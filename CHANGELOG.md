@@ -1,6 +1,7 @@
 # changelog
 
 2026-02-09
+- added README.md to each directory — library, presets, projects, scripts, tools, context. each explains what the directory is for, what goes there, and how it connects to the rest of the project
 - added .cursor/rules/voice-and-tone.mdc — codifies the writing style used across the project: lowercase everything, say less, explain the why not the what, talk like a colleague. applies to docs, comments, changelogs, and generated text
 - changed embedded MP4 artist metadata from "collide-o-scope" to "luis queral"
 - renamed project from video-synth to collide-o-scope — updated directory name, all internal references in ARCHITECTURE.md, README.md, multi-layer.py (artist metadata tag), and scripts/utils/__init__.py
