@@ -1,6 +1,17 @@
 # changelog
 
+2026-02-10
+- added preview GIF band to README — extracted 3-second clips from four output videos into docs/preview/, displayed as a horizontal row under the project description so you can see what the thing actually produces
+- rewrote schedule.py to support multiple posts per day — new --per-day and --window flags replace the old interval-based scheduling. --per-day 2 --window 08:00-17:00 posts twice daily at random times within the window. actual daily count varies ±1 for organic feel. --skip-chance adds random gaps where no videos post. --keep-uploaded preserves already-uploaded entries when regenerating a schedule
+- kicked off batch render of 50 new videos for first-blend-test using 1-3 min duration range
+- changed default blend duration from 2-5 minutes to 1-3 minutes — shorter outputs feel tighter, still enough room for the layers to breathe
+
 2026-02-09
+- built phase 9 tooling — three new scripts for the render-to-youtube pipeline:
+  - tools/batch-render.py: render N videos in sequence with unique seeds, configurable preset/fps/mode, auto-creates project folders for batches, reports timing stats
+  - scripts/upload/schedule.py: scans a directory of MP4s, reads embedded metadata, assigns publishAt dates spaced across a time window, outputs schedule.json. videos missing metadata get titles/descriptions generated on the spot
+  - scripts/upload/youtube-upload.py: reads schedule.json, authenticates via Google OAuth, uploads each video as private with scheduled publish time, saves progress after each upload so you can resume across days (quota is ~6 uploads/day)
+- added client_secret.json and token.json to .gitignore for youtube API credentials
 - added README.md to each directory — library, presets, projects, scripts, tools, context. each explains what the directory is for, what goes there, and how it connects to the rest of the project
 - added .cursor/rules/voice-and-tone.mdc — codifies the writing style used across the project: lowercase everything, say less, explain the why not the what, talk like a colleague. applies to docs, comments, changelogs, and generated text
 - changed embedded MP4 artist metadata from "collide-o-scope" to "luis queral"

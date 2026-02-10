@@ -2,6 +2,13 @@
 
 a personal framework for generative video synthesis. takes scraped youtube footage, layers it, and applies color keying to create composite video art.
 
+<p align="center">
+<img src="docs/preview/preview-1.gif" width="24%" />
+<img src="docs/preview/preview-2.gif" width="24%" />
+<img src="docs/preview/preview-3.gif" width="24%" />
+<img src="docs/preview/preview-4.gif" width="24%" />
+</p>
+
 the core technique: strip certain colors from video layers so you can see through to what's underneath. like chroma keying (green screen) but using colors that naturally occur in the footage — whites, blacks, dominant colors extracted via ML.
 
 ## how it works
