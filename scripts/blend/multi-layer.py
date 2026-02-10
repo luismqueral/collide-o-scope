@@ -92,7 +92,7 @@ DEFAULTS = {
 
     # output duration in seconds
     # use [min, max] for random range, or a single number for exact
-    "duration": [120, 300],
+    "duration": [60, 180],
 
     # output frame rate
     # 12-18 = dreamy/choppy, 24 = film, 30 = video standard

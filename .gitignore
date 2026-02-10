@@ -34,6 +34,10 @@ Thumbs.db
 .vscode/
 .idea/
 
+# youtube API credentials
+client_secret.json
+token.json
+
 # temp files from processing
 /tmp/
 *.tmp

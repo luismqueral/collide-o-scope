@@ -3,7 +3,8 @@
 2026-02-10
 - added preview GIF band to README — extracted 3-second clips from four output videos into docs/preview/, displayed as a horizontal row under the project description so you can see what the thing actually produces
 - rewrote schedule.py to support multiple posts per day — new --per-day and --window flags replace the old interval-based scheduling. --per-day 2 --window 08:00-17:00 posts twice daily at random times within the window. actual daily count varies ±1 for organic feel. --skip-chance adds random gaps where no videos post. --keep-uploaded preserves already-uploaded entries when regenerating a schedule
-- kicked off batch render of 50 new videos for first-blend-test using 1-3 min duration range
+- uploaded all 40 videos to youtube — scheduled Feb 10 through Mar 5, ~2/day with organic gaps. fixed timezone bug in youtube-upload.py where local times were being sent as UTC, causing videos to sit as private instead of scheduled
+- rendered 40 videos for first-blend-test using 1-3 min duration range
 - changed default blend duration from 2-5 minutes to 1-3 minutes — shorter outputs feel tighter, still enough room for the layers to breathe
 
 2026-02-09
