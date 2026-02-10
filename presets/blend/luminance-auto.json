@@ -1,0 +1,9 @@
+{
+  "name": "luminance-auto",
+  "mode": "luminance",
+  "luminance_target": "auto",
+  "luminance_threshold": [0.6, 0.9],
+  "num_videos": 3,
+  "similarity": [0.3, 0.5],
+  "blend": [0.0, 0.08]
+}

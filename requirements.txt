@@ -1,0 +1,11 @@
+# core image/array processing
+numpy
+Pillow
+
+# ML color extraction (K-means clustering)
+scikit-learn
+
+# ML background removal (optional, ~170MB model on first run)
+# install separately: pip install rembg onnxruntime
+# rembg
+# onnxruntime

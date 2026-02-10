@@ -1,0 +1,39 @@
+# source material (too large for git)
+library/video/*
+!library/video/.gitkeep
+library/audio/*
+!library/audio/.gitkeep
+
+# project outputs
+projects/*/output/
+projects/*/debug/
+
+# metadata cache (regenerated from library)
+video_cache.json
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# virtual environments
+venv/
+.venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# temp files from processing
+/tmp/
+*.tmp

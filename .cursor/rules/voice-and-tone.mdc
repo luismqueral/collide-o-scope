@@ -1,0 +1,73 @@
+---
+description: writing style and tone for all docs, comments, configs, and generated text in collide-o-scope
+alwaysApply: true
+---
+
+# voice and tone
+
+write like you're labeling a tape. lowercase. say less. explain the why, not the what. if it sounds like documentation, rewrite it until it doesn't.
+
+## principles
+
+- **lowercase everything** — titles, headings, comments, commit messages, changelogs. no shouting, no title case. the only exception is acronyms (FFmpeg, ML, API).
+- **talk like a colleague** — imagine you're explaining something to someone sitting next to you in the studio. no corporate voice, no "please note that", no "it should be noted".
+- **say less** — if you can cut a word, cut it. if a sentence works without an adjective, drop the adjective. brevity is the whole aesthetic.
+- **explain the why** — comments should say *why* something exists, not *what* it does. the code already says what. "# loop short clips to fill the output duration" not "# this loops the clips".
+- **use dashes** — kebab-case for files, dashes in prose where commas would feel heavy. fragments are fine. full sentences optional.
+- **no emoji** — unless the user explicitly asks for them. the work is serious even when the tone isn't.
+- **plain english** — no jargon unless it's domain-specific (colorkey, ffprobe, chroma key are fine. "leverage", "utilize", "facilitate" are not).
+
+## in code comments
+
+comments can be more verbose than docs — this is where you explain the thinking, the tradeoffs, the "here's what I tried and why this won." multi-line is fine, even encouraged when the logic is non-obvious. just keep the tone human.
+
+```python
+# BAD
+# This function retrieves the video duration by calling ffprobe
+# and parsing the output to extract the duration value.
+
+# GOOD
+# asks ffprobe how long this video is, returns seconds.
+# we shell out instead of using a python lib because ffprobe
+# handles edge cases (variable frame rate, missing headers)
+# better than anything else.
+
+# BAD
+# Set the similarity parameter for the colorkey filter
+"similarity": [0.2, 0.4],
+
+# GOOD
+# how close a pixel must be to the key color to become transparent
+# lower = stricter (less transparency), higher = looser (more transparency)
+# [min, max] → randomized per run for variety
+"similarity": [0.2, 0.4],
+```
+
+## in docs and changelogs
+
+```markdown
+# BAD
+## Overview
+This document provides a comprehensive overview of the architecture
+and design decisions made during the development of the project.
+
+# GOOD
+# collide-o-scope architecture
+how the pieces fit together and why they're shaped that way.
+
+# BAD
+- Updated the multi-layer rendering pipeline to incorporate embedded
+  metadata generation functionality utilizing the cryptic text generator module.
+
+# GOOD
+- wired metadata generator into the render pipeline — each video now
+  gets a title and description baked into the MP4 container
+```
+
+## in generated text (titles, descriptions)
+
+the metadata generator already follows this, but the rule is: it should feel found, not authored. like a label on a tape in a box in a room no one's been in for a while.
+
+## when in doubt
+
+read it out loud. if it sounds like a README template, a corporate wiki, or a textbook — rewrite it. it should sound like a person who's been working on this for a while and is writing notes to themselves.

@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>raw footage finder</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap');
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #faf9f7;
+            cursor: pointer;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        
+        .query {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: clamp(2rem, 10vw, 7rem);
+            font-weight: 500;
+            color: #1a1a1a;
+            letter-spacing: -0.03em;
+            text-decoration: none;
+            transition: opacity 0.15s;
+        }
+        
+        .query:hover {
+            opacity: 0.5;
+        }
+        
+        .hint {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.7rem;
+            color: #999;
+            letter-spacing: 0.02em;
+            text-align: center;
+        }
+        
+        .hint-source {
+            display: block;
+            margin-top: 0.25rem;
+            font-size: 0.65rem;
+            color: #bbb;
+        }
+        
+        .refresh {
+            position: fixed;
+            top: 1.5rem;
+            right: 1.5rem;
+            font-size: 1.5rem;
+            color: #999;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-decoration: none;
+            padding: 0.5rem;
+        }
+        
+        .refresh:hover {
+            color: #1a1a1a;
+            transform: rotate(90deg);
+        }
+    </style>
+</head>
+<body>
+    <a class="refresh" href="javascript:location.reload()" title="refresh">↻</a>
+    <a class="query" id="query" target="_blank"></a>
+    <div class="hint">
+        click to search
+        <span class="hint-source" id="hint"></span>
+    </div>
+    
+    <script>
+        // DCF Standard prefixes organized by manufacturer/type
+        // Based on https://en.wikipedia.org/wiki/Design_rule_for_Camera_File_system
+        const DCF_PATTERNS = [
+            // Generic DCF
+            { prefix: 'DSC', sep: '_', hint: 'generic DCF', weight: 10 },
+            { prefix: 'DSCF', sep: '', hint: 'Fujifilm', weight: 5 },
+            { prefix: 'DSCN', sep: '', hint: 'Nikon compact', weight: 5 },
+            { prefix: 'MOV', sep: '_', hint: 'QuickTime video', weight: 8 },
+            { prefix: 'VID', sep: '_', hint: 'generic video', weight: 8 },
+            
+            // Canon
+            { prefix: 'IMG', sep: '_', hint: 'Canon image', weight: 10 },
+            { prefix: 'MVI', sep: '_', hint: 'Canon video', weight: 8 },
+            { prefix: 'CSI', sep: '_', hint: 'Canon burst', weight: 3 },
+            { prefix: '_MG', sep: '_', hint: 'Canon Adobe RGB', weight: 2 },
+            
+            // Sony/Nikon
+            { prefix: 'DSC', sep: '', hint: 'Sony no separator', weight: 5 },
+            { prefix: 'C', sep: '', padding: 7, hint: 'Sony camcorder', weight: 3 },
+            
+            // Panasonic (P + directory number + file number)
+            { prefix: 'P', sep: '', padding: 7, hint: 'Panasonic', weight: 5 },
+            { prefix: 'R', sep: '', padding: 7, hint: 'Panasonic RAW', weight: 2 },
+            
+            // GoPro
+            { prefix: 'GOPR', sep: '', hint: 'GoPro image', weight: 6 },
+            { prefix: 'GH01', sep: '', padding: 5, hint: 'GoPro Hero 8+', weight: 4 },
+            { prefix: 'GX01', sep: '', padding: 5, hint: 'GoPro 360', weight: 2 },
+            { prefix: 'GP', sep: '', padding: 6, hint: 'GoPro legacy', weight: 3 },
+            
+            // Mobile/Android
+            { prefix: 'VIDEO', sep: '_', hint: 'Samsung video', weight: 5 },
+            { prefix: 'CLIP', sep: '_', hint: 'screen recording', weight: 3 },
+            { prefix: 'REC', sep: '_', hint: 'recording', weight: 3 },
+            { prefix: 'FILE', sep: '_', hint: 'generic file', weight: 2 },
+            { prefix: 'AMBA', sep: '', hint: 'dashcam', weight: 3 },
+            
+            // Year-stamped (common on Android)
+            { prefix: 'VID_2024', sep: '', padding: 6, hint: 'Android 2024', weight: 4 },
+            { prefix: 'VID_2023', sep: '', padding: 6, hint: 'Android 2023', weight: 4 },
+            { prefix: 'VID_2022', sep: '', padding: 6, hint: 'Android 2022', weight: 3 },
+            { prefix: 'IMG_2024', sep: '', padding: 6, hint: 'Android 2024', weight: 3 },
+        ];
+        
+        // DCF directory patterns and storage paths
+        const PATH_PATTERNS = [
+            // DCF directories (100-999 + 5 alphanumeric)
+            { path: '100APPLE', hint: 'iPhone DCIM folder' },
+            { path: '100ANDRO', hint: 'Android DCIM folder' },
+            { path: '100CANON', hint: 'Canon DCIM folder' },
+            { path: '100NCD40', hint: 'Nikon D40 folder' },
+            { path: '100ND750', hint: 'Nikon D750 folder' },
+            { path: '100EOS5D', hint: 'Canon EOS 5D folder' },
+            { path: '100MEDIA', hint: 'generic DCIM folder' },
+            { path: '100GOPRO', hint: 'GoPro DCIM folder' },
+            { path: '100_PANA', hint: 'Panasonic folder' },
+            { path: '101MSDCF', hint: 'Sony folder' },
+            { path: '100OLYMP', hint: 'Olympus folder' },
+            { path: '100PENTX', hint: 'Pentax folder' },
+            { path: '100SAMSN', hint: 'Samsung folder' },
+            { path: '100RICOH', hint: 'Ricoh folder' },
+            { path: '100LEICA', hint: 'Leica folder' },
+            { path: '100FUJIF', hint: 'Fujifilm folder' },
+            { path: 'DCIM 100', hint: 'DCIM search' },
+            { path: 'DCIM 101', hint: 'DCIM overflow folder' },
+            { path: 'DCIM 102', hint: 'DCIM overflow folder' },
+            
+            // Drone folders
+            { path: '100MEDIA DJI', hint: 'DJI drone' },
+            { path: 'DJI Album', hint: 'DJI app export' },
+            { path: '100PHANT', hint: 'DJI Phantom folder' },
+            { path: '100MAVIC', hint: 'DJI Mavic folder' },
+            { path: '100MINI', hint: 'DJI Mini folder' },
+            
+            // Action cams
+            { path: '100INSTA', hint: 'Insta360 folder' },
+            { path: '100SJCAM', hint: 'SJCAM folder' },
+            { path: '100AKASO', hint: 'Akaso folder' },
+            
+            // Dashcam folders
+            { path: 'CARDV', hint: 'dashcam folder' },
+            { path: 'DCIM MOVIE', hint: 'dashcam recordings' },
+            { path: 'Normal Video', hint: 'dashcam normal' },
+            { path: 'Event Video', hint: 'dashcam event' },
+            { path: 'Parking Video', hint: 'dashcam parking' },
+            { path: 'BlackVue', hint: 'BlackVue dashcam' },
+            { path: 'VIOFO', hint: 'Viofo dashcam' },
+            
+            // Phone storage paths
+            { path: 'storage emulated 0 DCIM Camera', hint: 'Android internal' },
+            { path: 'sdcard DCIM Camera', hint: 'Android SD card' },
+            { path: 'internal storage DCIM', hint: 'phone storage' },
+            { path: 'DCIM Camera', hint: 'camera folder' },
+            { path: 'private var mobile Media DCIM', hint: 'iOS filesystem' },
+            { path: 'Camera uploads', hint: 'cloud sync' },
+            
+            // Messaging apps
+            { path: 'WhatsApp Video', hint: 'WhatsApp' },
+            { path: 'WhatsApp Media Video', hint: 'WhatsApp received' },
+            { path: 'Telegram Video', hint: 'Telegram' },
+            { path: 'Facebook Video', hint: 'Facebook' },
+            { path: 'LINE Movies', hint: 'LINE app' },
+            { path: 'WeChat Video', hint: 'WeChat' },
+            { path: 'Snapchat Memories', hint: 'Snapchat export' },
+            { path: 'TikTok', hint: 'TikTok saved' },
+            
+            // Screen recordings
+            { path: 'Screen recordings', hint: 'phone screen record' },
+            { path: 'ScreenRecord', hint: 'screen capture' },
+            { path: 'Captures', hint: 'game captures' },
+            { path: 'Xbox DVR', hint: 'Xbox game clip' },
+            { path: 'Nvidia Share', hint: 'GeForce recording' },
+            
+            // Downloads/misc
+            { path: 'Download video', hint: 'downloads folder' },
+            { path: 'Movies Camera', hint: 'movies folder' },
+            { path: 'Video Editor', hint: 'editor exports' },
+            
+            // Security/surveillance
+            { path: 'NVR recordings', hint: 'security NVR' },
+            { path: 'DVR backup', hint: 'DVR export' },
+            { path: 'IPCamera', hint: 'IP camera' },
+            { path: 'Reolink', hint: 'Reolink camera' },
+            { path: 'Wyze', hint: 'Wyze cam' },
+            { path: 'Ring Video', hint: 'Ring doorbell' },
+            { path: 'Nest cam', hint: 'Nest camera' },
+            { path: 'Blink', hint: 'Blink camera' },
+        ];
+        
+        let currentHint = '';
+        
+        function generate() {
+            // 20% chance to use a path-style query
+            if (Math.random() < 0.20) {
+                const pattern = PATH_PATTERNS[Math.floor(Math.random() * PATH_PATTERNS.length)];
+                currentHint = pattern.hint;
+                return pattern.path;
+            }
+            
+            // Weighted random selection of DCF pattern
+            const totalWeight = DCF_PATTERNS.reduce((sum, p) => sum + p.weight, 0);
+            let roll = Math.random() * totalWeight;
+            let selected = DCF_PATTERNS[0];
+            
+            for (const pattern of DCF_PATTERNS) {
+                roll -= pattern.weight;
+                if (roll <= 0) {
+                    selected = pattern;
+                    break;
+                }
+            }
+            
+            currentHint = selected.hint;
+            
+            const sep = selected.sep;
+            const pad = selected.padding || (Math.random() < 0.7 ? 4 : Math.random() < 0.5 ? 3 : 5);
+            
+            // Biased toward lower numbers (more likely to be uploaded)
+            let num;
+            const numRoll = Math.random();
+            if (numRoll < 0.5) num = Math.floor(Math.random() * 100) + 1;
+            else if (numRoll < 0.8) num = Math.floor(Math.random() * 900) + 100;
+            else num = Math.floor(Math.random() * 9000) + 1000;
+            
+            return `${selected.prefix}${sep}${String(num).padStart(pad, '0')}`;
+        }
+        
+        const query = generate();
+        const el = document.getElementById('query');
+        el.textContent = query;
+        el.href = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAQ%253D%253D`;
+        document.getElementById('hint').textContent = currentHint;
+    </script>
+</body>
+</html>

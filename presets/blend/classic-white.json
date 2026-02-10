@@ -1,0 +1,9 @@
+{
+  "name": "classic-white",
+  "mode": "fixed",
+  "colorkey_hex": "0xFFFFFF",
+  "num_videos": 3,
+  "similarity": [0.25, 0.35],
+  "blend": [0.0, 0.05],
+  "fps": 30
+}
