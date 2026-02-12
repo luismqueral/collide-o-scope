@@ -22,7 +22,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def render_one(index, total, preset=None, fps=None, num_videos=None,
-               duration=None, mode=None, output_dir=None, project=None):
+               duration=None, mode=None, output_dir=None, project=None,
+               seed=None):
     """
     run a single render by calling multi-layer.py as a subprocess.
     returns the output path on success, None on failure.
@@ -46,8 +47,8 @@ def render_one(index, total, preset=None, fps=None, num_videos=None,
         cmd.extend(['--output-dir', output_dir])
     if project:
         cmd.extend(['--project', project])
-
-    # no --seed flag = multi-layer.py generates a unique one each run
+    if seed is not None:
+        cmd.extend(['--seed', str(seed)])
 
     print(f"\n{'='*60}")
     print(f"  video {index + 1} of {total}")

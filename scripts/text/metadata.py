@@ -702,6 +702,252 @@ def generate_metadata(session=None, rng=None, seed=None):
 
 
 # =============================================================================
+# RESPONSE GENERATORS
+#
+# titles and descriptions that absorb words from a youtube comment
+# and feed them through the existing pattern system. the comment
+# doesn't appear as a clean quote — it gets digested, broken up,
+# mixed with generated text. the audience member's words become
+# part of the cryptic language without looking like attribution.
+# =============================================================================
+
+def _extract_words(text):
+    """
+    pull usable words from a comment. strips punctuation, lowercases,
+    drops very short words and common filler. returns a list of words
+    that could plausibly slot into the existing word banks.
+    """
+    # strip punctuation, keep letters and spaces
+    cleaned = re.sub(r'[^a-zA-Z\s]', '', text.lower())
+    words = cleaned.split()
+
+    # drop filler — common words that don't carry visual/material meaning
+    filler = {
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
+        'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+        'would', 'could', 'should', 'may', 'might', 'can', 'shall',
+        'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him',
+        'her', 'us', 'them', 'my', 'your', 'his', 'its', 'our',
+        'their', 'this', 'that', 'these', 'those', 'what', 'which',
+        'who', 'whom', 'how', 'why', 'when', 'where', 'and', 'but',
+        'or', 'nor', 'not', 'so', 'if', 'then', 'than', 'too',
+        'very', 'just', 'also', 'like', 'really', 'much', 'more',
+        'most', 'some', 'any', 'all', 'each', 'every', 'both',
+        'few', 'many', 'of', 'in', 'on', 'at', 'to', 'for', 'with',
+        'from', 'by', 'about', 'as', 'into', 'through', 'during',
+        'before', 'after', 'above', 'below', 'up', 'down', 'out',
+        'off', 'over', 'under', 'again', 'further', 'dont', 'doesnt',
+        'im', 'ive', 'its', 'thats', 'youre', 'theyre', 'wont',
+        'cant', 'didnt', 'isnt', 'arent', 'wasnt', 'werent',
+        'lol', 'lmao', 'omg', 'wow', 'yeah', 'nah', 'ok', 'okay',
+    }
+
+    return [w for w in words if len(w) > 2 and w not in filler]
+
+
+def generate_response_title(comment_text, rng=None):
+    """
+    generate a title that absorbs words from a comment into the
+    existing pattern system. extracts usable words and treats them
+    like temporary additions to the word banks.
+
+    if the comment has no usable words, falls back to a normal title.
+
+    Args:
+        comment_text: the youtube comment text
+        rng: random.Random instance
+
+    Returns:
+        title string, lowercase
+    """
+    if rng is None:
+        rng = random.Random()
+
+    words = _extract_words(comment_text)
+    if not words:
+        return generate_title(rng)
+
+    # pick 1-3 words from the comment to work with
+    pick_count = min(len(words), rng.randint(1, 3))
+    picked = rng.sample(words, pick_count)
+
+    # slot the picked words into title patterns alongside existing banks
+    # the comment words replace what would normally come from OBJECTS/STATES/etc
+    patterns = [
+        # comment word + existing pattern element
+        lambda: f"{rng.choice(picked)}, {rng.choice(STATES)}",
+        lambda: f"{rng.choice(STATES)} {rng.choice(picked)}",
+        lambda: f"{rng.choice(picked)} ({rng.choice(STATES)})",
+        lambda: f"{rng.choice(ACTIONS)} {rng.choice(picked)}",
+        lambda: f"{rng.choice(picked)} {rng.choice(TECHNICAL)}",
+
+        # study/notes pattern with comment word
+        lambda: f"notes on {rng.choice(picked)}",
+        lambda: f"study for {rng.choice(picked)}",
+        lambda: f"re: {rng.choice(picked)}",
+
+        # two comment words if available
+        lambda: f"{picked[0]} / {picked[-1]}" if len(picked) > 1 else f"{picked[0]}",
+        lambda: f"{picked[0]}, {picked[-1]}" if len(picked) > 1 else f"({picked[0]})",
+
+        # comment word in a fragment
+        lambda: f"the {rng.choice(picked)} in the {rng.choice(PLACES)}",
+        lambda: f"the {rng.choice(PLACES)} with {rng.choice(picked)}",
+        lambda: f"after the {rng.choice(picked)} was {rng.choice(ACTIONS)}",
+
+        # minimal
+        lambda: f"[{rng.choice(picked)}]",
+        lambda: f"— {rng.choice(picked)} —",
+    ]
+
+    return rng.choice(patterns)().lower()
+
+
+def generate_response_description(comment_text, rng=None):
+    """
+    generate a description that weaves fragments of a comment into
+    generated text. the comment gets broken apart and scattered —
+    sometimes a phrase survives intact, sometimes just a word.
+
+    Args:
+        comment_text: the youtube comment text
+        rng: random.Random instance
+
+    Returns:
+        description string
+    """
+    if rng is None:
+        rng = random.Random()
+
+    words = _extract_words(comment_text)
+    if not words:
+        return generate_description(rng)
+
+    # build fragments that mix comment text with generated text
+    fragments = []
+
+    # sometimes include a raw chunk of the comment (lowered, trimmed)
+    raw = comment_text.strip().lower()
+    if len(raw) > 80:
+        # take a fragment from the middle
+        midpoint = len(raw) // 2
+        start = max(0, raw.rfind(' ', 0, midpoint) + 1)
+        end = raw.find(' ', midpoint + 20)
+        if end == -1:
+            end = len(raw)
+        raw = raw[start:end].strip()
+
+    roll = rng.random()
+
+    if roll < 0.25:
+        # comment fragment as the whole description
+        fragments.append(raw[:100])
+
+    elif roll < 0.5:
+        # comment fragment + cryptic line
+        fragments.append(raw[:60])
+        fragments.append(_desc_cryptic(rng))
+
+    elif roll < 0.7:
+        # observational line + comment word woven in
+        obs = _desc_observational(rng)
+        # replace a random word from the observation with a comment word
+        obs_words = obs.split()
+        if len(obs_words) > 3 and words:
+            idx = rng.randint(1, len(obs_words) - 2)
+            obs_words[idx] = rng.choice(words)
+        fragments.append(' '.join(obs_words))
+
+    elif roll < 0.85:
+        # chain that starts with a comment word (if it's in the transition table)
+        starter = rng.choice(words)
+        chain = generate_chain(starter=starter, length=rng.randint(5, 12), rng=rng)
+        fragments.append(chain)
+        if rng.random() < 0.5:
+            fragments.append(raw[:40])
+
+    else:
+        # multi-part: mix of generated and comment fragments
+        parts_count = rng.randint(2, 4)
+        for i in range(parts_count):
+            if rng.random() < 0.4 and words:
+                # insert a comment word or short phrase
+                fragments.append(rng.choice(words))
+            elif rng.random() < 0.5:
+                fragments.append(_desc_cryptic(rng))
+            else:
+                fragments.append(_desc_observational(rng))
+
+    sep = rng.choice(SEPARATORS)
+    return sep.join(fragments).lower()
+
+
+def generate_seed_description(comment_text, rng=None):
+    """
+    generate a description for a comment-seeded video. the description
+    hints that the video was shaped by something left in the comments,
+    but doesn't do clean attribution. more found than credited.
+
+    Args:
+        comment_text: the comment that was used as a seed
+        rng: random.Random instance
+
+    Returns:
+        description string
+    """
+    if rng is None:
+        rng = random.Random()
+
+    words = _extract_words(comment_text)
+    raw = comment_text.strip().lower()[:60]
+
+    # the seed reference is woven into the description
+    seed_hints = [
+        f"the seed was left in the comments",
+        f"seeded from something someone said",
+        f"shaped by: {raw}" if raw else "shaped by a comment",
+        f"someone wrote \"{raw}\" and this is what came out" if raw else None,
+        f"the input was a comment",
+        f"grew from \"{raw}\"" if raw else "grew from a comment",
+        f"source: a comment left on the last one",
+    ]
+
+    # filter None entries
+    seed_hints = [h for h in seed_hints if h]
+    hint = rng.choice(seed_hints)
+
+    # sometimes just the hint, sometimes hint + generated
+    if rng.random() < 0.4:
+        return hint.lower()
+    else:
+        extra = generate_description(rng)
+        sep = rng.choice(SEPARATORS)
+        return f"{hint}{sep}{extra}".lower()
+
+
+def generate_response_metadata(comment_text, rng=None, seed=None):
+    """
+    generate a complete metadata dict for a response video.
+    like generate_metadata() but absorbs the comment text.
+
+    Args:
+        comment_text: the youtube comment text to respond to
+        rng: random.Random instance
+        seed: seed for the rng (ignored if rng provided)
+
+    Returns:
+        dict with 'title' and 'description' keys
+    """
+    if rng is None:
+        rng = random.Random(seed)
+
+    return {
+        'title': generate_response_title(comment_text, rng),
+        'description': generate_response_description(comment_text, rng),
+    }
+
+
+# =============================================================================
 # CLI
 # =============================================================================
 
@@ -735,6 +981,10 @@ examples:
                         help='starter word for chain mode')
     parser.add_argument('--length', type=int, default=None,
                         help='chain length in words (default: random 5-15)')
+    parser.add_argument('--response', type=str, default=None,
+                        help='generate response metadata absorbing this comment text')
+    parser.add_argument('--seed-desc', type=str, default=None,
+                        help='generate seed-credit description for this comment text')
     parser.add_argument('--json', action='store_true',
                         help='output as JSON')
 
@@ -745,7 +995,14 @@ examples:
 
     results = []
     for _ in range(args.count):
-        if args.chain:
+        if args.response:
+            results.append(generate_response_metadata(args.response, rng))
+        elif args.seed_desc:
+            results.append({
+                'title': generate_title(rng, session),
+                'description': generate_seed_description(args.seed_desc, rng),
+            })
+        elif args.chain:
             results.append(generate_chain(
                 starter=args.starter, length=args.length, rng=rng
             ))

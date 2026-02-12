@@ -1,5 +1,35 @@
 # changelog
 
+2026-02-12
+- expanded the video library from 61 to 492 clips — pulled 431 new videos from the archive, prioritizing 162 HD clips (720p to 4K) alongside 269 SD clips. cleared the video cache so it rebuilds on next render
+- built the comment feedback loop — audience comments now feed back into the video-making pipeline across four dimensions: seeding renders, burning text into video, driving polls, and generating response videos. the audience shapes the work without knowing it
+- added scripts/youtube/comments.py — fetches comments from published videos via the YouTube Data API. uses the same OAuth credentials as the upload scripts. returns structured data (text, author, likes, video_id) and can pull from a single video or scan recent uploads via the manifest. includes comment_to_seed() which hashes comment text into a deterministic render seed via sha256
+- added scripts/youtube/polls.py — generates soft poll questions that map to real config knobs ("next: lights or darks?" -> luminance_target, "faster or slower?" -> fps, "vivid or muted?" -> saturation, etc). reads responses via simple keyword matching and returns config overrides. seven poll types covering mode, layers, fps, keying tightness, duration, saturation, and color method
+- added scripts/post/burn-comments.py — overlays comment text into videos using ffmpeg drawtext. style is deliberately lo-fi: low opacity (0.12-0.28), monospace, small, randomized position, with fade in/out. each comment appears for 3-8 seconds. comments from the previous burst's videos get burned into the next batch
+- added response and seed-credit generators to scripts/text/metadata.py — generate_response_title() and generate_response_description() absorb words from a comment into the existing pattern system (the comment gets digested, not quoted). generate_seed_description() weaves a hint that the video was shaped by a comment. new CLI flags: --response and --seed-desc
+- wired comment feedback into autopilot.py — rendering phase now fetches comments before rendering, reads poll results for config overrides, renders comment-seeded videos (up to 20% of batch), then post-processes new videos with comment burning and response metadata. uploading phase attaches poll questions to some uploads and records them in polls-state.json for next-cycle reading
+- added --poll-text flag to youtube-upload.py — the autopilot passes poll questions through to the upload script which appends them to the video description
+- updated rhythm.json for first-blend-test with comment feedback config — comment_feedback: true, seed_from_comments, burn_comments, burn_comment_chance (0.4), poll_chance (0.25), response_chance (0.12), min_comment_likes (0), comment_lookback_videos (10)
+- added polls-state.json to .gitignore — per-machine state that tracks which videos got poll questions
+- rewrote autopilot.py to upload directly as public — killed the scheduling phase entirely. no more private+publishAt dance. three phases now (quiet/rendering/uploading) instead of four. organic timing comes from per-tick probability: each hourly cron tick rolls dice based on remaining daily quota vs hours left in the window. early ticks are unlikely to fire, late ones feel the pressure. the audience sees someone posting when they feel like it
+- added --public and --file flags to youtube-upload.py — --public uploads as public immediately (no publishAt), --file uploads a single MP4 directly without needing a schedule.json. the autopilot uses both for direct organic uploads
+- replaced schedule.json tracking with upload-manifest.json — simpler tracking file that just records filename, video_id, timestamp, and url. lives at projects/PROJECT_NAME/upload-manifest.json, gitignored
+- removed burst_density from rhythm.json — no longer needed since we're not pre-scheduling publish dates. the upload density is now emergent from the per-tick probability math
+- updated youtube-publishing.mdc cursor rule to document the new direct-upload workflow, manifest-based tracking, and per-tick timing math
+- added tools/dashboard.py — a lightweight web dashboard that shows autopilot phase, upload progress, pending schedule, recent uploads with youtube links, rhythm config, and tail of the autopilot log. auto-refreshes every 60s. runs as a systemd service on port 8080
+- provisioned hetzner CX23 VPS in helsinki (77.42.87.199, ~$4/mo) — synced codebase, video library, and youtube credentials. autopilot cron running hourly, uploading 6 videos/day from the first burst of 28 pending videos
+
+2026-02-11
+- built tools/autopilot.py — a state machine daemon for organic burst publishing. cycles through quiet/rendering/scheduling/uploading phases with randomized timing so the channel feels like a person, not a bot. runs via hourly cron on a VPS. each project gets a rhythm.json that defines the posting personality (burst size, density, cooldown, solo post chance)
+- added scripts/upload/youtube-delete.py — delete videos from youtube by ID or by filtering schedule.json entries by duration. --clean-schedule removes deleted entries from the schedule file. used to clean up 14 accidental 15-second uploads
+- upgraded youtube OAuth scope from youtube.upload to full youtube — needed for delete capability. backward-compatible, just required one re-auth
+- deleted 14 accidentally-uploaded 15-second videos from youtube and cleaned them from schedule.json and disk
+- scheduled first organic burst: 34 videos across Feb 17-21 at 8-9/day with irregular times, first 6 uploaded today
+- added tools/setup-server.sh — provisioning script for a fresh ubuntu VPS (hetzner CX22 recommended, ~$4/mo). installs system deps, clones repo, sets up python packages, prints cron setup instructions
+- added projects/first-blend-test/rhythm.json — defines the posting personality for the first batch: 10-25 video bursts, 8-15/day density, 4-21 day cooldowns, 5% solo post chance during quiet periods
+- added autopilot-state.json to .gitignore — per-machine state that tracks current phase and transition times
+- updated .cursor/rules/youtube-publishing.mdc to cover the full autopilot workflow: phases, rhythm config, cron setup, manual overrides, and the new delete script
+
 2026-02-10
 - added preview GIF band to README — extracted 3-second clips from four output videos into docs/preview/, displayed as a horizontal row under the project description so you can see what the thing actually produces
 - rewrote schedule.py to support multiple posts per day — new --per-day and --window flags replace the old interval-based scheduling. --per-day 2 --window 08:00-17:00 posts twice daily at random times within the window. actual daily count varies ±1 for organic feel. --skip-chance adds random gaps where no videos post. --keep-uploaded preserves already-uploaded entries when regenerating a schedule

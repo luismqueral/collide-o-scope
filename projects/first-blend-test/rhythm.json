@@ -1,0 +1,19 @@
+{
+  "burst_size": [10, 25],
+  "burst_window_hours": ["06:00", "23:00"],
+  "cooldown_days": [4, 21],
+  "solo_post_chance": 0.05,
+  "uploads_per_day": 6,
+  "render_batch_size": [20, 40],
+  "render_when_below": 10,
+  "render_preset": "classic-white",
+
+  "comment_feedback": true,
+  "seed_from_comments": true,
+  "burn_comments": true,
+  "burn_comment_chance": 0.4,
+  "poll_chance": 0.25,
+  "response_chance": 0.12,
+  "min_comment_likes": 0,
+  "comment_lookback_videos": 10
+}

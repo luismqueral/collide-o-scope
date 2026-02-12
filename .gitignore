@@ -38,6 +38,11 @@ Thumbs.db
 client_secret.json
 token.json
 
+# autopilot state and upload manifest (per-machine, regenerated on first run)
+projects/*/autopilot-state.json
+projects/*/upload-manifest.json
+projects/*/polls-state.json
+
 # temp files from processing
 /tmp/
 *.tmp

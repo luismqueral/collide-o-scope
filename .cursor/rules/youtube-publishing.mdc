@@ -1,0 +1,177 @@
+---
+description: workflow for uploading videos to youtube — applies when the user asks about publishing, uploading, autopilot, or checking video status
+alwaysApply: false
+---
+
+# youtube publishing
+
+how to manage the render-to-youtube pipeline. scripts, a manifest file, a daily quota, and an autopilot daemon that ties it all together.
+
+## the pipeline
+
+```
+rendered MP4s (with embedded metadata)
+       │
+       ▼
+autopilot.py ──→ picks videos, uploads directly as public
+       │
+       ▼
+upload-manifest.json (tracks what's been uploaded)
+```
+
+each video already has a title and description baked into the MP4 by multi-layer.py. the autopilot picks videos from the output dir and uploads them directly as public — no scheduling step, no private-then-public dance. the organic timing comes from *when* the cron tick decides to act.
+
+## autopilot
+
+the autopilot (`tools/autopilot.py`) is a state machine that runs via cron on a VPS. it models the rhythm of someone who makes a bunch of stuff, dumps it online, then disappears.
+
+### phases
+
+- **quiet** — nothing happens. 4-21 days of silence. occasionally a solo post sneaks out (5% chance/day).
+- **rendering** — runs batch-render.py to produce 10-40 videos.
+- **uploading** — picks 0-N videos per cron tick and uploads them as public. organic timing via probability + jitter.
+
+### key insight
+
+timing IS the content. videos go public the moment they're uploaded. the organic pattern comes from which hourly ticks the autopilot decides to act on — some hours get 2 videos, some get 0. early in the day the chance per tick is low; late in the day it climbs as remaining uploads need to happen. the audience sees someone who posts when they feel like it.
+
+### the per-tick math
+
+during a burst, each hourly cron tick:
+1. are we inside the burst window (e.g. 06:00-23:00)?
+2. have we hit today's API quota (6/day)?
+3. upload_chance = remaining_today / hours_left_in_window, with ±30% jitter
+4. roll dice — if hit, upload 1 (occasionally 2)
+
+this means: early morning ticks are unlikely to upload. afternoon ticks feel the pressure. late evening ticks almost always fire if there's quota left. organic.
+
+### commands
+
+```bash
+# check what the autopilot is doing
+python3 tools/autopilot.py --project first-blend-test --status
+
+# dry-run a tick (see what it would do without doing it)
+python3 tools/autopilot.py --project first-blend-test --dry-run
+
+# force a specific phase
+python3 tools/autopilot.py --project first-blend-test --force-phase rendering
+python3 tools/autopilot.py --project first-blend-test --force-phase uploading
+```
+
+### rhythm config
+
+each project has a `rhythm.json` that defines the posting personality:
+
+```json
+{
+  "burst_size": [10, 25],
+  "burst_window_hours": ["06:00", "23:00"],
+  "cooldown_days": [4, 21],
+  "solo_post_chance": 0.05,
+  "uploads_per_day": 6,
+  "render_batch_size": [20, 40],
+  "render_when_below": 10,
+  "render_preset": "classic-white"
+}
+```
+
+lives at `projects/PROJECT_NAME/rhythm.json`. autopilot reads it each tick.
+
+### state file
+
+`projects/PROJECT_NAME/autopilot-state.json` tracks the current phase, transition times, burst progress, and seed. gitignored — it's per-machine state.
+
+### upload manifest
+
+`projects/PROJECT_NAME/upload-manifest.json` tracks what's been uploaded — filename, video ID, timestamp, URL. replaces the old schedule.json as the tracking mechanism. gitignored.
+
+### cron setup
+
+```bash
+# every hour, check if there's work to do
+0 * * * * cd /path/to/collide-o-scope && python3 tools/autopilot.py --project first-blend-test >> /var/log/autopilot.log 2>&1
+```
+
+### server setup
+
+`tools/setup-server.sh` provisions a fresh ubuntu VPS with everything needed. after running it, copy credentials and sync the video library.
+
+## manual commands
+
+when you need to intervene outside the autopilot.
+
+### check current status
+
+```bash
+python3 tools/autopilot.py --project first-blend-test --status
+```
+
+### upload a single video manually
+
+```bash
+# dry-run
+python3 scripts/upload/youtube-upload.py --file path/to/video.mp4 --public --dry-run
+
+# upload
+python3 scripts/upload/youtube-upload.py --file path/to/video.mp4 --public
+```
+
+### bulk upload from a schedule (legacy / manual override)
+
+```bash
+# the schedule.py + schedule.json workflow still works for manual bulk uploads
+python3 scripts/upload/schedule.py \
+  --dir projects/PROJECT_NAME/output \
+  --per-day 12 \
+  --window 06:00-23:00 \
+  --preview
+
+python3 scripts/upload/youtube-upload.py \
+  --schedule projects/PROJECT_NAME/output/schedule.json \
+  --public --limit 6
+```
+
+### delete videos from youtube
+
+```bash
+# find and delete videos under 30 seconds (dry-run first)
+python3 scripts/upload/youtube-delete.py \
+  --schedule projects/PROJECT_NAME/output/schedule.json \
+  --max-duration 30 \
+  --clean-schedule \
+  --dry-run
+
+# or delete by ID
+python3 scripts/upload/youtube-delete.py --ids VIDEO_ID1 VIDEO_ID2
+```
+
+## rules
+
+### safety
+
+- **always dry-run before uploading.** no exceptions. show the user what would happen, get confirmation, then run it for real.
+- **always use --limit 6** (or lower) for schedule-based bulk uploads unless the user explicitly asks to ignore quota.
+- **never touch credential files.** `client_secret.json` and `token.json` are gitignored and managed by the user.
+- **never force-upload failed entries** without investigating why they failed first.
+- **don't mess with autopilot-state.json** unless the user asks.
+
+### when the user asks to...
+
+| request | what to do |
+|---|---|
+| "upload my videos" | run autopilot --force-phase uploading, or use --file for one-offs |
+| "check upload status" | run autopilot --status |
+| "how many are left" | run autopilot --status (shows ready count and burst progress) |
+| "start the autopilot" | force-phase to the appropriate starting phase, or set up cron |
+| "change the rhythm" | edit rhythm.json, autopilot picks it up next tick |
+| "delete videos" | use youtube-delete.py with --dry-run first |
+| "what's the autopilot doing" | run --status |
+| "skip to the next burst" | force-phase to rendering |
+| "pause the autopilot" | remove the cron job, or force-phase to quiet with a far-future next_burst |
+
+### current project
+
+the active project is `first-blend-test`. videos live in `projects/first-blend-test/output/`. manifest is at `projects/first-blend-test/upload-manifest.json`. rhythm config is at `projects/first-blend-test/rhythm.json`.
+
+when working with a different project, confirm the project name and adjust paths accordingly.
