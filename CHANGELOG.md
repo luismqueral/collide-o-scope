@@ -1,12 +1,18 @@
 # changelog
 
 2026-02-15
+- added `tools/upload-draft.py` to force a one-off youtube upload as private (draft-like) from a project output folder, so upload checks can run on demand without waiting for autopilot timing
+- set safer defaults in the draft uploader — it prefers files not marked uploaded in `upload-manifest.json`, supports `--dry-run`, and can target a specific file when needed
+- updated `tools/README.md` to list active utilities including the new draft uploader so the ops path is easier to find
+- added a local-only server access runbook in `server-access.local.md` with exact ssh/provision/sync/cron steps, plus server origin details (hetzner CX23 in helsinki) so server handoffs are documented in one place without exposing secrets in the repo
+- updated `.gitignore` to ignore `server-access.local.md` so private access notes stay uncommitted by default
 - added comment-driven title generation for new renders — `tools/autopilot.py` now pulls youtube comments from videos uploaded in the last 90 days and passes a comment into each render so new titles can absorb audience language
 - updated `scripts/blend/multi-layer.py` with a `--title-comment` input that steers only the title pattern (description flow stays the same), so this can be used by autopilot without changing the rest of the render pipeline
 - enabled the feature in `projects/first-blend-test/rhythm.json` with `title_from_comments: true` and a 90-day lookback window, so the current project starts using recent channel comments immediately
 - fixed comment fetch filtering in autopilot to apply likes threshold correctly after fetch, avoiding a broken argument path that prevented reliable comment intake
 
 2026-02-12
+- added --comment-title flag to tools/upload-draft.py — fetches a random comment from published videos and uses it as the video title. the cryptic metadata description stays underneath. trimmed to youtube's 100-char limit. falls back gracefully if no comments exist yet. also added --title override to youtube-upload.py to support this
 - committed and pushed comment feedback loop + autopilot pipeline to origin, pulled latest on the VPS (77.42.87.199). initialized git tracking on the server (was previously rsync-only) so future deploys are just `git pull`
 - synced full video library to server — 431 new clips transferred (~8 GB), server now has all 492 source videos matching local
 - rendered 20 new videos with classic-white preset, 1-2 min duration range — output in projects/archive/output/. changed default duration from [60, 180] to [60, 120] for tighter outputs

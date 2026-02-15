@@ -48,7 +48,13 @@ def get_authenticated_service(credentials_dir=None):
         print("  pip install google-api-python-client google-auth-oauthlib")
         sys.exit(1)
 
-    SCOPES = ['https://www.googleapis.com/auth/youtube']
+    # youtube.force-ssl is required for commentThreads — the generic
+    # youtube scope doesn't actually cover comment reading. we request
+    # both so the token also works for uploads without re-auth.
+    SCOPES = [
+        'https://www.googleapis.com/auth/youtube',
+        'https://www.googleapis.com/auth/youtube.force-ssl',
+    ]
 
     creds_dir = credentials_dir or PROJECT_ROOT
     client_secret = os.path.join(creds_dir, 'client_secret.json')

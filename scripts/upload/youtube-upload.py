@@ -204,7 +204,7 @@ def upload_video(youtube, entry, dry_run=False, public=False):
 
 
 def upload_single_file(filepath, public=False, dry_run=False, credentials_dir=None,
-                       poll_text=None):
+                       poll_text=None, title_override=None):
     """
     upload a single MP4 file directly — no schedule.json needed.
     reads title/description from the embedded metadata.
@@ -218,6 +218,9 @@ def upload_single_file(filepath, public=False, dry_run=False, credentials_dir=No
         poll_text: optional poll question to append to the description.
                    comes from scripts/youtube/polls.py — the autopilot
                    decides which uploads get polls based on poll_chance.
+        title_override: if set, use this as the title instead of embedded
+                        metadata. used by upload-draft.py --comment-title
+                        to name videos after audience comments.
 
     returns:
         video ID on success, None on failure
@@ -235,6 +238,11 @@ def upload_single_file(filepath, public=False, dry_run=False, credentials_dir=No
         generated = generate_metadata(rng=random.Random())
         title = generated['title']
         description = generated['description']
+
+    # caller can force a specific title — the description stays as-is
+    # so the cryptic metadata still appears below the comment-as-title
+    if title_override:
+        title = title_override
 
     # append poll question if provided — goes at the end of the
     # description so it doesn't disrupt the cryptic metadata above
@@ -299,6 +307,8 @@ examples:
                         help='directory containing client_secret.json and token.json (default: project root)')
     parser.add_argument('--poll-text', default=None,
                         help='poll question to append to the description (used by autopilot)')
+    parser.add_argument('--title', default=None,
+                        help='override the video title (ignores embedded metadata)')
 
     args = parser.parse_args()
 
@@ -314,6 +324,7 @@ examples:
             dry_run=args.dry_run,
             credentials_dir=args.credentials,
             poll_text=args.poll_text,
+            title_override=args.title,
         )
         if video_id:
             print(f"\ndone: {video_id}")
