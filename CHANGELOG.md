@@ -1,6 +1,15 @@
 # changelog
 
+2026-02-15
+- added comment-driven title generation for new renders — `tools/autopilot.py` now pulls youtube comments from videos uploaded in the last 90 days and passes a comment into each render so new titles can absorb audience language
+- updated `scripts/blend/multi-layer.py` with a `--title-comment` input that steers only the title pattern (description flow stays the same), so this can be used by autopilot without changing the rest of the render pipeline
+- enabled the feature in `projects/first-blend-test/rhythm.json` with `title_from_comments: true` and a 90-day lookback window, so the current project starts using recent channel comments immediately
+- fixed comment fetch filtering in autopilot to apply likes threshold correctly after fetch, avoiding a broken argument path that prevented reliable comment intake
+
 2026-02-12
+- committed and pushed comment feedback loop + autopilot pipeline to origin, pulled latest on the VPS (77.42.87.199). initialized git tracking on the server (was previously rsync-only) so future deploys are just `git pull`
+- synced full video library to server — 431 new clips transferred (~8 GB), server now has all 492 source videos matching local
+- rendered 20 new videos with classic-white preset, 1-2 min duration range — output in projects/archive/output/. changed default duration from [60, 180] to [60, 120] for tighter outputs
 - expanded the video library from 61 to 492 clips — pulled 431 new videos from the archive, prioritizing 162 HD clips (720p to 4K) alongside 269 SD clips. cleared the video cache so it rebuilds on next render
 - built the comment feedback loop — audience comments now feed back into the video-making pipeline across four dimensions: seeding renders, burning text into video, driving polls, and generating response videos. the audience shapes the work without knowing it
 - added scripts/youtube/comments.py — fetches comments from published videos via the YouTube Data API. uses the same OAuth credentials as the upload scripts. returns structured data (text, author, likes, video_id) and can pull from a single video or scan recent uploads via the manifest. includes comment_to_seed() which hashes comment text into a deterministic render seed via sha256
@@ -11,6 +20,8 @@
 - added --poll-text flag to youtube-upload.py — the autopilot passes poll questions through to the upload script which appends them to the video description
 - updated rhythm.json for first-blend-test with comment feedback config — comment_feedback: true, seed_from_comments, burn_comments, burn_comment_chance (0.4), poll_chance (0.25), response_chance (0.12), min_comment_likes (0), comment_lookback_videos (10)
 - added polls-state.json to .gitignore — per-machine state that tracks which videos got poll questions
+- added delete_after_upload to autopilot — videos are automatically deleted from disk after successful upload to youtube. no reason to hoard gigabytes of MP4s that are already online. controlled by rhythm.json (on by default). also manually deleted 32 previously-uploaded videos, freeing ~7.7GB
+- stripped autopilot.py down to its simplest form — no phases, no bursts, no quiet periods. every hourly tick: render if the pool is low, roll dice to maybe upload 1-2 videos as public. 6/day at random times within a configurable window. the organic feel comes from per-tick probability math (remaining uploads / hours left, ±30% jitter). rhythm.json is now just window_hours, uploads_per_day, render config, and delete_after_upload
 - rewrote autopilot.py to upload directly as public — killed the scheduling phase entirely. no more private+publishAt dance. three phases now (quiet/rendering/uploading) instead of four. organic timing comes from per-tick probability: each hourly cron tick rolls dice based on remaining daily quota vs hours left in the window. early ticks are unlikely to fire, late ones feel the pressure. the audience sees someone posting when they feel like it
 - added --public and --file flags to youtube-upload.py — --public uploads as public immediately (no publishAt), --file uploads a single MP4 directly without needing a schedule.json. the autopilot uses both for direct organic uploads
 - replaced schedule.json tracking with upload-manifest.json — simpler tracking file that just records filename, video_id, timestamp, and url. lives at projects/PROJECT_NAME/upload-manifest.json, gitignored

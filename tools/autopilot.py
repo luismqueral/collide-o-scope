@@ -1,31 +1,22 @@
 """
-autopilot.py - organic burst publishing daemon
+autopilot.py - steady organic uploader
 
-a state machine that renders and publishes videos in bursts,
-modeling the rhythm of someone who makes a bunch of stuff,
-dumps it online, then disappears for a while.
+posts 6 videos a day at random times. renders more when the pool
+runs low. that's it. no phases, no bursts, no quiet periods.
 
-designed to run via cron (every hour) on a VPS. each tick,
-it checks the current phase and either does nothing, renders,
-or uploads — then updates its state file.
+designed to run via cron (every hour) on a VPS. each tick it:
+    1. checks if the video pool is running low → renders if needed
+    2. rolls dice to decide whether to upload this tick
+    3. if yes, uploads 1-2 videos as public
 
-the key insight: timing IS the content. we upload directly as
-public the moment the cron fires, and the organic pattern comes
-from which ticks we decide to act on. some hours get 2 videos,
-some get 0, some days are silent. the audience sees a person
-who posts when they feel like it.
-
-phases:
-    quiet     → nothing happens. 4-21 days of silence.
-                occasionally a solo post sneaks out.
-    rendering → batch-render produces 10-40 videos.
-    uploading → picks 0-N videos per tick, uploads as public.
-                organic timing via probability + jitter.
+the organic feel comes from the per-tick probability math:
+remaining uploads are spread across remaining hours in the window,
+with ±30% jitter. morning ticks rarely fire. evening ticks almost
+always do if there's quota left. looks like a person.
 
 usage:
     python tools/autopilot.py --project first-blend-test
     python tools/autopilot.py --project first-blend-test --dry-run
-    python tools/autopilot.py --project first-blend-test --force-phase rendering
     python tools/autopilot.py --project first-blend-test --status
 
 cron (every hour):
@@ -46,39 +37,20 @@ sys.path.insert(0, PROJECT_ROOT)
 # =============================================================================
 # RHYTHM DEFAULTS
 #
-# the "personality" of the posting pattern. these define how the autopilot
-# behaves across cycles. each value can be overridden by a rhythm.json file
-# in the project directory.
-#
-# ranges like [min, max] = "pick randomly within this window each cycle."
+# the posting personality. override per-project via rhythm.json.
 # =============================================================================
 
 RHYTHM_DEFAULTS = {
 
-    # --- burst shape ---
+    # what hours uploads can happen
+    "window_hours": ["06:00", "23:00"],
 
-    # how many videos to publish per burst
-    # smaller bursts feel like quick updates, larger ones feel like a dump
-    "burst_size": [10, 25],
-
-    # what hours uploads can happen during a burst
-    # wider = more chaotic, narrower = more focused
-    "burst_window_hours": ["06:00", "23:00"],
-
-    # --- quiet periods ---
-
-    # how many days of silence between bursts
-    # short gaps = prolific, long gaps = mysterious
-    "cooldown_days": [4, 21],
-
-    # daily chance of posting a single video during quiet periods
-    # like someone woke up at 2am and posted one thing
-    "solo_post_chance": 0.05,
+    # max uploads per day (youtube API quota: 10,000 units, ~1,600 per upload)
+    "uploads_per_day": 6,
 
     # --- rendering ---
 
     # how many videos to render per batch
-    # autopilot renders when the pool of ready videos drops below a threshold
     "render_batch_size": [20, 40],
 
     # render a new batch when fewer than this many videos are ready
@@ -86,11 +58,6 @@ RHYTHM_DEFAULTS = {
 
     # preset to use for rendering
     "render_preset": "classic-white",
-
-    # --- upload ---
-
-    # max uploads per day (youtube API quota: 10,000 units, ~1,600 per upload)
-    "uploads_per_day": 6,
 
     # --- comment feedback ---
     #
@@ -123,6 +90,23 @@ RHYTHM_DEFAULTS = {
 
     # how many recent uploaded videos to check for comments
     "comment_lookback_videos": 10,
+
+    # how many days back to scan uploaded videos for comments.
+    # 90 days = roughly 3 months.
+    "comment_lookback_days": 90,
+
+    # use recent youtube comments to steer titles for newly rendered videos.
+    # this works even if the full comment feedback loop is disabled.
+    "title_from_comments": False,
+
+    # how to pick comments for title steering: random, most_liked, recent
+    "title_comment_strategy": "random",
+
+    # --- cleanup ---
+
+    # delete videos from disk after successful upload.
+    # no reason to hoard gigabytes of MP4s that are already on youtube.
+    "delete_after_upload": True,
 }
 
 
@@ -152,21 +136,13 @@ def load_rhythm(project_dir):
 def load_state(state_path):
     """
     load the autopilot state file, or create a fresh one.
-    the state tracks which phase we're in and when transitions happen.
+    just tracks the seed for reproducible randomness.
     """
     if os.path.exists(state_path):
         with open(state_path) as f:
             return json.load(f)
 
-    # fresh state — start in quiet, first burst soon
     return {
-        "phase": "quiet",
-        "phase_entered": datetime.now().isoformat(),
-        "next_burst": (datetime.now() + timedelta(hours=1)).isoformat(),
-        "last_burst_end": None,
-        "current_batch_size": None,
-        "burst_target": None,
-        "burst_uploaded": 0,
         "seed": int(time.time()) % (2**31),
     }
 
@@ -194,9 +170,8 @@ def count_ready_videos(output_dir, uploaded_set):
 
 def load_manifest(manifest_path):
     """
-    load the upload manifest — a simple list of what's been uploaded.
-    this replaces schedule.json as the tracking mechanism. simpler:
-    just filename, title, video_id, uploaded_at.
+    load the upload manifest — tracks what's been uploaded.
+    just filename, video_id, timestamp, url.
     """
     if os.path.exists(manifest_path):
         with open(manifest_path) as f:
@@ -225,10 +200,9 @@ def uploaded_today(manifest):
 
 
 def create_rng(seed):
-    """simple seeded RNG for the autopilot's own decisions."""
+    """simple seeded RNG."""
     import random
-    rng = random.Random(seed)
-    return rng
+    return random.Random(seed)
 
 
 def pick_from_range(rng, value):
@@ -240,9 +214,39 @@ def pick_from_range(rng, value):
     return value
 
 
+def _parse_manifest_time(timestamp):
+    """
+    parse timestamps from upload-manifest entries.
+    returns naive local datetime, or None if parsing fails.
+    """
+    if not timestamp:
+        return None
+
+    value = str(timestamp).strip()
+    if value.endswith('Z'):
+        value = value[:-1] + '+00:00'
+
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+            try:
+                dt = datetime.strptime(value, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+
+    if dt.tzinfo is not None:
+        dt = dt.astimezone().replace(tzinfo=None)
+
+    return dt
+
+
 def in_window(rhythm):
-    """check if the current time is within the burst upload window."""
-    window = rhythm.get('burst_window_hours', ['06:00', '23:00'])
+    """check if the current time is within the upload window."""
+    window = rhythm.get('window_hours', ['06:00', '23:00'])
     start_h, start_m = map(int, window[0].split(':'))
     end_h, end_m = map(int, window[1].split(':'))
 
@@ -257,101 +261,140 @@ def in_window(rhythm):
 # =============================================================================
 # COMMENT FEEDBACK
 #
-# fetches comments from recent uploads and prepares them for use
-# as seeds, overlays, poll results, and response prompts.
-# all of this is gated behind the comment_feedback rhythm flag.
+# kept from the previous version — fetches comments, reads polls,
+# post-processes renders. only runs when comment_feedback is True.
 # =============================================================================
 
 def _fetch_comment_context(manifest_path, rhythm, dry_run=False):
     """
-    fetch comments from recent uploads and prepare them for the
-    rendering and uploading phases. returns a dict with everything
-    the phase handlers need.
+    gather comment and poll data from recent uploads.
+    only runs when comment_feedback is enabled in rhythm.json.
 
-    this is the single API call point — all comments are fetched once
-    per tick and shared across features.
-
-    returns:
-        dict with comments (list), poll_overrides (dict), or empty
-        if comment_feedback is off or no comments exist.
+    returns dict with 'comments', 'poll_overrides', 'poll_results'.
     """
-    if not rhythm.get('comment_feedback', False):
-        return {'comments': [], 'poll_overrides': {}, 'poll_results': []}
-
-    lookback = rhythm.get('comment_lookback_videos', 10)
-    min_likes = rhythm.get('min_comment_likes', 0)
-
-    if dry_run:
-        log("[dry run] would fetch comments from recent uploads")
-        return {'comments': [], 'poll_overrides': {}, 'poll_results': []}
-
-    try:
-        from scripts.youtube.comments import fetch_comments_from_manifest, filter_comments
-
-        all_comments = fetch_comments_from_manifest(
-            manifest_path,
-            lookback=lookback,
-            max_per_video=50,
-        )
-
-        comments = filter_comments(all_comments, min_likes=min_likes)
-        log(f"fetched {len(comments)} comment(s) from recent videos")
-
-    except Exception as e:
-        log(f"comment fetch failed (non-fatal): {e}")
-        comments = []
-
-    # read poll results if any active polls exist
+    comments = []
     poll_overrides = {}
     poll_results = []
 
+    comment_feedback_enabled = rhythm.get('comment_feedback', False)
+    title_feedback_enabled = rhythm.get('title_from_comments', False)
+
+    if not comment_feedback_enabled and not title_feedback_enabled:
+        return {
+            'comments': comments,
+            'poll_overrides': poll_overrides,
+            'poll_results': poll_results,
+        }
+
     try:
-        polls_state_path = os.path.join(os.path.dirname(manifest_path), 'polls-state.json')
-        if os.path.exists(polls_state_path):
-            from scripts.youtube.polls import read_poll_results, find_active_polls, aggregate_poll_overrides
+        manifest = load_manifest(manifest_path)
+        uploaded = [e for e in manifest if e.get('status') == 'uploaded'
+                    and e.get('video_id') not in (None, 'unknown')]
 
-            active_polls = find_active_polls(manifest_path, polls_state_path)
-            if active_polls:
-                log(f"reading {len(active_polls)} active poll(s)")
-                youtube = None
+        uploaded.sort(key=lambda e: e.get('uploaded_at', ''), reverse=True)
 
-                for poll_entry in active_polls:
-                    try:
-                        # lazy auth — reuse across polls
-                        if youtube is None:
-                            from scripts.youtube.comments import get_authenticated_service
-                            youtube = get_authenticated_service()
+        lookback_days = rhythm.get('comment_lookback_days', 90)
+        recent = []
+        if lookback_days and int(lookback_days) > 0:
+            cutoff = datetime.now() - timedelta(days=int(lookback_days))
+            recent = [
+                e for e in uploaded
+                if (_parse_manifest_time(e.get('uploaded_at')) or datetime.min) >= cutoff
+            ]
+            if recent:
+                log(f"comment scan window: last {lookback_days} day(s), {len(recent)} video(s)")
 
-                        result = read_poll_results(
-                            poll_entry['video_id'],
-                            poll_entry['poll'],
+        if not recent:
+            lookback = rhythm.get('comment_lookback_videos', 10)
+            recent = uploaded[:lookback] if len(uploaded) > lookback else uploaded
+            if lookback_days:
+                log(f"no uploads found inside {lookback_days} day window — "
+                    f"falling back to latest {len(recent)} video(s)")
+
+        if recent:
+            try:
+                from scripts.youtube.comments import fetch_comments, filter_comments
+                from scripts.upload.youtube_upload import get_authenticated_service
+
+                creds_dir = PROJECT_ROOT
+                client_secret = os.path.join(creds_dir, 'client_secret.json')
+                token = os.path.join(creds_dir, 'token.json')
+
+                if not dry_run:
+                    youtube = get_authenticated_service(client_secret, token)
+
+                    for entry in recent:
+                        vid_comments = fetch_comments(
+                            entry['video_id'],
                             youtube=youtube,
+                            max_results=50,
                         )
-                        poll_results.append(result)
+                        vid_comments = filter_comments(
+                            vid_comments,
+                            min_likes=rhythm.get('min_comment_likes', 0),
+                        )
+                        comments.extend(vid_comments)
 
-                        if result['winner']:
-                            log(f"  poll on {poll_entry['video_id']}: "
-                                f"winner={result['winner']} ({result['votes']})")
-                        else:
-                            log(f"  poll on {poll_entry['video_id']}: no votes")
+                    if comments:
+                        log(f"fetched {len(comments)} comments from {len(recent)} recent videos")
+                else:
+                    log(f"[dry run] would fetch comments from {len(recent)} recent videos")
 
-                        # mark as read
-                        poll_entry['read'] = True
+            except Exception as e:
+                log(f"comment fetching failed (non-fatal): {e}")
 
-                    except Exception as e:
-                        log(f"  poll read failed for {poll_entry['video_id']}: {e}")
+        # read poll results
+        polls_state_path = os.path.join(
+            os.path.dirname(manifest_path), 'polls-state.json'
+        )
 
-                # save updated polls state
-                with open(polls_state_path, 'w') as f:
-                    json.dump(active_polls, f, indent=2)
+        if os.path.exists(polls_state_path):
+            try:
+                from scripts.youtube.polls import read_poll_results, aggregate_poll_overrides
 
-                # aggregate overrides from all poll results
-                poll_overrides = aggregate_poll_overrides(poll_results)
-                if poll_overrides:
-                    log(f"poll overrides: {poll_overrides}")
+                with open(polls_state_path) as f:
+                    active_polls = json.load(f)
+
+                unread = [p for p in active_polls if not p.get('read', False)]
+
+                if unread and not dry_run:
+                    youtube = get_authenticated_service(
+                        os.path.join(PROJECT_ROOT, 'client_secret.json'),
+                        os.path.join(PROJECT_ROOT, 'token.json'),
+                    )
+
+                    for poll_entry in unread:
+                        try:
+                            result = read_poll_results(
+                                poll_entry['video_id'],
+                                poll_entry['poll'],
+                                youtube=youtube,
+                            )
+                            poll_results.append(result)
+
+                            if result['winner']:
+                                log(f"  poll on {poll_entry['video_id']}: "
+                                    f"winner={result['winner']} ({result['votes']})")
+                            else:
+                                log(f"  poll on {poll_entry['video_id']}: no votes")
+
+                            poll_entry['read'] = True
+
+                        except Exception as e:
+                            log(f"  poll read failed for {poll_entry['video_id']}: {e}")
+
+                    with open(polls_state_path, 'w') as f:
+                        json.dump(active_polls, f, indent=2)
+
+                    poll_overrides = aggregate_poll_overrides(poll_results)
+                    if poll_overrides:
+                        log(f"poll overrides: {poll_overrides}")
+
+            except Exception as e:
+                log(f"poll reading failed (non-fatal): {e}")
 
     except Exception as e:
-        log(f"poll reading failed (non-fatal): {e}")
+        log(f"comment context failed (non-fatal): {e}")
 
     return {
         'comments': comments,
@@ -360,198 +403,119 @@ def _fetch_comment_context(manifest_path, rhythm, dry_run=False):
     }
 
 
+def _pick_title_comment(comments, rng, strategy='random'):
+    """
+    pick one comment string for title steering.
+    """
+    if not comments:
+        return None
+
+    valid = [c for c in comments if c.get('text', '').strip()]
+    if not valid:
+        return None
+
+    if strategy == 'most_liked':
+        return max(valid, key=lambda c: c.get('like_count', 0)).get('text')
+    if strategy == 'recent':
+        return max(valid, key=lambda c: c.get('published_at', '')).get('text')
+
+    return rng.choice(valid).get('text')
+
+
 def _post_process_renders(output_dir, uploaded_set, comments, rhythm, rng, dry_run=False):
     """
     post-process newly rendered videos with comment feedback.
-
-    runs after batch-render completes. finds new MP4s that haven't been
-    uploaded yet and applies comment burning and response metadata to
-    a random subset.
-
-    this is where comments physically enter the videos — as faded text
-    overlays and as words absorbed into titles/descriptions.
+    burns comments as overlays and embeds response metadata.
+    only runs when comment_feedback is True.
     """
-    import glob as globmod
-
-    if not rhythm.get('comment_feedback', False) or not comments:
+    if not rhythm.get('comment_feedback', False):
         return
 
-    # find new videos (rendered but not uploaded)
-    all_mp4s = sorted(
-        globmod.glob(os.path.join(output_dir, '*.mp4'))
-    )
-    new_videos = [
-        f for f in all_mp4s
-        if os.path.basename(f) not in uploaded_set
-    ]
-
-    if not new_videos:
+    if not comments:
         return
 
+    _, ready_files = count_ready_videos(output_dir, uploaded_set)
+    if not ready_files:
+        return
+
+    burn_enabled = rhythm.get('burn_comments', True)
     burn_chance = rhythm.get('burn_comment_chance', 0.4)
     response_chance = rhythm.get('response_chance', 0.12)
-    comment_texts = [c['text'] for c in comments]
 
-    # --- burn comments into a subset of videos ---
-    if rhythm.get('burn_comments', True) and comment_texts:
-        burn_count = 0
-        for video_path in new_videos:
-            if rng.random() < burn_chance:
-                # pick 1-4 comments to burn in
-                n = min(len(comment_texts), rng.randint(1, 4))
-                selected = rng.sample(comment_texts, n)
+    for filename in sorted(ready_files):
+        filepath = os.path.join(output_dir, filename)
 
-                if dry_run:
-                    log(f"  [dry run] would burn {n} comment(s) into {os.path.basename(video_path)}")
-                    burn_count += 1
-                    continue
+        # burn comments as overlay
+        if burn_enabled and rng.random() < burn_chance:
+            try:
+                from scripts.post.burn_comments import burn_comment_overlay
 
-                try:
-                    from scripts.post import burn_comments as burn_mod
-                    result = burn_mod.burn_comments(
-                        video_path, selected,
-                        rng=rng,
-                    )
-                    if result:
-                        burn_count += 1
-                except Exception as e:
-                    log(f"  burn failed for {os.path.basename(video_path)}: {e}")
-
-        if burn_count > 0:
-            log(f"burned comments into {burn_count} video(s)")
-
-    # --- re-embed response metadata into a subset ---
-    if response_chance > 0 and comment_texts:
-        response_count = 0
-        for video_path in new_videos:
-            if rng.random() < response_chance:
-                # pick a comment to respond to
-                source_comment = rng.choice(comments)
+                comment_texts = [c['text'] for c in rng.sample(
+                    comments, min(3, len(comments))
+                )]
 
                 if dry_run:
-                    log(f"  [dry run] would embed response metadata in {os.path.basename(video_path)}")
-                    response_count += 1
-                    continue
+                    log(f"[dry run] would burn comments into {filename}")
+                else:
+                    burn_comment_overlay(filepath, comment_texts)
+                    log(f"burned comments into {filename}")
 
-                try:
-                    from scripts.text.metadata import generate_response_metadata
-                    meta = generate_response_metadata(source_comment['text'], rng=rng)
+            except Exception as e:
+                log(f"comment burn failed for {filename} (non-fatal): {e}")
 
-                    # re-embed metadata via ffmpeg -c copy (no re-encode)
-                    tmp_path = video_path + '.meta.mp4'
-                    cmd = [
-                        'ffmpeg', '-y', '-i', video_path,
-                        '-c', 'copy',
-                        '-metadata', f"title={meta['title']}",
-                        '-metadata', f"comment={meta['description']}",
-                        '-metadata', 'artist=luis queral',
-                        tmp_path,
-                    ]
-                    subprocess.run(cmd, check=True, capture_output=True, text=True)
-                    os.replace(tmp_path, video_path)
-                    response_count += 1
-                    log(f"  response: {os.path.basename(video_path)} -> \"{meta['title']}\"")
+        # response metadata
+        if rng.random() < response_chance and comments:
+            try:
+                from scripts.youtube.comments import pick_seed_comment
 
-                except Exception as e:
-                    log(f"  response metadata failed for {os.path.basename(video_path)}: {e}")
-                    # clean up temp file
-                    tmp_path = video_path + '.meta.mp4'
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
+                response_comment = pick_seed_comment(comments, rng=rng)
+                if response_comment:
+                    if dry_run:
+                        log(f"[dry run] would embed response metadata in {filename}")
+                    else:
+                        log(f"response video: {filename} ← \"{response_comment['text'][:40]}\"")
 
-        if response_count > 0:
-            log(f"embedded response metadata in {response_count} video(s)")
+            except Exception as e:
+                log(f"response metadata failed for {filename} (non-fatal): {e}")
 
 
 # =============================================================================
-# PHASE HANDLERS
+# CORE LOGIC
 # =============================================================================
 
-def handle_quiet(state, rhythm, rng, output_dir, manifest_path, dry_run=False):
+def maybe_render(rhythm, rng, output_dir, manifest_path, project_name, dry_run=False):
     """
-    quiet phase — wait for cooldown to expire.
-    occasionally fire off a solo post (uploaded directly as public).
-    """
-    now = datetime.now()
-    next_burst = datetime.fromisoformat(state['next_burst'])
-
-    if now >= next_burst:
-        log("cooldown expired — moving to rendering")
-        state['phase'] = 'rendering'
-        state['phase_entered'] = now.isoformat()
-        return state
-
-    # solo post chance — roll the dice.
-    # we check once per cron tick (hourly). scale the daily chance
-    # so P(at least one hit in 24 ticks) ≈ daily_chance.
-    # per-tick chance = 1 - (1 - daily_chance)^(1/24)
-    daily_chance = rhythm.get('solo_post_chance', 0.05)
-    per_tick_chance = 1 - (1 - daily_chance) ** (1/24)
-
-    manifest = load_manifest(manifest_path)
-    uploaded_set = get_uploaded_set(manifest)
-    ready_count, ready_files = count_ready_videos(output_dir, uploaded_set)
-
-    if ready_count > 0 and rng.random() < per_tick_chance:
-        log("solo post — uploading one video during quiet period")
-        if not dry_run:
-            solo_file = rng.choice(sorted(ready_files))
-            _upload_file(solo_file, output_dir, manifest, manifest_path)
-        else:
-            log("[dry run] would upload one solo video")
-
-    days_left = (next_burst - now).days
-    hours_left = int((next_burst - now).total_seconds() / 3600)
-    log(f"quiet — {hours_left}h until next burst ({days_left} days). {ready_count} videos ready")
-
-    return state
-
-
-def handle_rendering(state, rhythm, rng, output_dir, manifest_path, project_name, dry_run=False):
-    """
-    rendering phase — check if we need to render, kick off batch-render.
-    transitions to uploading when done.
-
-    when comment feedback is enabled, this phase also:
-    - fetches comments from recent uploads
-    - reads poll results and computes config overrides
-    - renders some videos with comment-derived seeds
-    - post-processes new videos with comment burns and response metadata
+    render more videos if the pool is running low.
+    returns True if rendering happened (or would happen in dry-run).
     """
     manifest = load_manifest(manifest_path)
     uploaded_set = get_uploaded_set(manifest)
     ready_count, _ = count_ready_videos(output_dir, uploaded_set)
 
-    # decide batch size for this burst
-    if state.get('current_batch_size') is None:
-        batch_size = pick_from_range(rng, rhythm['render_batch_size'])
-        state['current_batch_size'] = batch_size
-        log(f"decided to render {batch_size} videos")
+    threshold = rhythm.get('render_when_below', 10)
 
-    batch_size = state['current_batch_size']
+    if ready_count >= threshold:
+        log(f"{ready_count} videos ready (threshold: {threshold}) — no render needed")
+        return False
 
-    # if we already have enough, skip rendering
-    if ready_count >= batch_size:
-        log(f"already have {ready_count} ready videos (need {batch_size}), skipping render")
-        _enter_uploading(state, rhythm, rng, ready_count)
-        return state
-
+    batch_size = pick_from_range(rng, rhythm['render_batch_size'])
     need = batch_size - ready_count
-    log(f"need to render {need} more videos ({ready_count} ready, target {batch_size})")
+    log(f"pool is low ({ready_count} ready, threshold {threshold}) — rendering {need} videos")
 
-    # --- comment feedback: pre-render ---
+    # fetch comment context for seeded renders
     comment_ctx = _fetch_comment_context(manifest_path, rhythm, dry_run=dry_run)
     poll_overrides = comment_ctx.get('poll_overrides', {})
     comments = comment_ctx.get('comments', [])
 
-    # render comment-seeded videos first (if enabled and comments exist)
+    title_from_comments = rhythm.get('title_from_comments', False)
+    title_comment_strategy = rhythm.get('title_comment_strategy', 'random')
+
+    # render comment-seeded videos first (if enabled)
     seeded_count = 0
     if (rhythm.get('comment_feedback', False)
             and rhythm.get('seed_from_comments', True)
             and comments):
 
-        # render a few videos with comment-derived seeds.
-        # cap at ~20% of the batch or 5, whichever is smaller.
         max_seeded = min(max(1, need // 5), 5, len(comments))
 
         from scripts.youtube.comments import pick_seed_comment, comment_to_seed
@@ -569,7 +533,6 @@ def handle_rendering(state, rhythm, rng, output_dir, manifest_path, project_name
                 seeded_count += 1
                 continue
 
-            # render one video with this specific seed
             cmd = [
                 sys.executable,
                 os.path.join(PROJECT_ROOT, 'scripts', 'blend', 'multi-layer.py'),
@@ -577,13 +540,12 @@ def handle_rendering(state, rhythm, rng, output_dir, manifest_path, project_name
                 '--project', project_name,
                 '--seed', str(seed_val),
             ]
+            if title_from_comments and seed_comment.get('text', '').strip():
+                cmd.extend(['--title-comment', seed_comment['text'].strip()])
 
-            # apply poll overrides as CLI flags
             for key, value in poll_overrides.items():
-                flag = f"--{key.replace('_', '-')}"
-                # only pass overrides that multi-layer.py accepts as CLI flags
                 if key in ('mode', 'fps', 'num_videos', 'duration'):
-                    cmd.extend([flag, str(value)])
+                    cmd.extend([f"--{key.replace('_', '-')}", str(value)])
 
             log(f"rendering seeded video: seed={seed_val} "
                 f"from \"{seed_comment['text'][:40]}...\"")
@@ -593,138 +555,128 @@ def handle_rendering(state, rhythm, rng, output_dir, manifest_path, project_name
             except subprocess.CalledProcessError as e:
                 log(f"seeded render failed: {e}")
 
-    # render the rest via batch-render
+    # render the rest one by one so each title can absorb a fresh comment
     remaining = need - seeded_count
     if remaining > 0:
-        if dry_run:
-            extra_flags = ''
-            for key, value in poll_overrides.items():
-                if key in ('mode', 'fps', 'num_videos', 'duration'):
-                    extra_flags += f" --{key.replace('_', '-')} {value}"
-            log(f"[dry run] would run: batch-render.py --count {remaining} "
-                f"--preset {rhythm['render_preset']} --project {project_name}{extra_flags}")
-        else:
+        for i in range(remaining):
+            title_comment = None
+            if title_from_comments and comments:
+                title_comment = _pick_title_comment(
+                    comments, rng, strategy=title_comment_strategy
+                )
+
+            if dry_run:
+                if title_comment:
+                    log(f"[dry run] would render video {i+1}/{remaining} "
+                        f"with title from comment: \"{title_comment[:50]}\"")
+                else:
+                    log(f"[dry run] would render video {i+1}/{remaining}")
+                continue
+
             cmd = [
                 sys.executable,
-                os.path.join(PROJECT_ROOT, 'tools', 'batch-render.py'),
-                '--count', str(remaining),
+                os.path.join(PROJECT_ROOT, 'scripts', 'blend', 'multi-layer.py'),
                 '--preset', rhythm['render_preset'],
                 '--project', project_name,
             ]
 
-            # apply poll overrides
             for key, value in poll_overrides.items():
                 if key in ('mode', 'fps', 'num_videos', 'duration'):
                     cmd.extend([f"--{key.replace('_', '-')}", str(value)])
 
-            log(f"running: {' '.join(cmd)}")
+            if title_comment:
+                cmd.extend(['--title-comment', title_comment])
+                log(f"rendering {i+1}/{remaining} with title comment: "
+                    f"\"{title_comment[:40]}...\"")
+            else:
+                log(f"rendering {i+1}/{remaining}")
+
             try:
                 subprocess.run(cmd, check=True)
-                log("batch render complete")
             except subprocess.CalledProcessError as e:
-                log(f"batch render failed: {e}")
-                return state
+                log(f"render failed: {e}")
+                return False
 
-    # --- comment feedback: post-render ---
-    # burn comments and embed response metadata into newly rendered videos
+    # post-process new renders with comment feedback
     manifest = load_manifest(manifest_path)
     uploaded_set = get_uploaded_set(manifest)
     _post_process_renders(output_dir, uploaded_set, comments, rhythm, rng, dry_run=dry_run)
 
-    if dry_run:
-        _enter_uploading(state, rhythm, rng, batch_size)
-    else:
-        new_ready, _ = count_ready_videos(output_dir, uploaded_set)
-        _enter_uploading(state, rhythm, rng, new_ready)
-
-    return state
+    return True
 
 
-def handle_uploading(state, rhythm, rng, output_dir, manifest_path, dry_run=False):
+def maybe_upload(rhythm, rng, output_dir, manifest_path, dry_run=False):
     """
-    uploading phase — the heart of the organic timing.
+    the heart of the organic timing.
 
-    each tick, we decide whether to upload and how many. the logic:
-    - are we inside the burst window? (e.g. 06:00-23:00)
+    each tick, we decide whether to upload and how many:
+    - are we inside the upload window?
     - have we hit today's API quota?
-    - how many hours are left in the window? distribute remaining
-      uploads across remaining hours, with noise.
-    - occasionally upload 2 in one tick for variety.
+    - upload_chance = remaining_today / hours_left, ±30% jitter
+    - if hit: upload 1 (occasionally 2)
 
-    when comment feedback is on, some uploads get a poll question
-    appended to their description. the poll is recorded in
-    polls-state.json so we can read results next cycle.
-
-    this creates natural irregularity: some hours get videos,
-    some don't. early ticks are less likely, late ticks more likely
-    (pressure to hit the daily target builds through the day).
+    morning ticks rarely fire. evening ticks almost always do
+    if there's quota left.
     """
     manifest = load_manifest(manifest_path)
     uploaded_set = get_uploaded_set(manifest)
     ready_count, ready_files = count_ready_videos(output_dir, uploaded_set)
 
-    # check if the burst is done
-    burst_target = state.get('burst_target', 0)
-    burst_uploaded = state.get('burst_uploaded', 0)
-
-    if burst_uploaded >= burst_target or ready_count == 0:
-        log(f"burst complete — uploaded {burst_uploaded}/{burst_target}")
-        _enter_quiet(state, rhythm, rng)
-        return state
+    if ready_count == 0:
+        log("no videos ready to upload")
+        return
 
     # outside the window? skip
     if not in_window(rhythm):
-        log(f"outside burst window — waiting. {ready_count} ready, {burst_uploaded}/{burst_target} uploaded")
-        return state
+        log(f"outside upload window — {ready_count} videos waiting")
+        return
 
     # check daily quota
     uploads_per_day = rhythm.get('uploads_per_day', 6)
     done_today = uploaded_today(manifest)
 
     if done_today >= uploads_per_day:
-        log(f"hit daily quota ({done_today}/{uploads_per_day}) — waiting for tomorrow")
-        log(f"  {ready_count} ready, {burst_uploaded}/{burst_target} burst progress")
-        return state
+        log(f"hit daily quota ({done_today}/{uploads_per_day}) — done for today")
+        return
 
     remaining_today = uploads_per_day - done_today
 
-    # figure out how many hours are left in today's window
-    window = rhythm.get('burst_window_hours', ['06:00', '23:00'])
+    # figure out hours left in the window
+    window = rhythm.get('window_hours', ['06:00', '23:00'])
     end_h, end_m = map(int, window[1].split(':'))
     now = datetime.now()
     hours_left = max(1, (end_h * 60 + end_m - now.hour * 60 - now.minute) / 60)
 
-    # probability of uploading this tick:
-    # spread remaining uploads across remaining hours, with ±30% jitter.
-    # early in the day with lots of hours left → low chance per tick.
-    # late in the day with uploads still needed → high chance.
+    # probability: spread remaining uploads across remaining hours, with jitter.
+    # early → low chance. late → high chance. organic.
     upload_chance = remaining_today / hours_left
     upload_chance *= rng.uniform(0.7, 1.3)
     upload_chance = min(1.0, max(0.0, upload_chance))
 
     if rng.random() > upload_chance:
         log(f"skipping this tick (chance was {upload_chance:.0%}). "
-            f"{remaining_today} left today, {hours_left:.1f}h remaining in window")
-        return state
+            f"{remaining_today} left today, {hours_left:.1f}h in window, "
+            f"{ready_count} ready")
+        return
 
-    # decide how many — usually 1, sometimes 2
+    # how many — usually 1, sometimes 2
     count = 1
     if remaining_today >= 3 and rng.random() < 0.15:
         count = 2
     count = min(count, remaining_today, ready_count)
 
-    log(f"uploading {count} video(s) this tick (chance was {upload_chance:.0%})")
+    log(f"uploading {count} video(s) (chance was {upload_chance:.0%}, "
+        f"{done_today} done today, {ready_count} ready)")
 
     if dry_run:
         log(f"[dry run] would upload {count} video(s)")
-        state['burst_uploaded'] = burst_uploaded + count
-        return state
+        return
 
-    # pick random videos from the ready pool and upload
+    # pick random videos and upload
     sorted_ready = sorted(ready_files)
     to_upload = rng.sample(sorted_ready, min(count, len(sorted_ready)))
 
-    # decide if any of these uploads get a poll question
+    # polls (if comment feedback is on)
     poll_chance = rhythm.get('poll_chance', 0.25)
     use_polls = rhythm.get('comment_feedback', False) and poll_chance > 0
 
@@ -742,68 +694,28 @@ def handle_uploading(state, rhythm, rng, output_dir, manifest_path, dry_run=Fals
                 log(f"  poll generation failed (non-fatal): {e}")
 
         video_id = _upload_file(filename, output_dir, manifest, manifest_path,
-                                poll_text=poll_text)
+                                poll_text=poll_text, rhythm=rhythm)
 
-        if video_id:
-            state['burst_uploaded'] = state.get('burst_uploaded', 0) + 1
-
-            # record the poll so we can read results next cycle
-            if poll_data and video_id not in ('unknown', None):
-                _record_poll(manifest_path, video_id, poll_data)
-
-    return state
+        if video_id and poll_data and video_id not in ('unknown', None):
+            _record_poll(manifest_path, video_id, poll_data)
 
 
 # =============================================================================
 # HELPERS
 # =============================================================================
 
-def _enter_uploading(state, rhythm, rng, ready_count):
-    """transition to uploading phase with a burst target."""
-    burst_size = pick_from_range(rng, rhythm['burst_size'])
-    # don't target more than what's actually available
-    burst_target = min(burst_size, ready_count)
-
-    state['phase'] = 'uploading'
-    state['phase_entered'] = datetime.now().isoformat()
-    state['current_batch_size'] = None
-    state['burst_target'] = burst_target
-    state['burst_uploaded'] = 0
-
-    log(f"entering uploading phase — burst target: {burst_target} videos")
-
-
-def _enter_quiet(state, rhythm, rng):
-    """transition to quiet phase with a randomized cooldown."""
-    cooldown = pick_from_range(rng, rhythm['cooldown_days'])
-    next_burst = datetime.now() + timedelta(days=cooldown)
-
-    state['phase'] = 'quiet'
-    state['phase_entered'] = datetime.now().isoformat()
-    state['next_burst'] = next_burst.isoformat()
-    state['last_burst_end'] = datetime.now().isoformat()
-    state['burst_target'] = None
-    state['burst_uploaded'] = 0
-
-    log(f"entering quiet for {cooldown} days — next burst around {next_burst.strftime('%Y-%m-%d')}")
-
-
 def _record_poll(manifest_path, video_id, poll_data):
-    """
-    record that a video got a poll question so we can read results later.
-    saves to polls-state.json alongside the manifest.
-    """
-    polls_state_path = os.path.join(os.path.dirname(manifest_path), 'polls-state.json')
+    """record a poll question so we can read results later."""
+    polls_state_path = os.path.join(
+        os.path.dirname(manifest_path), 'polls-state.json'
+    )
 
-    polls_state = []
+    polls = []
     if os.path.exists(polls_state_path):
-        try:
-            with open(polls_state_path) as f:
-                polls_state = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            polls_state = []
+        with open(polls_state_path) as f:
+            polls = json.load(f)
 
-    polls_state.append({
+    polls.append({
         'video_id': video_id,
         'poll': poll_data,
         'created_at': datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),
@@ -811,19 +723,18 @@ def _record_poll(manifest_path, video_id, poll_data):
     })
 
     with open(polls_state_path, 'w') as f:
-        json.dump(polls_state, f, indent=2)
-
-    log(f"  recorded poll for {video_id}")
+        json.dump(polls, f, indent=2)
 
 
-def _upload_file(filename, output_dir, manifest, manifest_path, poll_text=None):
+def _upload_file(filename, output_dir, manifest, manifest_path, poll_text=None, rhythm=None):
     """
     upload a single file as public and record it in the manifest.
     the actual upload is handled by youtube-upload.py --file --public.
 
-    if poll_text is provided, it's passed as --poll-text to youtube-upload.py
-    which appends it to the video description. this is how the comment
-    feedback loop plants poll questions in uploaded videos.
+    if poll_text is provided, it's appended to the video description.
+
+    if rhythm['delete_after_upload'] is True, the MP4 is deleted from disk
+    after a successful upload.
     """
     filepath = os.path.join(output_dir, filename)
 
@@ -839,11 +750,10 @@ def _upload_file(filename, output_dir, manifest, manifest_path, poll_text=None):
 
     log(f"uploading: {filename}")
     try:
-        # capture output to extract video ID
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         output = result.stdout
 
-        # parse video ID from the output line "uploaded (public): https://youtube.com/watch?v=XXXXX"
+        # parse video ID from output
         video_id = None
         for line in output.split('\n'):
             if 'youtube.com/watch?v=' in line:
@@ -851,7 +761,6 @@ def _upload_file(filename, output_dir, manifest, manifest_path, poll_text=None):
                 break
 
         if not video_id:
-            # fallback: check the "done: XXXX" line
             for line in output.split('\n'):
                 if line.strip().startswith('done:'):
                     video_id = line.split('done:')[-1].strip()
@@ -867,11 +776,11 @@ def _upload_file(filename, output_dir, manifest, manifest_path, poll_text=None):
             })
             save_manifest(manifest, manifest_path)
             log(f"  done: https://youtube.com/watch?v={video_id}")
+            _maybe_delete_file(filepath, rhythm)
             return video_id
         else:
-            log(f"  uploaded but couldn't parse video ID from output")
+            log(f"  uploaded but couldn't parse video ID")
             log(f"  stdout: {output[:500]}")
-            # still record it so we don't re-upload
             manifest.append({
                 'filename': filename,
                 'video_id': 'unknown',
@@ -879,6 +788,7 @@ def _upload_file(filename, output_dir, manifest, manifest_path, poll_text=None):
                 'uploaded_at': datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),
             })
             save_manifest(manifest, manifest_path)
+            _maybe_delete_file(filepath, rhythm)
             return 'unknown'
 
     except subprocess.CalledProcessError as e:
@@ -890,7 +800,18 @@ def _upload_file(filename, output_dir, manifest, manifest_path, poll_text=None):
         return None
 
 
-def print_status(state, rhythm, output_dir, manifest_path):
+def _maybe_delete_file(filepath, rhythm):
+    """delete an uploaded video from disk if the rhythm config says to."""
+    if rhythm and rhythm.get('delete_after_upload', True):
+        try:
+            size_mb = os.path.getsize(filepath) / 1024 / 1024
+            os.remove(filepath)
+            log(f"  deleted from disk ({size_mb:.0f}MB freed)")
+        except OSError as e:
+            log(f"  couldn't delete {filepath}: {e}")
+
+
+def print_status(rhythm, output_dir, manifest_path):
     """print a human-readable status summary."""
     manifest = load_manifest(manifest_path)
     uploaded_set = get_uploaded_set(manifest)
@@ -900,31 +821,14 @@ def print_status(state, rhythm, output_dir, manifest_path):
 
     print(f"\n  autopilot status")
     print(f"  {'='*50}")
-    print(f"  phase: {state['phase']}")
-    print(f"  phase entered: {state.get('phase_entered', '?')}")
-
-    if state['phase'] == 'quiet':
-        next_burst = state.get('next_burst', '?')
-        if next_burst != '?':
-            nb = datetime.fromisoformat(next_burst)
-            delta = nb - datetime.now()
-            days = delta.days
-            hours = int(delta.total_seconds() / 3600)
-            print(f"  next burst: {next_burst[:10]} ({days}d {hours % 24}h from now)")
-        print(f"  solo post chance: {rhythm.get('solo_post_chance', 0.05)*100:.0f}%/day")
-
-    if state['phase'] == 'uploading':
-        burst_target = state.get('burst_target', '?')
-        burst_uploaded = state.get('burst_uploaded', 0)
-        print(f"  burst progress: {burst_uploaded}/{burst_target}")
-
     print(f"  videos ready: {ready_count}")
     print(f"  total uploaded: {total_uploaded}")
-    print(f"  uploaded today: {done_today}")
-    print(f"  upload limit/day: {rhythm.get('uploads_per_day', 6)}")
-
-    if state.get('last_burst_end'):
-        print(f"  last burst ended: {state['last_burst_end'][:10]}")
+    print(f"  uploaded today: {done_today}/{rhythm.get('uploads_per_day', 6)}")
+    window = rhythm.get('window_hours', ['06:00', '23:00'])
+    print(f"  upload window: {window[0]}-{window[1]}")
+    print(f"  currently in window: {'yes' if in_window(rhythm) else 'no'}")
+    print(f"  render threshold: {rhythm.get('render_when_below', 10)}")
+    print(f"  delete after upload: {rhythm.get('delete_after_upload', True)}")
 
     # show last 5 uploads
     recent = [e for e in manifest if e.get('status') == 'uploaded'][-5:]
@@ -946,14 +850,13 @@ def print_status(state, rhythm, output_dir, manifest_path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='organic burst publishing daemon',
+        description='steady organic uploader — 6 videos/day at random times',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
   python tools/autopilot.py --project first-blend-test
   python tools/autopilot.py --project first-blend-test --dry-run
   python tools/autopilot.py --project first-blend-test --status
-  python tools/autopilot.py --project first-blend-test --force-phase rendering
 
 cron (every hour):
   0 * * * * cd /path/to/collide-o-scope && python3 tools/autopilot.py --project first-blend-test >> /var/log/autopilot.log 2>&1
@@ -966,8 +869,6 @@ cron (every hour):
                         help='preview what would happen without doing anything')
     parser.add_argument('--status', action='store_true',
                         help='print current status and exit')
-    parser.add_argument('--force-phase', choices=['quiet', 'rendering', 'uploading'],
-                        help='force a specific phase (for testing or manual override)')
 
     args = parser.parse_args()
 
@@ -985,46 +886,26 @@ cron (every hour):
     rhythm = load_rhythm(project_dir)
     state = load_state(state_path)
 
-    # force phase if requested
-    if args.force_phase:
-        log(f"forcing phase: {args.force_phase}")
-        state['phase'] = args.force_phase
-        state['phase_entered'] = datetime.now().isoformat()
-
-    # status mode — just print and exit
+    # status mode
     if args.status:
-        print_status(state, rhythm, output_dir, manifest_path)
+        print_status(rhythm, output_dir, manifest_path)
         return
 
-    # create a seeded RNG from the state seed + current hour
-    # (so each hourly tick gets a different roll, but it's reproducible)
+    # seeded RNG — different roll each hourly tick
     hour_seed = state['seed'] + int(datetime.now().timestamp() / 3600)
     rng = create_rng(hour_seed)
 
-    log(f"tick — phase: {state['phase']}")
+    log("tick")
 
-    # dispatch to phase handler
-    phase = state['phase']
+    # step 1: render if pool is low
+    maybe_render(rhythm, rng, output_dir, manifest_path, args.project, dry_run=args.dry_run)
 
-    if phase == 'quiet':
-        state = handle_quiet(state, rhythm, rng, output_dir, manifest_path, dry_run=args.dry_run)
-
-    elif phase == 'rendering':
-        state = handle_rendering(state, rhythm, rng, output_dir, manifest_path, args.project, dry_run=args.dry_run)
-
-    elif phase == 'uploading':
-        state = handle_uploading(state, rhythm, rng, output_dir, manifest_path, dry_run=args.dry_run)
-
-    else:
-        log(f"unknown phase: {phase}, resetting to quiet")
-        state['phase'] = 'quiet'
+    # step 2: maybe upload
+    maybe_upload(rhythm, rng, output_dir, manifest_path, dry_run=args.dry_run)
 
     # save state
     if not args.dry_run:
         save_state(state, state_path)
-        log(f"state saved — phase: {state['phase']}")
-    else:
-        log(f"[dry run] would save state — phase: {state['phase']}")
 
 
 if __name__ == '__main__':

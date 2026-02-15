@@ -44,7 +44,7 @@ from scripts.utils.ffprobe import (
     get_video_resolution,
     video_has_audio,
 )
-from scripts.text.metadata import generate_metadata
+from scripts.text.metadata import generate_metadata, generate_response_title
 
 # optional imports for ML color modes (graceful fallback if not installed)
 try:
@@ -209,6 +209,10 @@ DEFAULTS = {
     # set to an integer to reproduce exact outputs
     # None = different result every run (seed is logged for replay)
     "seed": None,
+
+    # optional comment text to steer title generation.
+    # if set, the title absorbs words from this comment.
+    "title_comment": None,
 }
 
 
@@ -696,6 +700,9 @@ def blend(config):
 
     # generate metadata and embed in MP4 container
     meta = generate_metadata(rng=rng)
+    title_comment = config.get('title_comment')
+    if title_comment:
+        meta['title'] = generate_response_title(title_comment, rng=rng)
     title = meta['title']
     description = meta['description']
 
@@ -755,6 +762,8 @@ def parse_args():
                         help='Random seed for reproducibility')
     parser.add_argument('--output-dir', default=None,
                         help='Output directory')
+    parser.add_argument('--title-comment', default=None,
+                        help='comment text to steer title generation')
 
     return parser.parse_args()
 
@@ -770,6 +779,7 @@ def main():
     if args.duration is not None: cli['duration'] = args.duration
     if args.seed is not None: cli['seed'] = args.seed
     if args.output_dir is not None: cli['output_dir'] = args.output_dir
+    if args.title_comment is not None: cli['title_comment'] = args.title_comment
 
     config = load_config(
         DEFAULTS,
