@@ -1,0 +1,11 @@
+{
+  "window_hours": ["06:00", "23:00"],
+  "uploads_per_day": 4,
+  "render_batch_size": [10, 20],
+  "render_when_below": 5,
+  "render_preset": "kmeans-default",
+  "delete_after_upload": true,
+  "title_from_comments": false,
+  "comment_lookback_days": 90,
+  "title_comment_strategy": "random"
+}

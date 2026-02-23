@@ -538,6 +538,7 @@ def maybe_render(rhythm, rng, output_dir, manifest_path, project_name, dry_run=F
                 os.path.join(PROJECT_ROOT, 'scripts', 'blend', 'multi-layer.py'),
                 '--preset', rhythm['render_preset'],
                 '--project', project_name,
+                '--output-dir', output_dir,
                 '--seed', str(seed_val),
             ]
             if title_from_comments and seed_comment.get('text', '').strip():
@@ -578,6 +579,7 @@ def maybe_render(rhythm, rng, output_dir, manifest_path, project_name, dry_run=F
                 os.path.join(PROJECT_ROOT, 'scripts', 'blend', 'multi-layer.py'),
                 '--preset', rhythm['render_preset'],
                 '--project', project_name,
+                '--output-dir', output_dir,
             ]
 
             for key, value in poll_overrides.items():

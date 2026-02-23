@@ -46,3 +46,6 @@ projects/*/polls-state.json
 # temp files from processing
 /tmp/
 *.tmp
+
+# local private notes
+server-access.local.md

@@ -1,0 +1,9 @@
+{
+  "name": "dominant-auto",
+  "mode": "dominant",
+  "num_videos": 3,
+  "dominant_frames": 8,
+  "dominant_quant": 24,
+  "similarity": [0.25, 0.40],
+  "blend": [0.0, 0.06]
+}

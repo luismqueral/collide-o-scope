@@ -8,7 +8,7 @@ WHAT IT DOES:
 1. Selects random videos from the library
 2. Picks a random segment from each video (random start time)
 3. Analyzes each video to determine which colors to key out
-4. Builds an ffmpeg filter chain: trim → loop → color correct → colorkey → scale → overlay
+4. Builds an ffmpeg filter chain: trim → scale → color correct → colorkey → overlay
 5. Mixes audio from source videos with stereo panning
 6. Outputs the final composited video
 
@@ -102,6 +102,7 @@ DEFAULTS = {
 
     # which algorithm picks the transparency color
     # "fixed"      = always use colorkey_hex
+    # "dominant"   = key the most frequent color in each video (no deps)
     # "kmeans"     = extract dominant colors from each video via ML
     # "luminance"  = key out brights or darks based on frame analysis
     # "rembg"      = ML background removal, key detected bg/fg colors
@@ -134,6 +135,15 @@ DEFAULTS = {
     # minimum squared RGB distance between colors to count as distinct
     "kmeans_distinct_threshold": 2000,
 
+    # --- dominant mode ---
+
+    # how many frames to sample across the video for color counting
+    "dominant_frames": 8,
+
+    # quantization bucket size — groups nearby colors together
+    # 24 = moderate grouping (good default), 16 = finer, 32 = broader
+    "dominant_quant": 24,
+
     # --- luminance mode ---
 
     # what to key out: "lights", "darks", "auto", or "random"
@@ -156,8 +166,10 @@ DEFAULTS = {
 
     # --- color correction (applied per layer before keying) ---
 
-    # stretch color levels to use full range (fixes washed out footage)
-    "auto_normalize": True,
+    # stretch color levels to use full range (fixes washed out footage).
+    # costs ~3.5x render time with no memory benefit. the hue/eq filters
+    # already give each layer its own character.
+    "auto_normalize": False,
 
     # random color shifts per layer for visual variety
     "color_shift": True,
@@ -296,6 +308,68 @@ def extract_frame(video_path, output_path, rng, timestamp=None):
         '-frames:v', '1',
         output_path
     ], check=True)
+
+
+def get_dominant_color(video_path, rng, num_frames=8, quant=24):
+    """Find the most common color in a video using only ffmpeg + stdlib.
+
+    Samples `num_frames` spread across the video, scales each to 32x32,
+    reads raw RGB, quantizes to reduce noise, and picks the winner by
+    frequency. The quantization step (`quant`) groups nearby colors into
+    buckets — 24 means a pixel at (130, 44, 201) rounds to (120, 48, 192).
+    Lower quant = more precise, higher = broader strokes.
+    """
+    from collections import Counter
+
+    duration = get_video_duration(video_path)
+    if duration <= 0:
+        return None
+
+    timestamps = [duration * (i + 0.5) / num_frames for i in range(num_frames)]
+    all_pixels = Counter()
+
+    for ts in timestamps:
+        result = subprocess.run([
+            'ffmpeg', '-v', 'error',
+            '-ss', f'{ts:.2f}',
+            '-i', video_path,
+            '-frames:v', '1',
+            '-vf', 'scale=32:32',
+            '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+            'pipe:1'
+        ], capture_output=True)
+
+        data = result.stdout
+        if len(data) < 3:
+            continue
+
+        for i in range(0, len(data) - 2, 3):
+            r = (data[i] // quant) * quant
+            g = (data[i+1] // quant) * quant
+            b = (data[i+2] // quant) * quant
+            all_pixels[(r, g, b)] += 1
+
+    if not all_pixels:
+        return None
+
+    (r, g, b), _ = all_pixels.most_common(1)[0]
+    return f'0x{r:02X}{g:02X}{b:02X}'
+
+
+def get_colors_dominant(video_path, rng, config):
+    """Dominant mode: key out the most frequently occurring color in the video."""
+    similarity = rng.from_range(config['similarity'])
+    blend = rng.from_range(config['blend'])
+
+    color = get_dominant_color(video_path, rng,
+                               num_frames=config.get('dominant_frames', 8),
+                               quant=config.get('dominant_quant', 24))
+    if color:
+        print(f"  Dominant color: {color}")
+        return [(color, similarity, blend)]
+    else:
+        print("  Dominant analysis failed, falling back to fixed")
+        return get_colors_fixed(rng, config)
 
 
 def get_colors_fixed(rng, config):
@@ -457,6 +531,8 @@ def get_colorkey_settings(video_path, mode, rng, config, video_index=0, debug_di
     """Dispatch to the appropriate color extraction mode."""
     if mode == 'fixed':
         return get_colors_fixed(rng, config)
+    elif mode == 'dominant':
+        return get_colors_dominant(video_path, rng, config)
     elif mode == 'kmeans':
         return get_colors_kmeans(video_path, rng, config)
     elif mode == 'luminance':
@@ -567,14 +643,17 @@ def blend(config):
     filter_parts = []
 
     # --- base layer (video 0): no colorkey ---
+    # scale early so color correction works on smaller frames.
+    # looping is handled by -stream_loop on the input (no RAM buffering).
     cc_filter, _ = get_color_correction_filter(rng, config)
     base = (
-        f"[0:v]trim=start={videos[0][1]}:duration={crop_length},setpts=PTS-STARTPTS,"
-        f"loop=loop=-1:size={crop_length * fps},setpts=N/({fps}*TB),"
+        f"[0:v]trim=start={videos[0][1]}:duration={crop_length},"
+        f"setpts=N/({fps}*TB),"
+        f"scale={output_size[0]}:{output_size[1]},setsar=1,"
     )
     if cc_filter:
         base += f"{cc_filter},"
-    base += f"scale={output_size[0]}:{output_size[1]},setsar=1[v0]"
+    base = base.rstrip(',') + f"[v0]"
     filter_parts.append(base)
 
     # --- overlay layers (videos 1 to N-1): with colorkey ---
@@ -600,13 +679,13 @@ def blend(config):
         ])
 
         layer = (
-            f"[{i}:v]trim=start={videos[i][1]}:duration={crop_length},setpts=PTS-STARTPTS,"
-            f"loop=loop=-1:size={crop_length * fps},setpts=N/({fps}*TB),"
+            f"[{i}:v]trim=start={videos[i][1]}:duration={crop_length},"
+            f"setpts=N/({fps}*TB),"
+            f"scale={output_size[0]}:{output_size[1]},setsar=1,"
         )
         if cc_filter:
             layer += f"{cc_filter},"
-        layer += f"{ck_filters},"
-        layer += f"scale={output_size[0]}:{output_size[1]},setsar=1[v{i}]"
+        layer += f"{ck_filters}[v{i}]"
         filter_parts.append(layer)
 
     # --- overlay chain: stack all layers ---
@@ -645,14 +724,10 @@ def blend(config):
             audio_dur = get_video_duration(audio_path)
             label = f"aud{idx}"
 
-            # trim or loop audio to match output duration
-            if audio_dur < crop_length:
-                max_start = max(0, audio_dur - 5)
-                a_start = rng.uniform(0, max_start) if max_start > 0 else 0
-                trim = f"[{idx}:a]atrim=start={a_start:.2f},asetpts=PTS-STARTPTS,aloop=loop=-1:size=2e+09,asetpts=N/SR/TB"
-            else:
-                a_start = videos[idx][1]
-                trim = f"[{idx}:a]atrim=start={a_start}:duration={crop_length},asetpts=PTS-STARTPTS"
+            # -stream_loop on the input handles looping for both video and audio,
+            # so we just trim to the segment we want
+            a_start = videos[idx][1]
+            trim = f"[{idx}:a]atrim=start={a_start}:duration={crop_length},asetpts=PTS-STARTPTS"
 
             # stereo panning
             pan_val = audio_panning.get(idx, 0.0)
@@ -669,12 +744,13 @@ def blend(config):
 
             audio_labels.append(f"[{label}]")
 
-        # mix audio sources
+        # mix audio sources, resample to 48kHz so mixed sample rates
+        # (44.1k aac + 48k opus) don't produce a weird 96kHz output
         if len(audio_labels) == 1:
-            filter_parts.append(f"{audio_labels[0]}acopy[audio]")
+            filter_parts.append(f"{audio_labels[0]}aresample=48000[audio]")
         else:
             inputs = ''.join(audio_labels)
-            filter_parts.append(f"{inputs}amix=inputs={len(audio_labels)}:duration=longest:normalize=1[audio]")
+            filter_parts.append(f"{inputs}amix=inputs={len(audio_labels)}:duration=longest:normalize=1,aresample=48000[audio]")
     else:
         print("\nNo source videos have audio — output will be silent")
 
@@ -686,7 +762,9 @@ def blend(config):
 
     cmd = ['ffmpeg']
     for video_path, _ in videos:
-        cmd.extend(['-i', video_path])
+        # -stream_loop re-reads the file instead of buffering frames in RAM.
+        # this is what makes renders possible on a 4GB server.
+        cmd.extend(['-stream_loop', '-1', '-i', video_path])
 
     cmd.extend([
         '-filter_complex', filter_complex,
@@ -728,10 +806,51 @@ def blend(config):
     try:
         subprocess.run(cmd, check=True)
         print(f"\nDone: {output_path}")
+
+        # write a render log alongside the output so we can trace
+        # which source videos went into which output. invaluable for
+        # debugging "why does everything look the same" questions.
+        _write_render_log(output_path, videos, config, mode, title)
+
         return output_path
     except subprocess.CalledProcessError as e:
         print(f"\nFFmpeg error: {e}")
         return None
+
+
+def _write_render_log(output_path, videos, config, mode, title):
+    """
+    append to a render log in the output directory.
+    one JSON object per line — easy to grep, easy to parse.
+    tracks which source videos went into each output so we can
+    spot if the same clips keep getting picked.
+    """
+    import json as json_mod
+
+    log_path = os.path.join(os.path.dirname(output_path), 'render-log.jsonl')
+
+    entry = {
+        'output': os.path.basename(output_path),
+        'timestamp': datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),
+        'seed': config.get('seed'),
+        'mode': mode,
+        'title': title,
+        'duration': config.get('_duration'),
+        'num_videos': config.get('num_videos'),
+        'sources': [
+            {
+                'file': os.path.basename(path),
+                'start': start,
+            }
+            for path, start in videos
+        ],
+    }
+
+    try:
+        with open(log_path, 'a') as f:
+            f.write(json_mod.dumps(entry) + '\n')
+    except Exception as e:
+        print(f"  couldn't write render log: {e}")
 
 
 # =============================================================================
@@ -750,7 +869,7 @@ def parse_args():
                         help='Project directory name (for project-level presets and output)')
 
     parser.add_argument('--mode', default=None,
-                        choices=['fixed', 'kmeans', 'luminance', 'rembg', 'random'],
+                        choices=['fixed', 'dominant', 'kmeans', 'luminance', 'rembg', 'random'],
                         help='Color keying mode')
     parser.add_argument('--num-videos', type=int, default=None,
                         help='Number of videos to layer')

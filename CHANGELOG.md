@@ -1,6 +1,26 @@
 # changelog
 
+2026-02-18
+- added `dominant` color mode to `scripts/blend/multi-layer.py` — keys out the most frequent color in each video per-layer, no external deps. uses ffmpeg to sample frames at low res, quantizes pixels, and counts. each layer gets its own key color based on what's actually in the footage (greens from foliage, near-black from shadows, grays from sky, etc). added `dominant-auto` preset in `presets/blend/` and rendered test videos in alt-blend-test
+- fixed corrupt output audio — mixed sample rates (44.1kHz aac + 48kHz opus) were producing 96kHz output that most players and youtube can't handle. added `aresample=48000` to the audio chain in `scripts/blend/multi-layer.py` so everything lands at a standard rate
+- rendered 3 more 15-second test videos in alt-blend-test with the audio fix, all confirmed 48kHz
+- created `projects/alt-blend-test/` as a second project using the new library — rendered the first video with the `kmeans-default` preset (4 layers, 109s). kmeans fell back to fixed keying since numpy/sklearn aren't installed locally, but the structure is ready for real color analysis once those deps are in
+- renamed `tools/test-source-download.py` to `tools/download-source-material.py` so the command reads like the job it does and is easier to remember in day-to-day sourcing runs
+- optimized `scripts/blend/multi-layer.py` to use 12x less memory (12.5GB -> 0.98GB peak) and render 4x faster by replacing the `loop` filter (which pre-buffered thousands of frames in RAM) with ffmpeg's `-stream_loop` input option (re-reads from disk, near-zero memory). also removed `aloop` from the audio chain (redundant now) and disabled `normalize` by default (3.5x slower with no memory benefit). renders now complete on the 4GB server without crashing
+- added 4GB swap to the hetzner VPS and set `output_size` to 1280x720 in the `classic-white` preset as belt-and-suspenders for the memory-constrained server
+- replaced the entire server source library (485 old videos) with 44 fresh downloads from `library/video/` — cleared the video cache so the renderer rebuilds on next run
+- stripped the probability math out of `maybe_upload` in `tools/autopilot.py` — each tick now just uploads 1 video if under the daily cap, no dice rolls or jitter. the cron schedule is the timing (reverted — keeping organic logic)
+- fixed a bug where autopilot renders were going to `projects/archive/output/` instead of the active project's output dir — the `--project` flag only affected preset lookup, not the output path. added explicit `--output-dir` to both seeded and regular render calls in `tools/autopilot.py`
+- moved 1682 orphaned renders from `archive/output/` to `first-blend-test/output/` on the server so the upload pipeline can see them
+- rebooted the server after sshd became unresponsive — uploads had been stalled for ~2 days because of this + the output dir mismatch
+
 2026-02-15
+- hardened `tools/test-source-download.py` to prevent duplicate ingest and bad media drift — it now skips videos already present in `library/video` or `library/video/_archive` (by youtube id) and verifies each new download with ffprobe/size checks before keeping it
+- ran another random source-ingest pass for 50 downloads to keep momentum after the first archive split — all pulls succeeded and expanded the active blend-ready pool in `library/video`
+- ran a bulk source-ingest test with `tools/test-source-download.py` to pull 25 random camera-pattern youtube videos and verify the downloader path under heavier load
+- reorganized `library/video/` to match the active blending convention — kept only newly pulled candidates in the root and moved all previous source videos into `library/video/_archive` for preservation without blending pickup
+- added `tools/test-source-download.py` as a tiny source-ingest test path so we can validate discovery ideas quickly — it supports either a direct `--url` download or a `--random` camera-pattern search pick, then downloads with `yt-dlp` into `library/video`
+- updated `tools/README.md` to document the new test downloader and why it exists, so the source-material workflow is easier to run without digging through scripts
 - added `tools/upload-draft.py` to force a one-off youtube upload as private (draft-like) from a project output folder, so upload checks can run on demand without waiting for autopilot timing
 - set safer defaults in the draft uploader — it prefers files not marked uploaded in `upload-manifest.json`, supports `--dry-run`, and can target a specific file when needed
 - updated `tools/README.md` to list active utilities including the new draft uploader so the ops path is easier to find
@@ -27,6 +47,8 @@
 - updated rhythm.json for first-blend-test with comment feedback config — comment_feedback: true, seed_from_comments, burn_comments, burn_comment_chance (0.4), poll_chance (0.25), response_chance (0.12), min_comment_likes (0), comment_lookback_videos (10)
 - added polls-state.json to .gitignore — per-machine state that tracks which videos got poll questions
 - added delete_after_upload to autopilot — videos are automatically deleted from disk after successful upload to youtube. no reason to hoard gigabytes of MP4s that are already online. controlled by rhythm.json (on by default). also manually deleted 32 previously-uploaded videos, freeing ~7.7GB
+- wired title_from_comments into the autopilot upload loop — when enabled in rhythm.json, the autopilot fetches recent youtube comments and uses a random one as the video title. falls back to generated metadata when no comments exist. controlled by title_from_comments, title_comment_strategy, and comment_lookback_videos in rhythm.json
+- deleted all 32 previously scheduled videos from youtube — clean slate for direct public uploads
 - stripped autopilot.py down to its simplest form — no phases, no bursts, no quiet periods. every hourly tick: render if the pool is low, roll dice to maybe upload 1-2 videos as public. 6/day at random times within a configurable window. the organic feel comes from per-tick probability math (remaining uploads / hours left, ±30% jitter). rhythm.json is now just window_hours, uploads_per_day, render config, and delete_after_upload
 - rewrote autopilot.py to upload directly as public — killed the scheduling phase entirely. no more private+publishAt dance. three phases now (quiet/rendering/uploading) instead of four. organic timing comes from per-tick probability: each hourly cron tick rolls dice based on remaining daily quota vs hours left in the window. early ticks are unlikely to fire, late ones feel the pressure. the audience sees someone posting when they feel like it
 - added --public and --file flags to youtube-upload.py — --public uploads as public immediately (no publishAt), --file uploads a single MP4 directly without needing a schedule.json. the autopilot uses both for direct organic uploads
