@@ -5,5 +5,6 @@
   "num_videos": 3,
   "similarity": [0.25, 0.35],
   "blend": [0.0, 0.05],
-  "fps": 30
+  "fps": 30,
+  "output_size": [1280, 720]
 }
