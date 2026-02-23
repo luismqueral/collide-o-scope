@@ -42,6 +42,7 @@ token.json
 projects/*/autopilot-state.json
 projects/*/upload-manifest.json
 projects/*/polls-state.json
+projects/*/.autopilot.lock
 
 # temp files from processing
 /tmp/

@@ -116,6 +116,25 @@ def log(msg):
     print(f"[{ts}] {msg}")
 
 
+def acquire_lock(project_dir):
+    """prevent multiple autopilot instances from running at once.
+
+    without this, hourly cron stacks up processes when a render batch
+    takes longer than an hour — which it always does on a small VPS.
+    returns the lock file handle (keep it open) or None if locked.
+    """
+    lock_path = os.path.join(project_dir, '.autopilot.lock')
+    import fcntl
+    try:
+        lock_file = open(lock_path, 'w')
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+        return lock_file
+    except (IOError, OSError):
+        return None
+
+
 def load_rhythm(project_dir):
     """
     load the rhythm config for a project.
@@ -499,7 +518,7 @@ def maybe_render(rhythm, rng, output_dir, manifest_path, project_name, dry_run=F
         return False
 
     batch_size = pick_from_range(rng, rhythm['render_batch_size'])
-    need = batch_size - ready_count
+    need = min(batch_size - ready_count, 6)
     log(f"pool is low ({ready_count} ready, threshold {threshold}) — rendering {need} videos")
 
     # fetch comment context for seeded renders
@@ -891,6 +910,13 @@ cron (every hour):
     # status mode
     if args.status:
         print_status(rhythm, output_dir, manifest_path)
+        return
+
+    # only one autopilot at a time — if a previous tick is still rendering,
+    # this tick bows out instead of piling on
+    lock = acquire_lock(project_dir)
+    if lock is None:
+        log("another autopilot instance is already running — skipping this tick")
         return
 
     # seeded RNG — different roll each hourly tick
