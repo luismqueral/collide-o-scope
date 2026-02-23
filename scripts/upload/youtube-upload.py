@@ -85,8 +85,11 @@ def get_authenticated_service(client_secret_path, token_path):
     # refresh or get new credentials
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except Exception:
+                creds = None
+        if not creds or not creds.valid:
             if not os.path.exists(client_secret_path):
                 print(f"error: {client_secret_path} not found")
                 print("download OAuth credentials from Google Cloud Console")
