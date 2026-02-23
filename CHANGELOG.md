@@ -1,6 +1,8 @@
 # changelog
 
 2026-02-18
+- fixed autopilot stacking on the server — hourly cron was spawning new autopilot/ffmpeg processes before the previous tick finished, eventually drowning the VPS in stuck renders. added a file lock so only one autopilot instance runs at a time, and capped the per-tick render count at 6 (was 20-40) so renders can actually finish and reach the upload step within the hour
+- killed 4 stuck ffmpeg processes and 5 orphaned python processes on the server, truncated the 271MB log, deleted 309 corrupt 96kHz videos from `first-blend-test/output/`, and pulled all fixes. 57 videos had been uploaded successfully before things jammed (last upload feb 21)
 - added `dominant` color mode to `scripts/blend/multi-layer.py` — keys out the most frequent color in each video per-layer, no external deps. uses ffmpeg to sample frames at low res, quantizes pixels, and counts. each layer gets its own key color based on what's actually in the footage (greens from foliage, near-black from shadows, grays from sky, etc). added `dominant-auto` preset in `presets/blend/` and rendered test videos in alt-blend-test
 - fixed corrupt output audio — mixed sample rates (44.1kHz aac + 48kHz opus) were producing 96kHz output that most players and youtube can't handle. added `aresample=48000` to the audio chain in `scripts/blend/multi-layer.py` so everything lands at a standard rate
 - rendered 3 more 15-second test videos in alt-blend-test with the audio fix, all confirmed 48kHz

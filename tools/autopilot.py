@@ -517,9 +517,8 @@ def maybe_render(rhythm, rng, output_dir, manifest_path, project_name, dry_run=F
         log(f"{ready_count} videos ready (threshold: {threshold}) — no render needed")
         return False
 
-    batch_size = pick_from_range(rng, rhythm['render_batch_size'])
-    need = min(batch_size - ready_count, 6)
-    log(f"pool is low ({ready_count} ready, threshold {threshold}) — rendering {need} videos")
+    need = 1
+    log(f"pool is low ({ready_count} ready, threshold {threshold}) — rendering 1 video")
 
     # fetch comment context for seeded renders
     comment_ctx = _fetch_comment_context(manifest_path, rhythm, dry_run=dry_run)
