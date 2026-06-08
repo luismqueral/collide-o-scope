@@ -90,6 +90,7 @@ impl NtscState {
     }
 
     /// Apply VHS effects to an RGBA buffer in-place.
+    /// Processes at half resolution for performance, then upscales back.
     /// Returns true if effects were applied, false if disabled/skipped.
     pub fn apply(&mut self, pixels: &mut [u8], width: u32, height: u32) -> bool {
         if !self.params.enabled {
@@ -100,14 +101,46 @@ impl NtscState {
 
         let w = width as usize;
         let h = height as usize;
+        let half_w = w / 2;
+        let half_h = h / 2;
 
+        // Downscale 2x with box filter (average 2x2 blocks)
+        let mut small = vec![0u8; half_w * half_h * 4];
+        for sy in 0..half_h {
+            for sx in 0..half_w {
+                let dst = (sy * half_w + sx) * 4;
+                let s00 = ((sy * 2) * w + sx * 2) * 4;
+                let s10 = ((sy * 2) * w + sx * 2 + 1) * 4;
+                let s01 = ((sy * 2 + 1) * w + sx * 2) * 4;
+                let s11 = ((sy * 2 + 1) * w + sx * 2 + 1) * 4;
+                for c in 0..4 {
+                    small[dst + c] = ((pixels[s00 + c] as u16
+                        + pixels[s10 + c] as u16
+                        + pixels[s01 + c] as u16
+                        + pixels[s11 + c] as u16) / 4) as u8;
+                }
+            }
+        }
+
+        // Apply ntsc-rs at half resolution
         self.effect.apply_effect_to_buffer::<Rgbx, u8>(
             &self.ctx,
-            (w, h),
-            pixels,
+            (half_w, half_h),
+            &mut small,
             self.frame_num,
             [1.0, 1.0],
         );
+
+        // Upscale back with nearest-neighbor (VHS doesn't need bilinear)
+        for y in 0..h {
+            for x in 0..w {
+                let sx = x / 2;
+                let sy = y / 2;
+                let src = (sy * half_w + sx) * 4;
+                let dst = (y * w + x) * 4;
+                pixels[dst..dst + 4].copy_from_slice(&small[src..src + 4]);
+            }
+        }
 
         self.frame_num = self.frame_num.wrapping_add(1);
         true
