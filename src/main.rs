@@ -3,6 +3,7 @@
 mod effects;
 mod input;
 mod layers;
+mod patch;
 mod renderer;
 mod video;
 
@@ -38,6 +39,8 @@ struct App {
     // Library
     library_folder: Option<PathBuf>,
     library_files: Vec<PathBuf>,
+    // YAML editor
+    yaml_editor: patch::editor::EditorState,
     // egui state
     egui_ctx: egui::Context,
     egui_winit: Option<egui_winit::State>,
@@ -65,6 +68,7 @@ impl App {
             modifiers: ModifiersState::empty(),
             library_folder,
             library_files,
+            yaml_editor: patch::editor::EditorState::default(),
             egui_ctx: egui::Context::default(),
             egui_winit: None,
             egui_renderer: None,
@@ -123,7 +127,7 @@ impl ApplicationHandler for App {
 
         log::info!("Output: {}x{}", output_width, output_height);
 
-        let window_w = output_width + 460;
+        let window_w = output_width + 560;
         let window_h = output_height;
 
         let window_attrs = WindowAttributes::default()
@@ -224,6 +228,35 @@ impl ApplicationHandler for App {
                     },
                 ..
             } => {
+                use winit::keyboard::{KeyCode, PhysicalKey};
+
+                // Ctrl+key shortcuts (editor toggle, save, load)
+                if state == winit::event::ElementState::Pressed
+                    && self.modifiers.control_key()
+                {
+                    match physical_key {
+                        PhysicalKey::Code(KeyCode::KeyE) => {
+                            self.yaml_editor.active = !self.yaml_editor.active;
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::KeyS) => {
+                            patch::editor::save_patch(
+                                &self.master_effects,
+                                &self.layers,
+                            );
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::KeyO) => {
+                            patch::editor::load_patch(
+                                &mut self.master_effects,
+                                &mut self.layers,
+                            );
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+
                 let shift = self.modifiers.shift_key();
                 let action = map_key(physical_key, state, shift);
 
@@ -301,6 +334,7 @@ impl ApplicationHandler for App {
                     let master_paused = &mut self.master_paused;
                     let library_folder = &mut self.library_folder;
                     let library_files = &mut self.library_files;
+                    let yaml_editor = &mut self.yaml_editor;
                     let video_egui_texture_id = self.video_egui_texture_id;
                     let output_width = self.renderer.as_ref().unwrap().output_width;
                     let output_height = self.renderer.as_ref().unwrap().output_height;
@@ -313,6 +347,7 @@ impl ApplicationHandler for App {
                             selected_layer,
                             master_effects,
                             master_paused,
+                            yaml_editor,
                             library_folder,
                             library_files,
                             video_egui_texture_id,
@@ -454,6 +489,7 @@ fn build_ui(
     selected_layer: &mut Option<usize>,
     master_effects: &mut effects::EffectUniforms,
     master_paused: &mut bool,
+    yaml_editor: &mut patch::editor::EditorState,
     library_folder: &mut Option<PathBuf>,
     library_files: &mut Vec<PathBuf>,
     video_egui_texture_id: Option<egui::TextureId>,
@@ -465,78 +501,142 @@ fn build_ui(
     let mut move_layer: Option<(usize, usize)> = None;
     let mut change_folder = false;
 
-    // LEFT panel: Layers + Master + Selected Layer controls
+    // LEFT panel: Layers with collapsible per-layer controls
     egui::Panel::left("left_panel")
+        .min_size(240.0)
+        .default_size(280.0)
+        .show(ctx, |ui| {
+            // View switcher tabs
+            ui.horizontal(|ui| {
+                if ui.selectable_label(!yaml_editor.active, "UI").clicked() {
+                    yaml_editor.active = false;
+                }
+                if ui.selectable_label(yaml_editor.active, "Code").clicked() {
+                    yaml_editor.active = true;
+                }
+            });
+            ui.separator();
+
+            if yaml_editor.active {
+                // Code view
+                patch::editor::build_yaml_editor_content(
+                    ui,
+                    layers,
+                    master_effects,
+                    yaml_editor,
+                );
+            } else {
+                // UI view: collapsible layers
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let layer_count = layers.len();
+
+                        for i in 0..layer_count {
+                            let is_selected = *selected_layer == Some(i);
+
+                            // Layer header row with controls
+                            ui.horizontal(|ui| {
+                                // Grip handle for reorder
+                                let grip = ui.label(egui::RichText::new("⠿").weak());
+                                if grip.dragged() {
+                                    let delta = grip.drag_delta().y;
+                                    if delta < -16.0 && i > 0 {
+                                        move_layer = Some((i, i - 1));
+                                    } else if delta > 16.0 && i < layer_count - 1 {
+                                        move_layer = Some((i, i + 1));
+                                    }
+                                }
+
+                                // Visibility toggle
+                                let eye = if layers[i].visible { "👁" } else { "ꞏ" };
+                                if ui.small_button(eye).clicked() {
+                                    layers[i].visible = !layers[i].visible;
+                                }
+
+                                // Remove button
+                                if ui.small_button("×").clicked() {
+                                    remove_layer = Some(i);
+                                }
+                            });
+
+                            // Collapsible header with layer name
+                            let header_id = ui.make_persistent_id(format!("layer_col_{i}"));
+                            let header = egui::CollapsingHeader::new(
+                                egui::RichText::new(&layers[i].filename)
+                                    .strong(),
+                            )
+                            .id_salt(header_id)
+                            .default_open(is_selected);
+
+                            header.show(ui, |ui| {
+                                let layer = &mut layers[i];
+
+                                // Transport
+                                ui.horizontal(|ui| {
+                                    if ui.button(if layer.paused { "▶" } else { "⏸" }).clicked() {
+                                        layer.paused = !layer.paused;
+                                    }
+                                    if ui.button("Reset FX").clicked() {
+                                        layer.effects.reset();
+                                    }
+                                });
+
+                                labeled_slider(ui, "Speed",
+                                    egui::Slider::new(&mut layer.speed, 0.25..=4.0)
+                                        .logarithmic(true)
+                                        .custom_formatter(|v, _| format!("{:.2}×", v)),
+                                );
+                                labeled_slider(ui, "FPS",
+                                    egui::Slider::new(&mut layer.fps, 1.0..=60.0)
+                                        .step_by(1.0)
+                                        .custom_formatter(|v, _| format!("{:.0}", v)),
+                                );
+                                labeled_slider(ui, "Opacity",
+                                    egui::Slider::new(&mut layer.opacity, 0.0..=1.0),
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(78.0, ui.spacing().interact_size.y),
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| { ui.label("Blend"); },
+                                    );
+                                    egui::ComboBox::from_id_salt(format!("blend_mode_{i}"))
+                                        .selected_text(layer.blend_mode.label())
+                                        .show_ui(ui, |ui| {
+                                            for mode in BlendMode::ALL {
+                                                ui.selectable_value(
+                                                    &mut layer.blend_mode,
+                                                    *mode,
+                                                    mode.label(),
+                                                );
+                                            }
+                                        });
+                                });
+
+                                ui.add_space(4.0);
+                                effects_sliders(ui, &mut layer.effects, &format!("layer_{i}"));
+                            });
+
+                            ui.separator();
+                        }
+
+                        if layers.is_empty() {
+                            ui.weak("No active layers");
+                            ui.weak("Drop files or add from library →");
+                        }
+                    });
+            }
+        });
+
+    // RIGHT panel: Master controls + Library
+    egui::Panel::right("right_panel")
         .min_size(260.0)
         .default_size(300.0)
         .show(ctx, |ui| {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    // === LAYERS ===
-                    ui.heading("Layers");
-                    ui.separator();
-
-                    let layer_count = layers.len();
-                    for i in 0..layer_count {
-                        let is_selected = *selected_layer == Some(i);
-                        let row_response = ui.horizontal(|ui| {
-                            // Grip handle for reorder
-                            let grip = ui.label(
-                                egui::RichText::new("⠿").weak(),
-                            );
-                            // Drag up/down via grip
-                            if grip.dragged() {
-                                let delta = grip.drag_delta().y;
-                                if delta < -16.0 && i > 0 {
-                                    move_layer = Some((i, i - 1));
-                                } else if delta > 16.0 && i < layer_count - 1 {
-                                    move_layer = Some((i, i + 1));
-                                }
-                            }
-
-                            // Visibility toggle (eye icon)
-                            let eye = if layers[i].visible { "👁" } else { "ꞏ" };
-                            if ui.small_button(eye).clicked() {
-                                layers[i].visible = !layers[i].visible;
-                            }
-
-                            // Layer number + pause indicator
-                            let prefix = format!(
-                                "{}{}.",
-                                if layers[i].paused { "⏸" } else { "" },
-                                i + 1
-                            );
-                            ui.label(egui::RichText::new(prefix).weak());
-
-                            // Filename (selectable)
-                            let response = ui.selectable_label(
-                                is_selected,
-                                &layers[i].filename,
-                            );
-                            if response.clicked() {
-                                *selected_layer = Some(i);
-                            }
-
-                            // Remove button
-                            if ui.small_button("×").clicked() {
-                                remove_layer = Some(i);
-                            }
-                        });
-                        // Clicking anywhere on the row also selects
-                        if row_response.response.clicked() {
-                            *selected_layer = Some(i);
-                        }
-                    }
-
-                    if layers.is_empty() {
-                        ui.weak("No active layers");
-                        ui.weak("Drop files or add from library →");
-                    }
-
-                    ui.add_space(12.0);
-                    ui.separator();
-
                     // === MASTER ===
                     ui.heading("Master");
                     ui.separator();
@@ -544,11 +644,7 @@ fn build_ui(
                     // Transport
                     ui.horizontal(|ui| {
                         if ui
-                            .button(if *master_paused {
-                                "▶ Play All"
-                            } else {
-                                "⏸ Pause All"
-                            })
+                            .button(if *master_paused { "▶ Play All" } else { "⏸ Pause All" })
                             .clicked()
                         {
                             *master_paused = !*master_paused;
@@ -559,118 +655,32 @@ fn build_ui(
                     });
 
                     ui.add_space(4.0);
-
-                    // Master effects
                     effects_sliders(ui, master_effects, "master");
 
                     ui.add_space(12.0);
                     ui.separator();
 
-                    // === SELECTED LAYER ===
-                    ui.heading("Layer");
+                    // === LIBRARY ===
+                    ui.heading("Library");
                     ui.separator();
 
-                    if let Some(idx) = *selected_layer {
-                        if let Some(layer) = layers.get_mut(idx) {
-                            ui.label(
-                                egui::RichText::new(&layer.filename).strong(),
-                            );
-                            ui.add_space(4.0);
-
-                            // Transport
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .button(if layer.paused {
-                                        "▶ Play"
-                                    } else {
-                                        "⏸ Pause"
-                                    })
-                                    .clicked()
-                                {
-                                    layer.paused = !layer.paused;
-                                }
-                                if ui.button("Reset FX").clicked() {
-                                    layer.effects.reset();
-                                }
-                            });
-
-                            ui.label("Speed");
-                            ui.add(
-                                egui::Slider::new(&mut layer.speed, 0.25..=4.0)
-                                    .logarithmic(true)
-                                    .custom_formatter(|v, _| format!("{:.2}×", v)),
-                            );
-
-                            ui.label("FPS");
-                            ui.add(
-                                egui::Slider::new(&mut layer.fps, 1.0..=60.0)
-                                    .step_by(1.0)
-                                    .custom_formatter(|v, _| format!("{:.0}", v)),
-                            );
-
-                            ui.add_space(4.0);
-
-                            // Blend
-                            ui.label("Opacity");
-                            ui.add(
-                                egui::Slider::new(&mut layer.opacity, 0.0..=1.0),
-                            );
-
-                            ui.label("Blend Mode");
-                            egui::ComboBox::from_id_salt("blend_mode")
-                                .selected_text(layer.blend_mode.label())
-                                .show_ui(ui, |ui| {
-                                    for mode in BlendMode::ALL {
-                                        ui.selectable_value(
-                                            &mut layer.blend_mode,
-                                            *mode,
-                                            mode.label(),
-                                        );
-                                    }
-                                });
-
-                            ui.add_space(4.0);
-                            ui.separator();
-
-                            // Per-layer effects
-                            effects_sliders(ui, &mut layer.effects, "layer");
-                        } else {
-                            ui.weak("Invalid selection");
+                    // Folder path + change button
+                    ui.horizontal(|ui| {
+                        let folder_label = library_folder
+                            .as_ref()
+                            .and_then(|f| f.file_name())
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "No folder".into());
+                        ui.label(folder_label);
+                        if ui.small_button("…").clicked() {
+                            change_folder = true;
                         }
-                    } else {
-                        ui.weak("Select a layer to edit");
-                    }
-                });
-        });
+                    });
 
-    // RIGHT panel: Library
-    egui::Panel::right("right_panel")
-        .min_size(160.0)
-        .default_size(180.0)
-        .show(ctx, |ui| {
-            ui.heading("Library");
-            ui.separator();
+                    ui.add_space(4.0);
+                    ui.separator();
 
-            // Folder path + change button
-            ui.horizontal(|ui| {
-                let folder_label = library_folder
-                    .as_ref()
-                    .and_then(|f| f.file_name())
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "No folder".into());
-                ui.label(folder_label);
-                if ui.small_button("…").clicked() {
-                    change_folder = true;
-                }
-            });
-
-            ui.add_space(4.0);
-            ui.separator();
-
-            // File list
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
+                    // File list
                     for file in library_files.iter() {
                         let name = file
                             .file_name()
@@ -740,80 +750,96 @@ fn build_ui(
     add_layer_path
 }
 
+/// Inline labeled slider: label on left (fixed width), slider fills remaining space.
+fn labeled_slider(ui: &mut egui::Ui, label: &str, slider: egui::Slider<'_>) {
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(78.0, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| { ui.label(label); },
+        );
+        ui.add(slider);
+    });
+}
+
+/// Inline labeled checkbox.
+fn labeled_checkbox(ui: &mut egui::Ui, label: &str, value: &mut bool) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(78.0, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| { ui.label(label); },
+        );
+        changed = ui.checkbox(value, "").changed();
+    });
+    changed
+}
+
 /// Shared effects slider UI — used for both master and per-layer effects.
 fn effects_sliders(ui: &mut egui::Ui, effects: &mut effects::EffectUniforms, id_prefix: &str) {
     // --- Digital effects ---
-    ui.label("Pixelate");
-    ui.add(
+    ui.label(egui::RichText::new("Digital").weak().size(11.0));
+
+    labeled_slider(ui, "Pixelate",
         egui::Slider::new(&mut effects.pixelate_size, 1.0..=32.0)
             .step_by(1.0)
             .custom_formatter(|v, _| format!("{:.0}", v)),
     );
-
-    ui.label("RGB Split");
-    ui.add(
+    labeled_slider(ui, "RGB Split",
         egui::Slider::new(&mut effects.rgb_split, 0.0..=30.0)
             .step_by(1.0)
             .custom_formatter(|v, _| format!("{:.0}", v)),
     );
-
-    ui.label("Hue");
-    ui.add(
+    labeled_slider(ui, "Hue",
         egui::Slider::new(&mut effects.hue_shift, -180.0..=180.0)
             .step_by(1.0)
             .suffix("°"),
     );
-
-    ui.label("Saturation");
-    ui.add(egui::Slider::new(&mut effects.saturation, -1.0..=1.0));
-
-    ui.label("Brightness");
-    ui.add(egui::Slider::new(&mut effects.brightness, -1.0..=1.0));
-
-    ui.label("Contrast");
-    ui.add(egui::Slider::new(&mut effects.contrast, -1.0..=1.0));
-
-    ui.label("Posterize");
-    ui.add(
+    labeled_slider(ui, "Saturation",
+        egui::Slider::new(&mut effects.saturation, -1.0..=1.0),
+    );
+    labeled_slider(ui, "Brightness",
+        egui::Slider::new(&mut effects.brightness, -1.0..=1.0),
+    );
+    labeled_slider(ui, "Contrast",
+        egui::Slider::new(&mut effects.contrast, -1.0..=1.0),
+    );
+    labeled_slider(ui, "Posterize",
         egui::Slider::new(&mut effects.posterize, 0.0..=16.0)
             .step_by(1.0)
             .custom_formatter(|v, _| {
-                if v < 2.0 {
-                    "Off".to_string()
-                } else {
-                    format!("{:.0}", v)
-                }
+                if v < 2.0 { "Off".to_string() } else { format!("{:.0}", v) }
             }),
     );
 
     let mut invert_on = effects.invert > 0.5;
-    if ui
-        .checkbox(&mut invert_on, format!("Invert##{id_prefix}"))
-        .changed()
-    {
+    if labeled_checkbox(ui, "Invert", &mut invert_on) {
         effects.invert = if invert_on { 1.0 } else { 0.0 };
     }
 
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     ui.separator();
 
     // --- Analog effects ---
-    ui.label(egui::RichText::new("Analog").strong());
+    ui.label(egui::RichText::new("Analog").weak().size(11.0));
 
-    ui.label("Grain");
-    ui.add(egui::Slider::new(&mut effects.grain_intensity, 0.0..=0.3));
+    labeled_slider(ui, "Grain",
+        egui::Slider::new(&mut effects.grain_intensity, 0.0..=0.3),
+    );
 
     if effects.grain_intensity > 0.0 {
+        labeled_slider(ui, "  Size",
+            egui::Slider::new(&mut effects.grain_size, 1.0..=4.0)
+                .step_by(1.0)
+                .custom_formatter(|v, _| format!("{:.0}", v)),
+        );
         ui.horizontal(|ui| {
-            ui.label("Size");
-            ui.add(
-                egui::Slider::new(&mut effects.grain_size, 1.0..=4.0)
-                    .step_by(1.0)
-                    .custom_formatter(|v, _| format!("{:.0}", v)),
+            ui.allocate_ui_with_layout(
+                egui::vec2(78.0, ui.spacing().interact_size.y),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| { ui.label("  Algo"); },
             );
-        });
-        ui.horizontal(|ui| {
-            ui.label("Algo");
             egui::ComboBox::from_id_salt(format!("grain_algo_{id_prefix}"))
                 .width(90.0)
                 .selected_text(match effects.grain_algo as i32 {
@@ -830,28 +856,34 @@ fn effects_sliders(ui: &mut egui::Ui, effects: &mut effects::EffectUniforms, id_
                 });
         });
         let mut color = effects.color_grain > 0.5;
-        if ui.checkbox(&mut color, format!("Color grain##{id_prefix}")).changed() {
+        if labeled_checkbox(ui, "  Color", &mut color) {
             effects.color_grain = if color { 1.0 } else { 0.0 };
         }
     }
 
-    ui.label("Vignette");
-    ui.add(egui::Slider::new(&mut effects.vignette, 0.0..=1.5));
+    labeled_slider(ui, "Vignette",
+        egui::Slider::new(&mut effects.vignette, 0.0..=1.5),
+    );
+    labeled_slider(ui, "Drift",
+        egui::Slider::new(&mut effects.color_drift, 0.0..=0.02),
+    );
 
-    ui.label("Color Drift");
-    ui.add(egui::Slider::new(&mut effects.color_drift, 0.0..=0.02));
+    ui.add_space(4.0);
+    ui.separator();
 
-    ui.label("Breathe Scale");
-    ui.add(egui::Slider::new(&mut effects.breathe_scale, 0.0..=0.05));
+    // --- Motion effects ---
+    ui.label(egui::RichText::new("Motion").weak().size(11.0));
 
-    ui.label("Breathe Rotate");
-    ui.add(
+    labeled_slider(ui, "Bth Scale",
+        egui::Slider::new(&mut effects.breathe_scale, 0.0..=0.05),
+    );
+    labeled_slider(ui, "Bth Rotate",
         egui::Slider::new(&mut effects.breathe_rotation, 0.0..=2.0)
             .suffix("°"),
     );
-
-    ui.label("Breathe Drift");
-    ui.add(egui::Slider::new(&mut effects.breathe_position, 0.0..=0.02));
+    labeled_slider(ui, "Bth Drift",
+        egui::Slider::new(&mut effects.breathe_position, 0.0..=0.02),
+    );
 }
 
 /// Fit a rectangle with given aspect ratio into available width/height.

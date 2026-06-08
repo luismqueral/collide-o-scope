@@ -15,3 +15,5 @@ egui = "0.34"
 egui-wgpu = "0.34"
 egui-winit = "0.34"
 rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"

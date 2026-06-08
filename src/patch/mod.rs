@@ -1,0 +1,327 @@
+pub mod editor;
+
+use serde::{Deserialize, Serialize};
+
+use crate::effects::EffectUniforms;
+use crate::layers::{BlendMode, Layer};
+
+// --- Helpers for serde defaults ---
+
+fn one() -> f32 {
+    1.0
+}
+fn default_fps() -> f32 {
+    30.0
+}
+
+// --- Parameter metadata for stepping & comments ---
+
+pub struct ParamMeta {
+    pub step: f32,
+    pub min: f32,
+    pub max: f32,
+    pub desc: &'static str,
+}
+
+pub fn param_meta(name: &str) -> Option<ParamMeta> {
+    match name {
+        "pixelate" => Some(ParamMeta { step: 1.0, min: 1.0, max: 32.0, desc: "pixel block size" }),
+        "rgb_split" => Some(ParamMeta { step: 0.5, min: 0.0, max: 30.0, desc: "chromatic split px" }),
+        "hue_shift" => Some(ParamMeta { step: 5.0, min: -180.0, max: 180.0, desc: "degrees" }),
+        "saturation" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "color intensity" }),
+        "brightness" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "exposure" }),
+        "contrast" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "dynamic range" }),
+        "posterize" => Some(ParamMeta { step: 1.0, min: 0.0, max: 16.0, desc: "color levels (0=off)" }),
+        "grain_intensity" => Some(ParamMeta { step: 0.01, min: 0.0, max: 0.3, desc: "film grain amount" }),
+        "grain_size" => Some(ParamMeta { step: 0.25, min: 1.0, max: 4.0, desc: "grain particle scale" }),
+        "grain_algo" => Some(ParamMeta { step: 1.0, min: 0.0, max: 3.0, desc: "0=value 1=perlin 2=gaussian 3=salt&pepper" }),
+        "breathe_scale" => Some(ParamMeta { step: 0.005, min: 0.0, max: 0.05, desc: "zoom oscillation" }),
+        "breathe_rotation" => Some(ParamMeta { step: 0.1, min: 0.0, max: 2.0, desc: "rotation oscillation deg" }),
+        "breathe_position" => Some(ParamMeta { step: 0.002, min: 0.0, max: 0.02, desc: "position drift" }),
+        "vignette" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.5, desc: "edge darkening" }),
+        "color_drift" => Some(ParamMeta { step: 0.002, min: 0.0, max: 0.02, desc: "chromatic aberration" }),
+        "opacity" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "layer transparency" }),
+        "speed" => Some(ParamMeta { step: 0.25, min: 0.25, max: 4.0, desc: "playback multiplier" }),
+        "fps" => Some(ParamMeta { step: 1.0, min: 1.0, max: 60.0, desc: "decode frame rate" }),
+        _ => None,
+    }
+}
+
+
+// --- Serializable patch state ---
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PatchState {
+    pub master: EffectsConfig,
+    pub layers: Vec<LayerConfig>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LayerConfig {
+    pub filename: String,
+    #[serde(default = "one")]
+    pub opacity: f32,
+    #[serde(default = "default_blend")]
+    pub blend_mode: String,
+    #[serde(default = "one")]
+    pub speed: f32,
+    #[serde(default = "default_fps")]
+    pub fps: f32,
+    #[serde(default)]
+    pub paused: bool,
+    #[serde(default = "default_true")]
+    pub visible: bool,
+    #[serde(default)]
+    pub effects: EffectsConfig,
+}
+
+fn default_blend() -> String {
+    "normal".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EffectsConfig {
+    #[serde(default = "one")]
+    pub pixelate: f32,
+    #[serde(default)]
+    pub rgb_split: f32,
+    #[serde(default)]
+    pub hue_shift: f32,
+    #[serde(default)]
+    pub saturation: f32,
+    #[serde(default)]
+    pub brightness: f32,
+    #[serde(default)]
+    pub contrast: f32,
+    #[serde(default)]
+    pub posterize: f32,
+    #[serde(default)]
+    pub invert: bool,
+    #[serde(default)]
+    pub grain_intensity: f32,
+    #[serde(default = "one")]
+    pub grain_size: f32,
+    #[serde(default)]
+    pub grain_algo: u32,
+    #[serde(default)]
+    pub color_grain: bool,
+    #[serde(default)]
+    pub breathe_scale: f32,
+    #[serde(default)]
+    pub breathe_rotation: f32,
+    #[serde(default)]
+    pub breathe_position: f32,
+    #[serde(default)]
+    pub vignette: f32,
+    #[serde(default)]
+    pub color_drift: f32,
+}
+
+impl Default for EffectsConfig {
+    fn default() -> Self {
+        Self {
+            pixelate: 1.0,
+            rgb_split: 0.0,
+            hue_shift: 0.0,
+            saturation: 0.0,
+            brightness: 0.0,
+            contrast: 0.0,
+            posterize: 0.0,
+            invert: false,
+            grain_intensity: 0.0,
+            grain_size: 1.0,
+            grain_algo: 0,
+            color_grain: false,
+            breathe_scale: 0.0,
+            breathe_rotation: 0.0,
+            breathe_position: 0.0,
+            vignette: 0.0,
+            color_drift: 0.0,
+        }
+    }
+}
+
+// --- Conversion: EffectUniforms <-> EffectsConfig ---
+
+impl EffectsConfig {
+    pub fn from_uniforms(u: &EffectUniforms) -> Self {
+        Self {
+            pixelate: u.pixelate_size,
+            rgb_split: u.rgb_split,
+            hue_shift: u.hue_shift,
+            saturation: u.saturation,
+            brightness: u.brightness,
+            contrast: u.contrast,
+            posterize: u.posterize,
+            invert: u.invert > 0.5,
+            grain_intensity: u.grain_intensity,
+            grain_size: u.grain_size,
+            grain_algo: u.grain_algo as u32,
+            color_grain: u.color_grain > 0.5,
+            breathe_scale: u.breathe_scale,
+            breathe_rotation: u.breathe_rotation,
+            breathe_position: u.breathe_position,
+            vignette: u.vignette,
+            color_drift: u.color_drift,
+        }
+    }
+
+    pub fn apply_to_uniforms(&self, u: &mut EffectUniforms) {
+        u.pixelate_size = self.pixelate.clamp(1.0, 32.0);
+        u.rgb_split = self.rgb_split.clamp(0.0, 30.0);
+        u.hue_shift = self.hue_shift.clamp(-180.0, 180.0);
+        u.saturation = self.saturation.clamp(-1.0, 1.0);
+        u.brightness = self.brightness.clamp(-1.0, 1.0);
+        u.contrast = self.contrast.clamp(-1.0, 1.0);
+        u.posterize = self.posterize.clamp(0.0, 16.0);
+        u.invert = if self.invert { 1.0 } else { 0.0 };
+        u.grain_intensity = self.grain_intensity.clamp(0.0, 0.3);
+        u.grain_size = self.grain_size.clamp(1.0, 4.0);
+        u.grain_algo = (self.grain_algo.min(3)) as f32;
+        u.color_grain = if self.color_grain { 1.0 } else { 0.0 };
+        u.breathe_scale = self.breathe_scale.clamp(0.0, 0.05);
+        u.breathe_rotation = self.breathe_rotation.clamp(0.0, 2.0);
+        u.breathe_position = self.breathe_position.clamp(0.0, 0.02);
+        u.vignette = self.vignette.clamp(0.0, 1.5);
+        u.color_drift = self.color_drift.clamp(0.0, 0.02);
+    }
+
+    /// Get fields organized into groups for display.
+    pub fn grouped_fields(&self) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
+        vec![
+            ("digital", vec![
+                ("pixelate", format!("{:.1}", self.pixelate)),
+                ("rgb_split", format!("{:.1}", self.rgb_split)),
+                ("hue_shift", format!("{:.1}", self.hue_shift)),
+                ("saturation", format!("{:.2}", self.saturation)),
+                ("brightness", format!("{:.2}", self.brightness)),
+                ("contrast", format!("{:.2}", self.contrast)),
+                ("posterize", format!("{:.1}", self.posterize)),
+                ("invert", format!("{}", self.invert)),
+            ]),
+            ("analog", vec![
+                ("grain_intensity", format!("{:.2}", self.grain_intensity)),
+                ("grain_size", format!("{:.2}", self.grain_size)),
+                ("grain_algo", format!("{}", self.grain_algo)),
+                ("color_grain", format!("{}", self.color_grain)),
+                ("vignette", format!("{:.2}", self.vignette)),
+                ("color_drift", format!("{:.3}", self.color_drift)),
+            ]),
+            ("motion", vec![
+                ("breathe_scale", format!("{:.3}", self.breathe_scale)),
+                ("breathe_rotation", format!("{:.2}", self.breathe_rotation)),
+                ("breathe_position", format!("{:.3}", self.breathe_position)),
+            ]),
+        ]
+    }
+
+    /// Set a single field by key name. Returns true if the key was recognized.
+    pub fn set_field(&mut self, key: &str, value: &str) -> bool {
+        match key {
+            "pixelate" => { if let Ok(v) = value.parse() { self.pixelate = v; return true; } }
+            "rgb_split" => { if let Ok(v) = value.parse() { self.rgb_split = v; return true; } }
+            "hue_shift" => { if let Ok(v) = value.parse() { self.hue_shift = v; return true; } }
+            "saturation" => { if let Ok(v) = value.parse() { self.saturation = v; return true; } }
+            "brightness" => { if let Ok(v) = value.parse() { self.brightness = v; return true; } }
+            "contrast" => { if let Ok(v) = value.parse() { self.contrast = v; return true; } }
+            "posterize" => { if let Ok(v) = value.parse() { self.posterize = v; return true; } }
+            "invert" => { if let Ok(v) = value.parse() { self.invert = v; return true; } }
+            "grain_intensity" => { if let Ok(v) = value.parse() { self.grain_intensity = v; return true; } }
+            "grain_size" => { if let Ok(v) = value.parse() { self.grain_size = v; return true; } }
+            "grain_algo" => { if let Ok(v) = value.parse() { self.grain_algo = v; return true; } }
+            "color_grain" => { if let Ok(v) = value.parse() { self.color_grain = v; return true; } }
+            "breathe_scale" => { if let Ok(v) = value.parse() { self.breathe_scale = v; return true; } }
+            "breathe_rotation" => { if let Ok(v) = value.parse() { self.breathe_rotation = v; return true; } }
+            "breathe_position" => { if let Ok(v) = value.parse() { self.breathe_position = v; return true; } }
+            "vignette" => { if let Ok(v) = value.parse() { self.vignette = v; return true; } }
+            "color_drift" => { if let Ok(v) = value.parse() { self.color_drift = v; return true; } }
+            _ => {}
+        }
+        false
+    }
+}
+
+// --- Conversion: Layer <-> LayerConfig ---
+
+impl LayerConfig {
+    pub fn from_layer(layer: &Layer) -> Self {
+        Self {
+            filename: layer.filename.clone(),
+            opacity: layer.opacity,
+            blend_mode: match layer.blend_mode {
+                BlendMode::Normal => "normal",
+                BlendMode::Screen => "screen",
+                BlendMode::Multiply => "multiply",
+                BlendMode::Difference => "difference",
+            }
+            .to_string(),
+            speed: layer.speed,
+            fps: layer.fps,
+            paused: layer.paused,
+            visible: layer.visible,
+            effects: EffectsConfig::from_uniforms(&layer.effects),
+        }
+    }
+
+    pub fn apply_to_layer(&self, layer: &mut Layer) {
+        layer.opacity = self.opacity.clamp(0.0, 1.0);
+        layer.blend_mode = match self.blend_mode.as_str() {
+            "screen" => BlendMode::Screen,
+            "multiply" => BlendMode::Multiply,
+            "difference" => BlendMode::Difference,
+            _ => BlendMode::Normal,
+        };
+        layer.speed = self.speed.clamp(0.25, 4.0);
+        layer.fps = self.fps.clamp(1.0, 60.0);
+        layer.paused = self.paused;
+        layer.visible = self.visible;
+        self.effects.apply_to_uniforms(&mut layer.effects);
+    }
+
+    /// Get top-level layer fields as (key, value_string) pairs.
+    pub fn top_fields(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("filename", self.filename.clone()),
+            ("opacity", format!("{:.2}", self.opacity)),
+            ("blend_mode", self.blend_mode.clone()),
+            ("speed", format!("{:.2}", self.speed)),
+            ("fps", format!("{:.1}", self.fps)),
+            ("paused", format!("{}", self.paused)),
+            ("visible", format!("{}", self.visible)),
+        ]
+    }
+
+    /// Set a top-level field by key name. Returns true if recognized.
+    pub fn set_field(&mut self, key: &str, value: &str) -> bool {
+        match key {
+            "opacity" => { if let Ok(v) = value.parse() { self.opacity = v; return true; } }
+            "blend_mode" => { self.blend_mode = value.to_string(); return true; }
+            "speed" => { if let Ok(v) = value.parse() { self.speed = v; return true; } }
+            "fps" => { if let Ok(v) = value.parse() { self.fps = v; return true; } }
+            "paused" => { if let Ok(v) = value.parse() { self.paused = v; return true; } }
+            "visible" => { if let Ok(v) = value.parse() { self.visible = v; return true; } }
+            _ => {}
+        }
+        false
+    }
+}
+
+// --- Full patch snapshot ---
+
+impl PatchState {
+    pub fn capture(master: &EffectUniforms, layers: &[Layer]) -> Self {
+        Self {
+            master: EffectsConfig::from_uniforms(master),
+            layers: layers.iter().map(LayerConfig::from_layer).collect(),
+        }
+    }
+
+    pub fn apply(&self, master: &mut EffectUniforms, layers: &mut [Layer]) {
+        self.master.apply_to_uniforms(master);
+        for (config, layer) in self.layers.iter().zip(layers.iter_mut()) {
+            config.apply_to_layer(layer);
+        }
+    }
+}
