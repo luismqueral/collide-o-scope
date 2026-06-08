@@ -24,3 +24,11 @@ tower-http = { version = "0.5", features = ["fs"] }
 futures = "0.3"
 open = "5"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
+ntsc-rs = { git = "https://github.com/ntsc-rs/ntsc-rs", package = "ntsc-rs", features = ["rayon"] }
+
+# ntsc-rs is CPU-intensive; always optimize it even in debug builds
+[profile.dev.package.ntsc-rs]
+opt-level = 3
+
+[profile.dev.package.fearless_simd]
+opt-level = 3

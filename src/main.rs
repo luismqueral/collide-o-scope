@@ -4,6 +4,7 @@
 mod effects;
 mod input;
 mod layers;
+mod ntsc;
 mod patch;
 mod renderer;
 mod video;
@@ -49,6 +50,8 @@ struct App {
     egui_winit: Option<egui_winit::State>,
     egui_renderer: Option<egui_wgpu::Renderer>,
     video_egui_texture_id: Option<egui::TextureId>,
+    // NTSC/VHS effects
+    ntsc_state: ntsc::NtscState,
     // Web control panel
     web_state: Arc<WebState>,
 }
@@ -81,6 +84,7 @@ impl App {
             egui_winit: None,
             egui_renderer: None,
             video_egui_texture_id: None,
+            ntsc_state: ntsc::NtscState::new(),
             web_state,
         }
     }
@@ -177,6 +181,9 @@ impl App {
                         self.master_effects.breathe_rotation = defaults.breathe_rotation;
                         self.master_effects.breathe_position = defaults.breathe_position;
                     }
+                    "vhs" => {
+                        self.ntsc_state.params = ntsc::NtscParams::default();
+                    }
                     _ => {}
                 }
             }
@@ -208,16 +215,20 @@ impl App {
                     }
                 }
             }
+            WebAction::SetNtscParam { param, value } => {
+                self.ntsc_state.set_param(&param, &value);
+            }
         }
     }
 
     /// Push full app state to the web UI via broadcast.
     fn push_web_state(&self) {
-        use web::state::{AppSnapshot, EffectsSnapshot, LayerSnapshot};
+        use web::state::{AppSnapshot, EffectsSnapshot, LayerSnapshot, NtscSnapshot};
 
         let snapshot = AppSnapshot {
             msg_type: "state".to_string(),
             effects: EffectsSnapshot::from_uniforms(&self.master_effects),
+            ntsc: NtscSnapshot::from_params(&self.ntsc_state.params),
             layers: self.layers.iter().map(|l| LayerSnapshot {
                 filename: l.filename.clone(),
                 visible: l.visible,
@@ -667,7 +678,7 @@ impl ApplicationHandler for App {
                     }
                     self.master_effects.time = elapsed;
 
-                    let renderer = self.renderer.as_ref().unwrap();
+                    let renderer = self.renderer.as_mut().unwrap();
                     let mut encoder = renderer.device.create_command_encoder(
                         &wgpu::CommandEncoderDescriptor {
                             label: Some("Frame Encoder"),
@@ -675,6 +686,28 @@ impl ApplicationHandler for App {
                     );
                     renderer.render_layers(&mut encoder, &self.layers);
                     renderer.render_master_effects(&mut encoder, &self.master_effects);
+
+                    // NTSC/VHS post-process (CPU-based, requires GPU sync)
+                    if self.ntsc_state.params.enabled {
+                        // Submit current GPU work so composite_textures[0] is ready
+                        renderer.queue.submit(std::iter::once(encoder.finish()));
+
+                        // Read back, process, write back
+                        let mut pixels = renderer.readback_composite();
+                        self.ntsc_state.apply(
+                            &mut pixels,
+                            renderer.output_width,
+                            renderer.output_height,
+                        );
+                        renderer.write_composite(&pixels);
+
+                        // Create fresh encoder for the egui pass
+                        encoder = renderer.device.create_command_encoder(
+                            &wgpu::CommandEncoderDescriptor {
+                                label: Some("Post-NTSC Encoder"),
+                            },
+                        );
+                    }
 
                     let egui_renderer = self.egui_renderer.as_mut().unwrap();
                     for (id, image_delta) in &full_output.textures_delta.set {

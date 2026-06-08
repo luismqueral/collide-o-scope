@@ -31,6 +31,7 @@ function connect() {
       const msg = JSON.parse(e.data);
       if (msg.type === 'state') {
         syncEffects(msg.effects);
+        syncNtsc(msg.ntsc);
         syncLayers(msg.layers);
         syncLibrary(msg.library);
         syncTransport(msg.paused);
@@ -83,6 +84,45 @@ document.querySelectorAll('.param-row[data-param]').forEach((row) => {
   if (select) {
     select.addEventListener('change', () => {
       sendAction({ action: 'set_param', param, value: parseInt(select.value) });
+    });
+  }
+});
+
+// --- Initialize NTSC/VHS sliders ---
+
+document.querySelectorAll('.param-row[data-ntsc]').forEach((row) => {
+  const param = row.dataset.ntsc;
+  const min = parseFloat(row.dataset.min);
+  const max = parseFloat(row.dataset.max);
+  const step = parseFloat(row.dataset.step);
+
+  const slider = row.querySelector('input[type="range"]');
+  const valueEl = row.querySelector('.value');
+  const checkbox = row.querySelector('input[type="checkbox"]');
+  const select = row.querySelector('select');
+
+  if (slider) {
+    slider.min = min;
+    slider.max = max;
+    slider.step = step;
+    slider.value = min;
+
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      valueEl.textContent = formatValue(v, min, max, step);
+      sendAction({ action: 'set_ntsc_param', param, value: v });
+    });
+  }
+
+  if (checkbox) {
+    checkbox.addEventListener('change', () => {
+      sendAction({ action: 'set_ntsc_param', param, value: checkbox.checked });
+    });
+  }
+
+  if (select) {
+    select.addEventListener('change', () => {
+      sendAction({ action: 'set_ntsc_param', param, value: parseInt(select.value) });
     });
   }
 });
@@ -142,6 +182,37 @@ function syncEffects(effects) {
     }
 
     if (select) {
+      select.value = value;
+    }
+  }
+}
+
+// --- Sync NTSC/VHS UI from server ---
+
+function syncNtsc(ntsc) {
+  if (!ntsc) return;
+  for (const [param, value] of Object.entries(ntsc)) {
+    const row = document.querySelector(`.param-row[data-ntsc="${param}"]`);
+    if (!row) continue;
+
+    const slider = row.querySelector('input[type="range"]');
+    const valueEl = row.querySelector('.value');
+    const checkbox = row.querySelector('input[type="checkbox"]');
+    const select = row.querySelector('select');
+
+    if (slider && valueEl && document.activeElement !== slider) {
+      slider.value = value;
+      const min = parseFloat(row.dataset.min);
+      const max = parseFloat(row.dataset.max);
+      const step = parseFloat(row.dataset.step);
+      valueEl.textContent = formatValue(value, min, max, step);
+    }
+
+    if (checkbox) {
+      checkbox.checked = !!value;
+    }
+
+    if (select && document.activeElement !== select) {
       select.value = value;
     }
   }

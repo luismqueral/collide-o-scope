@@ -28,6 +28,7 @@ pub struct AppSnapshot {
     #[serde(rename = "type")]
     pub msg_type: String,
     pub effects: EffectsSnapshot,
+    pub ntsc: NtscSnapshot,
     pub layers: Vec<LayerSnapshot>,
     pub library: Vec<String>,
     pub paused: bool,
@@ -38,6 +39,7 @@ impl Default for AppSnapshot {
         Self {
             msg_type: "state".to_string(),
             effects: EffectsSnapshot::default(),
+            ntsc: NtscSnapshot::default(),
             layers: Vec::new(),
             library: Vec::new(),
             paused: false,
@@ -91,6 +93,82 @@ impl Default for EffectsSnapshot {
     }
 }
 
+/// NTSC/VHS effect parameters sent to the browser.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NtscSnapshot {
+    pub enabled: bool,
+    pub tape_speed: u32,
+    pub chroma_loss: f32,
+    pub edge_wave_enabled: bool,
+    pub edge_wave_intensity: f32,
+    pub edge_wave_speed: f32,
+    pub head_switching_enabled: bool,
+    pub head_switching_height: i32,
+    pub head_switching_shift: f32,
+    pub tracking_noise_enabled: bool,
+    pub tracking_noise_height: i32,
+    pub tracking_noise_wave: f32,
+    pub tracking_noise_snow: f32,
+    pub snow_intensity: f32,
+    pub composite_noise_intensity: f32,
+    pub luma_noise_intensity: f32,
+    pub chroma_noise_intensity: f32,
+    pub luma_smear: f32,
+    pub composite_sharpening: f32,
+}
+
+impl Default for NtscSnapshot {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            tape_speed: 0,
+            chroma_loss: 0.0,
+            edge_wave_enabled: false,
+            edge_wave_intensity: 0.0,
+            edge_wave_speed: 0.5,
+            head_switching_enabled: false,
+            head_switching_height: 8,
+            head_switching_shift: 0.0,
+            tracking_noise_enabled: false,
+            tracking_noise_height: 24,
+            tracking_noise_wave: 0.0,
+            tracking_noise_snow: 0.0,
+            snow_intensity: 0.0,
+            composite_noise_intensity: 0.0,
+            luma_noise_intensity: 0.0,
+            chroma_noise_intensity: 0.0,
+            luma_smear: 0.0,
+            composite_sharpening: 0.0,
+        }
+    }
+}
+
+impl NtscSnapshot {
+    pub fn from_params(p: &crate::ntsc::NtscParams) -> Self {
+        Self {
+            enabled: p.enabled,
+            tape_speed: p.tape_speed,
+            chroma_loss: p.chroma_loss,
+            edge_wave_enabled: p.edge_wave_enabled,
+            edge_wave_intensity: p.edge_wave_intensity,
+            edge_wave_speed: p.edge_wave_speed,
+            head_switching_enabled: p.head_switching_enabled,
+            head_switching_height: p.head_switching_height,
+            head_switching_shift: p.head_switching_shift,
+            tracking_noise_enabled: p.tracking_noise_enabled,
+            tracking_noise_height: p.tracking_noise_height,
+            tracking_noise_wave: p.tracking_noise_wave,
+            tracking_noise_snow: p.tracking_noise_snow,
+            snow_intensity: p.snow_intensity,
+            composite_noise_intensity: p.composite_noise_intensity,
+            luma_noise_intensity: p.luma_noise_intensity,
+            chroma_noise_intensity: p.chroma_noise_intensity,
+            luma_smear: p.luma_smear,
+            composite_sharpening: p.composite_sharpening,
+        }
+    }
+}
+
 /// Per-layer info sent to the browser.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerSnapshot {
@@ -134,6 +212,9 @@ pub enum WebAction {
     /// Set a per-layer parameter (opacity, speed, blend_mode)
     #[serde(rename = "set_layer_param")]
     SetLayerParam { index: usize, param: String, value: serde_json::Value },
+    /// Set an NTSC/VHS effect parameter
+    #[serde(rename = "set_ntsc_param")]
+    SetNtscParam { param: String, value: serde_json::Value },
 }
 
 impl EffectsSnapshot {

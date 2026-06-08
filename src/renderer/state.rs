@@ -45,6 +45,10 @@ pub struct Renderer {
 
     pub output_width: u32,
     pub output_height: u32,
+
+    // Persistent staging buffer for NTSC readback (avoids per-frame allocation)
+    readback_buffer: Option<wgpu::Buffer>,
+    readback_buffer_size: u64,
 }
 
 impl Renderer {
@@ -324,6 +328,8 @@ impl Renderer {
             output_view,
             output_width,
             output_height,
+            readback_buffer: None,
+            readback_buffer_size: 0,
         }
     }
 
@@ -617,6 +623,108 @@ impl Renderer {
             wgpu::Extent3d {
                 width: self.output_width,
                 height: self.output_height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    /// Read composite_textures[0] back to CPU as RGBA bytes.
+    /// Submits current work to the GPU and blocks until readback completes.
+    /// Uses a persistent staging buffer to avoid per-frame allocation.
+    pub fn readback_composite(&mut self) -> Vec<u8> {
+        let w = self.output_width;
+        let h = self.output_height;
+        // Row must be aligned to 256 bytes for wgpu buffer copy
+        let bytes_per_row = (w * 4 + 255) & !255;
+        let buffer_size = (bytes_per_row * h) as u64;
+
+        // Reuse or create staging buffer
+        if self.readback_buffer.is_none() || self.readback_buffer_size < buffer_size {
+            self.readback_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("NTSC Readback"),
+                size: buffer_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            }));
+            self.readback_buffer_size = buffer_size;
+        }
+        let staging = self.readback_buffer.as_ref().unwrap();
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("NTSC Readback Encoder"),
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.composite_textures[0],
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: staging,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        // Map and read
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            tx.send(result).unwrap();
+        });
+        let _ = self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+        rx.recv().unwrap().unwrap();
+
+        let data = slice.get_mapped_range();
+        // Remove row padding if any
+        let row_bytes = (w * 4) as usize;
+        let padded_row = bytes_per_row as usize;
+        let mut pixels = Vec::with_capacity(row_bytes * h as usize);
+        for row in 0..h as usize {
+            let start = row * padded_row;
+            pixels.extend_from_slice(&data[start..start + row_bytes]);
+        }
+        drop(data);
+        staging.unmap();
+
+        pixels
+    }
+
+    /// Write RGBA pixels back to composite_textures[0].
+    pub fn write_composite(&self, pixels: &[u8]) {
+        let w = self.output_width;
+        let h = self.output_height;
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.composite_textures[0],
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 4),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
                 depth_or_array_layers: 1,
             },
         );

@@ -127,6 +127,82 @@
               </div>
             </div>
           </div>
+
+          <div class="fx-group" data-group="vhs" id="vhs-group">
+            <div class="fx-group-header">
+              <span class="chevron">&#x25BC;</span>
+              <span class="group-label">VHS</span>
+              <button class="group-reset" data-group="vhs">reset</button>
+            </div>
+            <div class="fx-group-body">
+              <div class="param-row toggle-row" data-ntsc="enabled">
+                <label>Enable</label>
+                <label class="toggle"><input type="checkbox"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="param-row select-row" data-ntsc="tape_speed">
+                <label>Tape Speed</label>
+                <select>
+                  <option value="0">SP</option>
+                  <option value="1">LP</option>
+                  <option value="2">EP</option>
+                </select>
+              </div>
+              <div class="param-row toggle-row" data-ntsc="head_switching_enabled">
+                <label>Head Sw.</label>
+                <label class="toggle"><input type="checkbox"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="param-row" data-ntsc="head_switching_height" data-min="0" data-max="24" data-step="1">
+                <label>Head Height</label><input type="range"><span class="value">8</span>
+              </div>
+              <div class="param-row" data-ntsc="head_switching_shift" data-min="-100" data-max="100" data-step="1">
+                <label>Head Shift</label><input type="range"><span class="value">0</span>
+              </div>
+              <div class="param-row toggle-row" data-ntsc="tracking_noise_enabled">
+                <label>Tracking</label>
+                <label class="toggle"><input type="checkbox"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="param-row" data-ntsc="tracking_noise_height" data-min="0" data-max="120" data-step="1">
+                <label>Track Height</label><input type="range"><span class="value">24</span>
+              </div>
+              <div class="param-row" data-ntsc="tracking_noise_wave" data-min="0" data-max="50" data-step="0.5">
+                <label>Track Wave</label><input type="range"><span class="value">0</span>
+              </div>
+              <div class="param-row" data-ntsc="tracking_noise_snow" data-min="0" data-max="1" data-step="0.01">
+                <label>Track Snow</label><input type="range"><span class="value">0</span>
+              </div>
+              <div class="param-row" data-ntsc="snow_intensity" data-min="0" data-max="1" data-step="0.01">
+                <label>Snow</label><input type="range"><span class="value">0</span>
+              </div>
+              <div class="param-row" data-ntsc="composite_noise_intensity" data-min="0" data-max="0.5" data-step="0.005">
+                <label>Comp Noise</label><input type="range"><span class="value">0</span>
+              </div>
+              <div class="param-row" data-ntsc="luma_noise_intensity" data-min="0" data-max="0.2" data-step="0.005">
+                <label>Luma Noise</label><input type="range"><span class="value">0</span>
+              </div>
+              <div class="param-row" data-ntsc="chroma_noise_intensity" data-min="0" data-max="0.5" data-step="0.005">
+                <label>Chroma Noise</label><input type="range"><span class="value">0</span>
+              </div>
+              <div class="param-row" data-ntsc="chroma_loss" data-min="0" data-max="0.01" data-step="0.0005">
+                <label>Chroma Loss</label><input type="range"><span class="value">0</span>
+              </div>
+              <div class="param-row toggle-row" data-ntsc="edge_wave_enabled">
+                <label>Edge Wave</label>
+                <label class="toggle"><input type="checkbox"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="param-row" data-ntsc="edge_wave_intensity" data-min="0" data-max="20" data-step="0.5">
+                <label>Wave Amt</label><input type="range"><span class="value">0</span>
+              </div>
+              <div class="param-row" data-ntsc="edge_wave_speed" data-min="0" data-max="10" data-step="0.1">
+                <label>Wave Speed</label><input type="range"><span class="value">0.5</span>
+              </div>
+              <div class="param-row" data-ntsc="luma_smear" data-min="0" data-max="1" data-step="0.01">
+                <label>Luma Smear</label><input type="range"><span class="value">0</span>
+              </div>
+              <div class="param-row" data-ntsc="composite_sharpening" data-min="-1" data-max="2" data-step="0.05">
+                <label>Sharpening</label><input type="range"><span class="value">0</span>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
     </main>
