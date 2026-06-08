@@ -1,4 +1,5 @@
 #![allow(deprecated)] // egui 0.34 deprecation warnings for panel API renames
+#![allow(dead_code)] // Old egui UI code kept as reference during web UI migration
 
 mod effects;
 mod input;
@@ -6,6 +7,7 @@ mod layers;
 mod patch;
 mod renderer;
 mod video;
+mod web;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,6 +23,7 @@ use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 use input::{apply_action, map_key, ControlFlow};
 use layers::{is_video_file, BlendMode, Layer};
 use renderer::Renderer;
+use web::state::WebState;
 
 const TARGET_FPS: u64 = 30;
 const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
@@ -46,14 +49,19 @@ struct App {
     egui_winit: Option<egui_winit::State>,
     egui_renderer: Option<egui_wgpu::Renderer>,
     video_egui_texture_id: Option<egui::TextureId>,
+    // Web control panel
+    web_state: Arc<WebState>,
 }
 
 impl App {
-    fn new(initial_video: Option<String>, library_folder: Option<PathBuf>) -> Self {
+    fn new(initial_video: Option<String>, library_folder: Option<PathBuf>, web_state: Arc<WebState>) -> Self {
         let library_files = library_folder
             .as_ref()
             .map(|f| scan_folder(f))
             .unwrap_or_default();
+
+        // Generate thumbnails on background thread
+        generate_thumbnails(&library_files, web_state.clone());
 
         Self {
             initial_video,
@@ -73,6 +81,7 @@ impl App {
             egui_winit: None,
             egui_renderer: None,
             video_egui_texture_id: None,
+            web_state,
         }
     }
 
@@ -93,9 +102,148 @@ impl App {
         self.library_files = scan_folder(&folder);
         self.library_folder = Some(folder);
     }
+
+    /// Handle an action from the web UI.
+    fn handle_web_action(&mut self, action: web::state::WebAction) {
+        use web::state::WebAction;
+        match action {
+            WebAction::SetParam { param, value } => {
+                let mut snap = web::state::EffectsSnapshot::from_uniforms(&self.master_effects);
+                snap.apply_param(&param, &value);
+                snap.apply_to_uniforms(&mut self.master_effects);
+            }
+            WebAction::AddLayer { filename } => {
+                // Find the full path from the library
+                if let Some(path) = self.library_files.iter().find(|p| {
+                    p.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .as_deref() == Some(&filename)
+                }) {
+                    let path_str = path.to_string_lossy().to_string();
+                    self.add_layer(&path_str);
+                }
+            }
+            WebAction::RemoveLayer { index } => {
+                if index < self.layers.len() {
+                    self.layers.remove(index);
+                    if self.layers.is_empty() {
+                        self.selected_layer = None;
+                    } else if let Some(sel) = self.selected_layer {
+                        if sel >= self.layers.len() {
+                            self.selected_layer = Some(self.layers.len() - 1);
+                        }
+                    }
+                }
+            }
+            WebAction::ToggleVisibility { index } => {
+                if index < self.layers.len() {
+                    self.layers[index].visible = !self.layers[index].visible;
+                }
+            }
+            WebAction::ToggleLayerPause { index } => {
+                if index < self.layers.len() {
+                    self.layers[index].paused = !self.layers[index].paused;
+                }
+            }
+            WebAction::ToggleMasterPause => {
+                self.master_paused = !self.master_paused;
+            }
+            WebAction::ResetFx => {
+                self.master_effects.reset();
+            }
+            WebAction::ResetGroup { group } => {
+                let defaults = crate::effects::EffectUniforms::default();
+                match group.as_str() {
+                    "digital" => {
+                        self.master_effects.pixelate_size = defaults.pixelate_size;
+                        self.master_effects.rgb_split = defaults.rgb_split;
+                        self.master_effects.hue_shift = defaults.hue_shift;
+                        self.master_effects.saturation = defaults.saturation;
+                        self.master_effects.brightness = defaults.brightness;
+                        self.master_effects.contrast = defaults.contrast;
+                        self.master_effects.posterize = defaults.posterize;
+                        self.master_effects.invert = defaults.invert;
+                    }
+                    "analog" => {
+                        self.master_effects.grain_intensity = defaults.grain_intensity;
+                        self.master_effects.grain_size = defaults.grain_size;
+                        self.master_effects.grain_algo = defaults.grain_algo;
+                        self.master_effects.color_grain = defaults.color_grain;
+                        self.master_effects.vignette = defaults.vignette;
+                        self.master_effects.color_drift = defaults.color_drift;
+                    }
+                    "motion" => {
+                        self.master_effects.breathe_scale = defaults.breathe_scale;
+                        self.master_effects.breathe_rotation = defaults.breathe_rotation;
+                        self.master_effects.breathe_position = defaults.breathe_position;
+                    }
+                    _ => {}
+                }
+            }
+            WebAction::SetLayerParam { index, param, value } => {
+                if index < self.layers.len() {
+                    let layer = &mut self.layers[index];
+                    match param.as_str() {
+                        "opacity" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.opacity = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "speed" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.speed = (v as f32).clamp(0.25, 4.0);
+                            }
+                        }
+                        "blend_mode" => {
+                            if let Some(s) = value.as_str() {
+                                layer.blend_mode = match s {
+                                    "screen" => crate::layers::BlendMode::Screen,
+                                    "multiply" => crate::layers::BlendMode::Multiply,
+                                    "difference" => crate::layers::BlendMode::Difference,
+                                    _ => crate::layers::BlendMode::Normal,
+                                };
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// Push full app state to the web UI via broadcast.
+    fn push_web_state(&self) {
+        use web::state::{AppSnapshot, EffectsSnapshot, LayerSnapshot};
+
+        let snapshot = AppSnapshot {
+            msg_type: "state".to_string(),
+            effects: EffectsSnapshot::from_uniforms(&self.master_effects),
+            layers: self.layers.iter().map(|l| LayerSnapshot {
+                filename: l.filename.clone(),
+                visible: l.visible,
+                paused: l.paused,
+                opacity: l.opacity,
+                speed: l.speed,
+                blend_mode: l.blend_mode.label().to_string(),
+                progress: l.decoder.progress(),
+            }).collect(),
+            library: self.library_files.iter().filter_map(|p| {
+                p.file_name().map(|n| n.to_string_lossy().to_string())
+            }).collect(),
+            paused: self.master_paused,
+        };
+
+        // Non-blocking: try to write + broadcast
+        if let Ok(mut app) = self.web_state.app.try_write() {
+            *app = snapshot.clone();
+        }
+        let _ = self.web_state.tx.send(serde_json::to_string(&snapshot).unwrap_or_default());
+    }
 }
 
 /// Scan a directory for video files, returning sorted list of paths.
+
+
 fn scan_folder(folder: &PathBuf) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return Vec::new();
@@ -107,6 +255,147 @@ fn scan_folder(folder: &PathBuf) -> Vec<PathBuf> {
         .collect();
     files.sort();
     files
+}
+
+/// Generate thumbnails and preview frames for all library files using ffmpeg CLI.
+/// Thumbnails are generated first (fast), then preview frames in a second pass.
+fn generate_thumbnails(files: &[PathBuf], web_state: Arc<web::state::WebState>) {
+    let paths: Vec<PathBuf> = files.to_vec();
+    std::thread::Builder::new()
+        .name("thumb-gen".into())
+        .spawn(move || {
+            use std::process::Command;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+
+            let count = Arc::new(AtomicUsize::new(0));
+            let total = paths.len();
+
+            // Pass 1: Generate static thumbnails (fast, parallel batches of 8)
+            for chunk in paths.chunks(8) {
+                let handles: Vec<_> = chunk.iter().map(|path| {
+                    let path = path.clone();
+                    let web_state = web_state.clone();
+                    let count = count.clone();
+                    std::thread::spawn(move || {
+                        let filename = match path.file_name() {
+                            Some(n) => n.to_string_lossy().to_string(),
+                            None => return,
+                        };
+
+                        let output = Command::new("ffmpeg")
+                            .args([
+                                "-i", &path.to_string_lossy(),
+                                "-vframes", "1",
+                                "-vf", "scale=180:-1",
+                                "-f", "image2pipe",
+                                "-vcodec", "mjpeg",
+                                "-q:v", "8",
+                                "-loglevel", "error",
+                                "pipe:1",
+                            ])
+                            .output();
+
+                        match output {
+                            Ok(result) if result.status.success() && !result.stdout.is_empty() => {
+                                if let Ok(mut cache) = web_state.thumbnails.write() {
+                                    cache.insert(filename, result.stdout);
+                                }
+                                count.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Ok(result) => {
+                                let err = String::from_utf8_lossy(&result.stderr);
+                                log::warn!("Thumb: ffmpeg failed for {filename}: {err}");
+                            }
+                            Err(e) => {
+                                log::warn!("Thumb: can't run ffmpeg for {filename}: {e}");
+                            }
+                        }
+                    })
+                }).collect();
+
+                for h in handles {
+                    let _ = h.join();
+                }
+            }
+
+            log::info!("Generated {}/{total} thumbnails", count.load(Ordering::Relaxed));
+
+            // Pass 2: Generate preview frames (~8 per video, parallel batches of 4)
+            let preview_count = Arc::new(AtomicUsize::new(0));
+            for chunk in paths.chunks(4) {
+                let handles: Vec<_> = chunk.iter().map(|path| {
+                    let path = path.clone();
+                    let web_state = web_state.clone();
+                    let preview_count = preview_count.clone();
+                    std::thread::spawn(move || {
+                        let filename = match path.file_name() {
+                            Some(n) => n.to_string_lossy().to_string(),
+                            None => return,
+                        };
+
+                        // Get video duration with ffprobe
+                        let duration = Command::new("ffprobe")
+                            .args([
+                                "-v", "error",
+                                "-show_entries", "format=duration",
+                                "-of", "csv=p=0",
+                                &path.to_string_lossy(),
+                            ])
+                            .output()
+                            .ok()
+                            .and_then(|o| String::from_utf8(o.stdout).ok())
+                            .and_then(|s| s.trim().parse::<f64>().ok())
+                            .unwrap_or(0.0);
+
+                        if duration < 0.5 {
+                            return;
+                        }
+
+                        const NUM_FRAMES: usize = 8;
+                        let mut frames = Vec::with_capacity(NUM_FRAMES);
+
+                        for i in 0..NUM_FRAMES {
+                            let seek = duration * (i as f64) / (NUM_FRAMES as f64);
+                            let seek_str = format!("{:.2}", seek);
+
+                            let output = Command::new("ffmpeg")
+                                .args([
+                                    "-ss", &seek_str,
+                                    "-i", &path.to_string_lossy(),
+                                    "-vframes", "1",
+                                    "-vf", "scale=180:-1",
+                                    "-f", "image2pipe",
+                                    "-vcodec", "mjpeg",
+                                    "-q:v", "10",
+                                    "-loglevel", "error",
+                                    "pipe:1",
+                                ])
+                                .output();
+
+                            if let Ok(result) = output {
+                                if result.status.success() && !result.stdout.is_empty() {
+                                    frames.push(result.stdout);
+                                }
+                            }
+                        }
+
+                        if !frames.is_empty() {
+                            if let Ok(mut cache) = web_state.preview_frames.write() {
+                                cache.insert(filename, frames);
+                            }
+                            preview_count.fetch_add(1, Ordering::Relaxed);
+                        }
+                    })
+                }).collect();
+
+                for h in handles {
+                    let _ = h.join();
+                }
+            }
+
+            log::info!("Generated {}/{total} preview strips", preview_count.load(Ordering::Relaxed));
+        })
+        .ok();
 }
 
 impl ApplicationHandler for App {
@@ -127,7 +416,7 @@ impl ApplicationHandler for App {
 
         log::info!("Output: {}x{}", output_width, output_height);
 
-        let window_w = output_width + 560;
+        let window_w = output_width;
         let window_h = output_height;
 
         let window_attrs = WindowAttributes::default()
@@ -323,43 +612,45 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    // Build egui UI
+                    // Process actions from web UI
+                    let pending_actions: Vec<_> = self.web_state.actions
+                        .try_lock()
+                        .map(|mut a| a.drain(..).collect())
+                        .unwrap_or_default();
+                    for action in pending_actions {
+                        self.handle_web_action(action);
+                    }
+
+                    // Build minimal egui frame (video display only, no UI panels)
                     let window = self.window.as_ref().unwrap();
                     let egui_winit = self.egui_winit.as_mut().unwrap();
                     let raw_input = egui_winit.take_egui_input(window);
 
-                    let layers = &mut self.layers;
-                    let selected_layer = &mut self.selected_layer;
-                    let master_effects = &mut self.master_effects;
-                    let master_paused = &mut self.master_paused;
-                    let library_folder = &mut self.library_folder;
-                    let library_files = &mut self.library_files;
-                    let yaml_editor = &mut self.yaml_editor;
                     let video_egui_texture_id = self.video_egui_texture_id;
                     let output_width = self.renderer.as_ref().unwrap().output_width;
                     let output_height = self.renderer.as_ref().unwrap().output_height;
-                    let mut pending_add: Option<String> = None;
 
                     let full_output = self.egui_ctx.run_ui(raw_input, |ctx| {
-                        pending_add = build_ui(
-                            ctx,
-                            layers,
-                            selected_layer,
-                            master_effects,
-                            master_paused,
-                            yaml_editor,
-                            library_folder,
-                            library_files,
-                            video_egui_texture_id,
-                            output_width,
-                            output_height,
-                        );
+                        // Full-window video output (no UI panels)
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
+                            .show(ctx, |ui| {
+                                if let Some(tex_id) = video_egui_texture_id {
+                                    let available = ui.available_size();
+                                    let aspect = output_width as f32 / output_height as f32;
+                                    let (w, h) = fit_to_area(available.x, available.y, aspect);
+                                    ui.centered_and_justified(|ui| {
+                                        ui.image(egui::load::SizedTexture::new(
+                                            tex_id,
+                                            egui::vec2(w, h),
+                                        ));
+                                    });
+                                }
+                            });
                     });
 
-                    // Handle deferred layer add (needs device access)
-                    if let Some(path) = pending_add {
-                        self.add_layer(&path);
-                    }
+                    // Push full state to web UI
+                    self.push_web_state();
 
                     let window = self.window.as_ref().unwrap();
                     let egui_winit = self.egui_winit.as_mut().unwrap();
@@ -950,15 +1241,23 @@ fn main() {
             }
         }
         None => {
-            eprintln!("Usage: collide-o-scope [video-file-or-folder]");
-            eprintln!("  Pass a video file to start with one layer,");
-            eprintln!("  or a folder to browse available clips.");
-            eprintln!("  You can also drag and drop files/folders onto the window.");
-            (None, None)
+            // Default: use ./videos/ if it exists
+            let default_lib = PathBuf::from("videos");
+            if default_lib.is_dir() {
+                (None, Some(default_lib))
+            } else {
+                (None, None)
+            }
         }
     };
 
+    // Start web control panel server
+    let web_state = WebState::new();
+    let url = web::server::spawn(web_state.clone(), 3030);
+    log::info!("Opening control panel: {}", url);
+    let _ = open::that(&url);
+
     let event_loop = EventLoop::new().unwrap();
-    let mut app = App::new(initial_video, library_folder);
+    let mut app = App::new(initial_video, library_folder, web_state);
     event_loop.run_app(&mut app).unwrap();
 }

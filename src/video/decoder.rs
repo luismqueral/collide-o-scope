@@ -12,6 +12,8 @@ pub struct VideoDecoder {
     scaler: ScalerContext,
     pub width: u32,
     pub height: u32,
+    frame_count: u64,
+    total_frames: u64,
 }
 
 impl VideoDecoder {
@@ -36,6 +38,20 @@ impl VideoDecoder {
         let width = decoder.width();
         let height = decoder.height();
 
+        // Estimate total frames from stream duration and frame rate
+        let total_frames = {
+            let frames = stream.frames() as u64;
+            if frames > 0 {
+                frames
+            } else {
+                // Fallback: compute from duration and fps
+                let duration_secs = input_ctx.duration() as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE);
+                let fps = f64::from(stream.avg_frame_rate());
+                let estimated = (duration_secs * fps) as u64;
+                estimated.max(1)
+            }
+        };
+
         let scaler = ScalerContext::get(
             decoder.format(),
             width,
@@ -55,6 +71,8 @@ impl VideoDecoder {
             scaler,
             width,
             height,
+            frame_count: 0,
+            total_frames,
         })
     }
 
@@ -65,6 +83,7 @@ impl VideoDecoder {
             // Try to receive already-decoded frames first
             let mut decoded = VideoFrame::empty();
             if self.decoder.receive_frame(&mut decoded).is_ok() {
+                self.frame_count += 1;
                 return Some(self.scale_frame(&decoded));
             }
 
@@ -76,6 +95,7 @@ impl VideoDecoder {
                     }
                     let mut decoded = VideoFrame::empty();
                     if self.decoder.receive_frame(&mut decoded).is_ok() {
+                        self.frame_count += 1;
                         return Some(self.scale_frame(&decoded));
                     }
                 }
@@ -84,6 +104,7 @@ impl VideoDecoder {
                     self.decoder.send_eof().ok();
                     let mut decoded = VideoFrame::empty();
                     if self.decoder.receive_frame(&mut decoded).is_ok() {
+                        self.frame_count += 1;
                         return Some(self.scale_frame(&decoded));
                     }
                     // Reopen file to loop
@@ -93,6 +114,14 @@ impl VideoDecoder {
                 }
             }
         }
+    }
+
+    /// Returns loop progress as 0.0..1.0
+    pub fn progress(&self) -> f32 {
+        if self.total_frames == 0 {
+            return 0.0;
+        }
+        (self.frame_count % self.total_frames) as f32 / self.total_frames as f32
     }
 
     fn scale_frame(&mut self, frame: &VideoFrame) -> Vec<u8> {
@@ -126,6 +155,8 @@ impl VideoDecoder {
             .decoder()
             .video()
             .map_err(|e| format!("Decoder on reopen: {e}"))?;
+
+        self.frame_count = 0;
 
         Ok(())
     }

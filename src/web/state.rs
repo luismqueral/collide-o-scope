@@ -1,0 +1,218 @@
+//! Shared state between the web control panel and the render engine.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+use tokio::sync::{broadcast, Mutex, RwLock};
+
+use crate::effects::EffectUniforms;
+
+/// Shared state accessible by both the web server and the render loop.
+pub struct WebState {
+    /// Full app snapshot (pushed from render loop each frame)
+    pub app: RwLock<AppSnapshot>,
+    /// Broadcast channel for pushing state to all WebSocket clients
+    pub tx: broadcast::Sender<String>,
+    /// Actions queue: browser pushes commands, render loop drains them
+    pub actions: Mutex<Vec<WebAction>>,
+    /// Thumbnail cache: filename → JPEG bytes (generated on library scan)
+    pub thumbnails: std::sync::RwLock<HashMap<String, Vec<u8>>>,
+    /// Preview frames: filename → vec of JPEG frames (for hover animation)
+    pub preview_frames: std::sync::RwLock<HashMap<String, Vec<Vec<u8>>>>,
+}
+
+/// Full app state snapshot sent to the browser each frame.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppSnapshot {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub effects: EffectsSnapshot,
+    pub layers: Vec<LayerSnapshot>,
+    pub library: Vec<String>,
+    pub paused: bool,
+}
+
+impl Default for AppSnapshot {
+    fn default() -> Self {
+        Self {
+            msg_type: "state".to_string(),
+            effects: EffectsSnapshot::default(),
+            layers: Vec::new(),
+            library: Vec::new(),
+            paused: false,
+        }
+    }
+}
+
+/// A JSON-friendly snapshot of the current effect parameters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EffectsSnapshot {
+    pub pixelate: f32,
+    pub rgb_split: f32,
+    pub hue_shift: f32,
+    pub saturation: f32,
+    pub brightness: f32,
+    pub contrast: f32,
+    pub posterize: f32,
+    pub invert: bool,
+    pub grain_intensity: f32,
+    pub grain_size: f32,
+    pub grain_algo: u32,
+    pub color_grain: bool,
+    pub vignette: f32,
+    pub color_drift: f32,
+    pub breathe_scale: f32,
+    pub breathe_rotation: f32,
+    pub breathe_position: f32,
+}
+
+impl Default for EffectsSnapshot {
+    fn default() -> Self {
+        Self {
+            pixelate: 1.0,
+            rgb_split: 0.0,
+            hue_shift: 0.0,
+            saturation: 0.0,
+            brightness: 0.0,
+            contrast: 0.0,
+            posterize: 0.0,
+            invert: false,
+            grain_intensity: 0.0,
+            grain_size: 1.0,
+            grain_algo: 0,
+            color_grain: false,
+            vignette: 0.0,
+            color_drift: 0.0,
+            breathe_scale: 0.0,
+            breathe_rotation: 0.0,
+            breathe_position: 0.0,
+        }
+    }
+}
+
+/// Per-layer info sent to the browser.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerSnapshot {
+    pub filename: String,
+    pub visible: bool,
+    pub paused: bool,
+    pub opacity: f32,
+    pub speed: f32,
+    pub blend_mode: String,
+    pub progress: f32,
+}
+
+/// Actions the browser can request (processed by the render loop).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action")]
+pub enum WebAction {
+    /// Set a master effect parameter
+    #[serde(rename = "set_param")]
+    SetParam { param: String, value: serde_json::Value },
+    /// Add a layer from the library by filename
+    #[serde(rename = "add_layer")]
+    AddLayer { filename: String },
+    /// Remove a layer by index
+    #[serde(rename = "remove_layer")]
+    RemoveLayer { index: usize },
+    /// Toggle layer visibility
+    #[serde(rename = "toggle_visibility")]
+    ToggleVisibility { index: usize },
+    /// Toggle layer play/pause
+    #[serde(rename = "toggle_layer_pause")]
+    ToggleLayerPause { index: usize },
+    /// Toggle master play/pause
+    #[serde(rename = "toggle_master_pause")]
+    ToggleMasterPause,
+    /// Reset all master effects
+    #[serde(rename = "reset_fx")]
+    ResetFx,
+    /// Reset a specific effect group (digital, analog, motion)
+    #[serde(rename = "reset_group")]
+    ResetGroup { group: String },
+    /// Set a per-layer parameter (opacity, speed, blend_mode)
+    #[serde(rename = "set_layer_param")]
+    SetLayerParam { index: usize, param: String, value: serde_json::Value },
+}
+
+impl EffectsSnapshot {
+    pub fn from_uniforms(u: &EffectUniforms) -> Self {
+        Self {
+            pixelate: u.pixelate_size,
+            rgb_split: u.rgb_split,
+            hue_shift: u.hue_shift,
+            saturation: u.saturation,
+            brightness: u.brightness,
+            contrast: u.contrast,
+            posterize: u.posterize,
+            invert: u.invert > 0.5,
+            grain_intensity: u.grain_intensity,
+            grain_size: u.grain_size,
+            grain_algo: u.grain_algo as u32,
+            color_grain: u.color_grain > 0.5,
+            vignette: u.vignette,
+            color_drift: u.color_drift,
+            breathe_scale: u.breathe_scale,
+            breathe_rotation: u.breathe_rotation,
+            breathe_position: u.breathe_position,
+        }
+    }
+
+    pub fn apply_to_uniforms(&self, u: &mut EffectUniforms) {
+        u.pixelate_size = self.pixelate.clamp(1.0, 32.0);
+        u.rgb_split = self.rgb_split.clamp(0.0, 30.0);
+        u.hue_shift = self.hue_shift.clamp(-180.0, 180.0);
+        u.saturation = self.saturation.clamp(-1.0, 1.0);
+        u.brightness = self.brightness.clamp(-1.0, 1.0);
+        u.contrast = self.contrast.clamp(-1.0, 1.0);
+        u.posterize = self.posterize.clamp(0.0, 16.0);
+        u.invert = if self.invert { 1.0 } else { 0.0 };
+        u.grain_intensity = self.grain_intensity.clamp(0.0, 0.3);
+        u.grain_size = self.grain_size.clamp(1.0, 4.0);
+        u.grain_algo = (self.grain_algo.min(3)) as f32;
+        u.color_grain = if self.color_grain { 1.0 } else { 0.0 };
+        u.vignette = self.vignette.clamp(0.0, 1.5);
+        u.color_drift = self.color_drift.clamp(0.0, 0.02);
+        u.breathe_scale = self.breathe_scale.clamp(0.0, 0.05);
+        u.breathe_rotation = self.breathe_rotation.clamp(0.0, 2.0);
+        u.breathe_position = self.breathe_position.clamp(0.0, 0.02);
+    }
+
+    pub fn apply_param(&mut self, param: &str, value: &serde_json::Value) {
+        let v = value;
+        match param {
+            "pixelate" => if let Some(n) = v.as_f64() { self.pixelate = n as f32; },
+            "rgb_split" => if let Some(n) = v.as_f64() { self.rgb_split = n as f32; },
+            "hue_shift" => if let Some(n) = v.as_f64() { self.hue_shift = n as f32; },
+            "saturation" => if let Some(n) = v.as_f64() { self.saturation = n as f32; },
+            "brightness" => if let Some(n) = v.as_f64() { self.brightness = n as f32; },
+            "contrast" => if let Some(n) = v.as_f64() { self.contrast = n as f32; },
+            "posterize" => if let Some(n) = v.as_f64() { self.posterize = n as f32; },
+            "invert" => if let Some(b) = v.as_bool() { self.invert = b; },
+            "grain_intensity" => if let Some(n) = v.as_f64() { self.grain_intensity = n as f32; },
+            "grain_size" => if let Some(n) = v.as_f64() { self.grain_size = n as f32; },
+            "grain_algo" => if let Some(n) = v.as_u64() { self.grain_algo = n as u32; },
+            "color_grain" => if let Some(b) = v.as_bool() { self.color_grain = b; },
+            "vignette" => if let Some(n) = v.as_f64() { self.vignette = n as f32; },
+            "color_drift" => if let Some(n) = v.as_f64() { self.color_drift = n as f32; },
+            "breathe_scale" => if let Some(n) = v.as_f64() { self.breathe_scale = n as f32; },
+            "breathe_rotation" => if let Some(n) = v.as_f64() { self.breathe_rotation = n as f32; },
+            "breathe_position" => if let Some(n) = v.as_f64() { self.breathe_position = n as f32; },
+            _ => {}
+        }
+    }
+}
+
+impl WebState {
+    pub fn new() -> Arc<Self> {
+        let (tx, _) = broadcast::channel(64);
+        Arc::new(Self {
+            app: RwLock::new(AppSnapshot::default()),
+            tx,
+            actions: Mutex::new(Vec::new()),
+            thumbnails: std::sync::RwLock::new(HashMap::new()),
+            preview_frames: std::sync::RwLock::new(HashMap::new()),
+        })
+    }
+}
