@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::effects::EffectUniforms;
 use crate::layers::{BlendMode, Layer};
+use crate::ntsc::NtscParams;
 
 // --- Helpers for serde defaults ---
 
@@ -55,6 +56,105 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
 pub struct PatchState {
     pub master: EffectsConfig,
     pub layers: Vec<LayerConfig>,
+    #[serde(default)]
+    pub ntsc: Option<NtscConfig>,
+}
+
+/// Serializable NTSC/VHS effect parameters for patch files.
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct NtscConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub tape_speed: u32,
+    #[serde(default)]
+    pub chroma_loss: f32,
+    #[serde(default)]
+    pub edge_wave_enabled: bool,
+    #[serde(default)]
+    pub edge_wave_intensity: f32,
+    #[serde(default = "default_edge_wave_speed")]
+    pub edge_wave_speed: f32,
+    #[serde(default)]
+    pub head_switching_enabled: bool,
+    #[serde(default = "default_head_height")]
+    pub head_switching_height: i32,
+    #[serde(default)]
+    pub head_switching_shift: f32,
+    #[serde(default)]
+    pub tracking_noise_enabled: bool,
+    #[serde(default = "default_tracking_height")]
+    pub tracking_noise_height: i32,
+    #[serde(default)]
+    pub tracking_noise_wave: f32,
+    #[serde(default)]
+    pub tracking_noise_snow: f32,
+    #[serde(default)]
+    pub snow_intensity: f32,
+    #[serde(default)]
+    pub composite_noise_intensity: f32,
+    #[serde(default)]
+    pub luma_noise_intensity: f32,
+    #[serde(default)]
+    pub chroma_noise_intensity: f32,
+    #[serde(default)]
+    pub luma_smear: f32,
+    #[serde(default)]
+    pub composite_sharpening: f32,
+}
+
+fn default_edge_wave_speed() -> f32 { 0.5 }
+fn default_head_height() -> i32 { 8 }
+fn default_tracking_height() -> i32 { 24 }
+
+impl NtscConfig {
+    pub fn from_params(p: &NtscParams) -> Self {
+        Self {
+            enabled: p.enabled,
+            tape_speed: p.tape_speed,
+            chroma_loss: p.chroma_loss,
+            edge_wave_enabled: p.edge_wave_enabled,
+            edge_wave_intensity: p.edge_wave_intensity,
+            edge_wave_speed: p.edge_wave_speed,
+            head_switching_enabled: p.head_switching_enabled,
+            head_switching_height: p.head_switching_height,
+            head_switching_shift: p.head_switching_shift,
+            tracking_noise_enabled: p.tracking_noise_enabled,
+            tracking_noise_height: p.tracking_noise_height,
+            tracking_noise_wave: p.tracking_noise_wave,
+            tracking_noise_snow: p.tracking_noise_snow,
+            snow_intensity: p.snow_intensity,
+            composite_noise_intensity: p.composite_noise_intensity,
+            luma_noise_intensity: p.luma_noise_intensity,
+            chroma_noise_intensity: p.chroma_noise_intensity,
+            luma_smear: p.luma_smear,
+            composite_sharpening: p.composite_sharpening,
+        }
+    }
+
+    pub fn to_params(&self) -> NtscParams {
+        NtscParams {
+            enabled: self.enabled,
+            tape_speed: self.tape_speed,
+            chroma_loss: self.chroma_loss,
+            edge_wave_enabled: self.edge_wave_enabled,
+            edge_wave_intensity: self.edge_wave_intensity,
+            edge_wave_speed: self.edge_wave_speed,
+            head_switching_enabled: self.head_switching_enabled,
+            head_switching_height: self.head_switching_height,
+            head_switching_shift: self.head_switching_shift,
+            tracking_noise_enabled: self.tracking_noise_enabled,
+            tracking_noise_height: self.tracking_noise_height,
+            tracking_noise_wave: self.tracking_noise_wave,
+            tracking_noise_snow: self.tracking_noise_snow,
+            snow_intensity: self.snow_intensity,
+            composite_noise_intensity: self.composite_noise_intensity,
+            luma_noise_intensity: self.luma_noise_intensity,
+            chroma_noise_intensity: self.chroma_noise_intensity,
+            luma_smear: self.luma_smear,
+            composite_sharpening: self.composite_sharpening,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -312,17 +412,21 @@ impl LayerConfig {
 // --- Full patch snapshot ---
 
 impl PatchState {
-    pub fn capture(master: &EffectUniforms, layers: &[Layer]) -> Self {
+    pub fn capture(master: &EffectUniforms, layers: &[Layer], ntsc_params: &NtscParams) -> Self {
         Self {
             master: EffectsConfig::from_uniforms(master),
             layers: layers.iter().map(LayerConfig::from_layer).collect(),
+            ntsc: Some(NtscConfig::from_params(ntsc_params)),
         }
     }
 
-    pub fn apply(&self, master: &mut EffectUniforms, layers: &mut [Layer]) {
+    pub fn apply(&self, master: &mut EffectUniforms, layers: &mut [Layer], ntsc_params: &mut NtscParams) {
         self.master.apply_to_uniforms(master);
         for (config, layer) in self.layers.iter().zip(layers.iter_mut()) {
             config.apply_to_layer(layer);
+        }
+        if let Some(ref ntsc) = self.ntsc {
+            *ntsc_params = ntsc.to_params();
         }
     }
 }

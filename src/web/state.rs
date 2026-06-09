@@ -32,6 +32,12 @@ pub struct AppSnapshot {
     pub layers: Vec<LayerSnapshot>,
     pub library: Vec<String>,
     pub paused: bool,
+    /// Export progress: 0.0 = idle, 0.0..1.0 = rendering, 1.0 = done
+    #[serde(default)]
+    pub export_progress: f32,
+    /// Non-empty when export encountered an error
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub export_error: String,
 }
 
 impl Default for AppSnapshot {
@@ -43,6 +49,8 @@ impl Default for AppSnapshot {
             layers: Vec::new(),
             library: Vec::new(),
             paused: false,
+            export_progress: 0.0,
+            export_error: String::new(),
         }
     }
 }
@@ -215,6 +223,12 @@ pub enum WebAction {
     /// Set an NTSC/VHS effect parameter
     #[serde(rename = "set_ntsc_param")]
     SetNtscParam { param: String, value: serde_json::Value },
+    /// Start an offline render export
+    #[serde(rename = "start_export")]
+    StartExport { width: u32, height: u32, fps: u32, duration_secs: f32 },
+    /// Cancel a running export
+    #[serde(rename = "cancel_export")]
+    CancelExport,
 }
 
 impl EffectsSnapshot {

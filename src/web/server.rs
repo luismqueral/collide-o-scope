@@ -117,8 +117,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<WebState>) {
         while let Some(Ok(msg)) = receiver.next().await {
             if let Message::Text(text) = msg {
                 // Try to parse as a WebAction
-                if let Ok(action) = serde_json::from_str::<WebAction>(&text) {
-                    state_clone.actions.lock().await.push(action);
+                match serde_json::from_str::<WebAction>(&text) {
+                    Ok(action) => {
+                        state_clone.actions.lock().await.push(action);
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to parse WebAction: {e} — raw: {text}");
+                    }
                 }
             }
         }

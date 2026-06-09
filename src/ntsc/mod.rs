@@ -146,6 +146,29 @@ impl NtscState {
         true
     }
 
+    /// Apply VHS effects at full (native) resolution. For offline rendering.
+    pub fn apply_full_res(&mut self, pixels: &mut [u8], width: u32, height: u32) -> bool {
+        if !self.params.enabled {
+            return false;
+        }
+
+        self.sync_effect_from_params();
+
+        let w = width as usize;
+        let h = height as usize;
+
+        self.effect.apply_effect_to_buffer::<Rgbx, u8>(
+            &self.ctx,
+            (w, h),
+            pixels,
+            self.frame_num,
+            [1.0, 1.0],
+        );
+
+        self.frame_num = self.frame_num.wrapping_add(1);
+        true
+    }
+
     /// Sync the ntsc-rs NtscEffect struct from our user-facing params.
     fn sync_effect_from_params(&mut self) {
         let p = &self.params;

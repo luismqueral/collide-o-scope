@@ -35,6 +35,7 @@ function connect() {
         syncLayers(msg.layers);
         syncLibrary(msg.library);
         syncTransport(msg.paused);
+        syncExport(msg.export_progress, msg.export_error);
       }
     } catch (err) {
       console.warn('[ws] parse error:', err);
@@ -244,6 +245,7 @@ function createLayerCard(layer, index) {
 
   card.innerHTML = `
     <div class="layer-header">
+      <img class="layer-thumb" src="/thumb/${encodeURIComponent(layer.filename)}" alt="">
       <span class="layer-num">${index + 1}</span>
       <button class="layer-play-btn" title="Play/Pause">${layer.paused ? '\u25B6' : '\u25A0'}</button>
       <span class="layer-title">${layer.filename || 'Untitled'}</span>
@@ -281,17 +283,20 @@ function createLayerCard(layer, index) {
   });
 
   // Play/pause
-  card.querySelector('.layer-play-btn').addEventListener('click', () => {
+  card.querySelector('.layer-play-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
     sendAction({ action: 'toggle_layer_pause', index });
   });
 
   // Visibility
-  card.querySelector('.layer-vis-btn').addEventListener('click', () => {
+  card.querySelector('.layer-vis-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
     sendAction({ action: 'toggle_visibility', index });
   });
 
   // Remove
-  card.querySelector('.layer-remove-btn').addEventListener('click', () => {
+  card.querySelector('.layer-remove-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
     sendAction({ action: 'remove_layer', index });
   });
 
@@ -456,6 +461,63 @@ function syncTransport(paused) {
   btn.title = paused ? 'Play All' : 'Pause All';
 }
 
+
+// --- Export / Render ---
+
+let exportActive = false;
+
+document.getElementById('export-start').addEventListener('click', () => {
+  const [w, h] = document.getElementById('export-resolution').value.split('x').map(Number);
+  const duration = parseFloat(document.getElementById('export-duration').value) || 10;
+  const fps = parseInt(document.getElementById('export-fps').value) || 30;
+  sendAction({ action: 'start_export', width: w, height: h, fps, duration_secs: duration });
+});
+
+document.getElementById('export-cancel').addEventListener('click', () => {
+  sendAction({ action: 'cancel_export' });
+});
+
+function syncExport(progress, error) {
+  const startBtn = document.getElementById('export-start');
+  const cancelBtn = document.getElementById('export-cancel');
+  const progressEl = document.getElementById('export-progress');
+  const fillEl = document.getElementById('export-fill');
+  const textEl = document.getElementById('export-text');
+  const statusEl = document.getElementById('export-status');
+
+  if (progress > 0 && progress < 1) {
+    // Rendering in progress
+    exportActive = true;
+    startBtn.style.display = 'none';
+    cancelBtn.style.display = '';
+    progressEl.style.display = '';
+    fillEl.style.width = (progress * 100) + '%';
+    textEl.textContent = Math.round(progress * 100) + '%';
+    statusEl.textContent = '';
+  } else if (progress >= 1) {
+    // Done
+    if (exportActive) {
+      startBtn.style.display = '';
+      cancelBtn.style.display = 'none';
+      progressEl.style.display = 'none';
+      if (error) {
+        statusEl.textContent = 'Error: ' + error;
+        statusEl.className = 'export-status error';
+      } else {
+        statusEl.textContent = 'Render complete!';
+        statusEl.className = 'export-status success';
+      }
+      exportActive = false;
+    }
+  } else {
+    // Idle
+    if (!exportActive) {
+      startBtn.style.display = '';
+      cancelBtn.style.display = 'none';
+      progressEl.style.display = 'none';
+    }
+  }
+}
 
 // --- Helpers ---
 

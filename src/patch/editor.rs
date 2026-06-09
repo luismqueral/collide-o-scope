@@ -1,5 +1,6 @@
 use crate::effects::EffectUniforms;
 use crate::layers::Layer;
+use crate::ntsc::NtscParams;
 
 use super::{param_meta, EffectsConfig, LayerConfig, PatchState};
 
@@ -343,8 +344,8 @@ pub fn build_yaml_editor_content(
 }
 
 /// Save full patch state to a YAML file via native dialog.
-pub fn save_patch(master: &EffectUniforms, layers: &[Layer]) {
-    let patch = PatchState::capture(master, layers);
+pub fn save_patch(master: &EffectUniforms, layers: &[Layer], ntsc_params: &NtscParams) {
+    let patch = PatchState::capture(master, layers, ntsc_params);
     let yaml = serde_yaml::to_string(&patch).unwrap_or_default();
 
     if let Some(path) = rfd::FileDialog::new()
@@ -359,7 +360,7 @@ pub fn save_patch(master: &EffectUniforms, layers: &[Layer]) {
 }
 
 /// Load a patch from a YAML file via native dialog.
-pub fn load_patch(master: &mut EffectUniforms, layers: &mut Vec<Layer>) {
+pub fn load_patch(master: &mut EffectUniforms, layers: &mut Vec<Layer>, ntsc_params: &mut NtscParams) {
     if let Some(path) = rfd::FileDialog::new()
         .add_filter("YAML", &["yaml", "yml"])
         .pick_file()
@@ -367,7 +368,7 @@ pub fn load_patch(master: &mut EffectUniforms, layers: &mut Vec<Layer>) {
         match std::fs::read_to_string(&path) {
             Ok(yaml) => match serde_yaml::from_str::<PatchState>(&yaml) {
                 Ok(patch) => {
-                    patch.apply(master, layers);
+                    patch.apply(master, layers, ntsc_params);
                 }
                 Err(e) => {
                     eprintln!("Failed to parse patch: {e}");

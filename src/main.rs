@@ -6,6 +6,7 @@ mod input;
 mod layers;
 mod ntsc;
 mod patch;
+mod render_export;
 mod renderer;
 mod video;
 mod web;
@@ -54,6 +55,8 @@ struct App {
     ntsc_state: ntsc::NtscState,
     // Web control panel
     web_state: Arc<WebState>,
+    // Offline render export
+    export_job: Option<render_export::ExportJob>,
 }
 
 impl App {
@@ -86,6 +89,7 @@ impl App {
             video_egui_texture_id: None,
             ntsc_state: ntsc::NtscState::new(),
             web_state,
+            export_job: None,
         }
     }
 
@@ -218,6 +222,45 @@ impl App {
             WebAction::SetNtscParam { param, value } => {
                 self.ntsc_state.set_param(&param, &value);
             }
+            WebAction::StartExport { width, height, fps, duration_secs } => {
+                if self.export_job.is_none() || self.export_job.as_ref().unwrap().is_done() {
+                    let patch = patch::PatchState::capture(
+                        &self.master_effects,
+                        &self.layers,
+                        &self.ntsc_state.params,
+                    );
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let timestamp = now;
+                    let output_dir = self.library_folder.as_ref()
+                        .map(|f| f.parent().unwrap_or(f).join("renders"))
+                        .unwrap_or_else(|| std::path::PathBuf::from("renders"));
+                    let output_path = format!(
+                        "{}/patch_{}_{width}x{height}.mp4",
+                        output_dir.display(),
+                        timestamp
+                    );
+                    let lib_folder = self.library_folder.as_ref()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_else(|| ".".to_string());
+                    let config = render_export::ExportConfig {
+                        width,
+                        height,
+                        fps,
+                        duration_secs,
+                        output_path,
+                    };
+                    self.export_job = Some(render_export::ExportJob::start(patch, config, &lib_folder));
+                    log::info!("Export started");
+                }
+            }
+            WebAction::CancelExport => {
+                if let Some(ref job) = self.export_job {
+                    job.cancel();
+                }
+            }
         }
     }
 
@@ -242,6 +285,19 @@ impl App {
                 p.file_name().map(|n| n.to_string_lossy().to_string())
             }).collect(),
             paused: self.master_paused,
+            export_progress: self.export_job.as_ref()
+                .map(|j| if j.is_done() { 1.0 } else { j.progress.progress_f32() })
+                .unwrap_or(0.0),
+            export_error: self.export_job.as_ref()
+                .and_then(|j| {
+                    if j.is_done() {
+                        let err = j.progress.error.lock().unwrap();
+                        if err.is_empty() { None } else { Some(err.clone()) }
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default(),
         };
 
         // Non-blocking: try to write + broadcast
@@ -543,6 +599,7 @@ impl ApplicationHandler for App {
                             patch::editor::save_patch(
                                 &self.master_effects,
                                 &self.layers,
+                                &self.ntsc_state.params,
                             );
                             return;
                         }
@@ -550,6 +607,7 @@ impl ApplicationHandler for App {
                             patch::editor::load_patch(
                                 &mut self.master_effects,
                                 &mut self.layers,
+                                &mut self.ntsc_state.params,
                             );
                             return;
                         }
