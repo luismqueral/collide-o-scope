@@ -46,7 +46,10 @@ connect();
 
 function sendAction(action) {
   if (ws && ws.readyState === WebSocket.OPEN) {
+    console.log('[ws] send:', JSON.stringify(action));
     ws.send(JSON.stringify(action));
+  } else {
+    console.warn('[ws] not connected, dropping:', action);
   }
 }
 
@@ -285,12 +288,14 @@ function createLayerCard(layer, index) {
   // Play/pause
   card.querySelector('.layer-play-btn').addEventListener('click', (e) => {
     e.stopPropagation();
+    console.log('[layer] play/pause clicked, index:', index);
     sendAction({ action: 'toggle_layer_pause', index });
   });
 
   // Visibility
   card.querySelector('.layer-vis-btn').addEventListener('click', (e) => {
     e.stopPropagation();
+    console.log('[layer] visibility clicked, index:', index);
     sendAction({ action: 'toggle_visibility', index });
   });
 
