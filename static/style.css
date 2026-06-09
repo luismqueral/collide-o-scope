@@ -437,7 +437,6 @@ body {
   justify-content: center;
   gap: 8px;
   padding: 10px;
-  border-bottom: 1px solid var(--border);
 }
 
 .transport-btn {
@@ -728,6 +727,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .export-status.success { color: #6c6; }
 .export-status.error { color: #e55; }
+
+/* Export group uses .group-header/.group-params; match the padding of the
+   other FX groups' .fx-group-header/.fx-group-body so it aligns above. */
+#export-group .group-header { padding: 6px 8px; }
+#export-group .group-params { padding: 4px 8px 6px; }
 
 #export-group select,
 #export-group input[type="number"] {
