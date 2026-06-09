@@ -146,11 +146,13 @@ impl App {
             WebAction::ToggleVisibility { index } => {
                 if index < self.layers.len() {
                     self.layers[index].visible = !self.layers[index].visible;
+                    log::info!("Layer {index} visibility → {}", self.layers[index].visible);
                 }
             }
             WebAction::ToggleLayerPause { index } => {
                 if index < self.layers.len() {
                     self.layers[index].paused = !self.layers[index].paused;
+                    log::info!("Layer {index} paused → {}", self.layers[index].paused);
                 }
             }
             WebAction::ToggleMasterPause => {
