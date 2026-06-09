@@ -9,12 +9,24 @@
 <body>
   <div class="app">
     <main class="columns">
-      <!-- LEFT: Library -->
+      <!-- LEFT: Patches + Media Library -->
       <aside class="col-left">
-        <h3 class="panel-title">Library</h3>
-        <div class="library-grid" id="library-grid">
-          <!-- Library items rendered by JS -->
-        </div>
+        <section class="patches-section">
+          <div class="patches-header">
+            <h3 class="panel-title">patches</h3>
+            <input type="text" id="patch-name" class="patch-name-input" placeholder="name…" maxlength="48">
+            <button id="patch-save" class="patch-save-btn" title="Save current patch"><i data-lucide="save"></i></button>
+          </div>
+          <div class="patches-list" id="patches-list">
+            <!-- Patch rows rendered by JS -->
+          </div>
+        </section>
+        <section class="library-section">
+          <h3 class="panel-title">media library</h3>
+          <div class="library-grid" id="library-grid">
+            <!-- Library items rendered by JS -->
+          </div>
+        </section>
       </aside>
 
       <!-- CENTER: Layers -->
@@ -43,6 +55,7 @@
             <div class="fx-group-header">
               <span class="chevron">&#x25BC;</span>
               <span class="group-label">DIGITAL</span>
+              <button class="group-rand" data-group="digital" title="Randomize"><i data-lucide="dices"></i></button>
               <button class="group-reset" data-group="digital">reset</button>
             </div>
             <div class="fx-group-body">
@@ -78,6 +91,7 @@
             <div class="fx-group-header">
               <span class="chevron">&#x25BC;</span>
               <span class="group-label">ANALOG</span>
+              <button class="group-rand" data-group="analog" title="Randomize"><i data-lucide="dices"></i></button>
               <button class="group-reset" data-group="analog">reset</button>
             </div>
             <div class="fx-group-body">
@@ -113,6 +127,7 @@
             <div class="fx-group-header">
               <span class="chevron">&#x25BC;</span>
               <span class="group-label">MOTION</span>
+              <button class="group-rand" data-group="motion" title="Randomize"><i data-lucide="dices"></i></button>
               <button class="group-reset" data-group="motion">reset</button>
             </div>
             <div class="fx-group-body">
@@ -132,6 +147,15 @@
             <div class="fx-group-header">
               <span class="chevron">&#x25BC;</span>
               <span class="group-label">VHS</span>
+              <select class="vhs-preset" title="Preset">
+                <option value="" disabled selected>&mdash; preset &mdash;</option>
+                <option value="Clean">Clean</option>
+                <option value="Worn Tape">Worn Tape</option>
+                <option value="Heavy Damage">Heavy Damage</option>
+                <option value="Tracking Trouble">Tracking Trouble</option>
+              </select>
+              <span class="preset-modified" title="Preset modified" style="display:none">--</span>
+              <button class="group-rand" data-group="vhs" title="Randomize"><i data-lucide="dices"></i></button>
               <button class="group-reset" data-group="vhs">reset</button>
             </div>
             <div class="fx-group-body">
@@ -247,6 +271,7 @@
     </main>
   </div>
 
+  <script src="https://unpkg.com/lucide@latest"></script>
   <script src="app.js"></script>
   <script src="https://queral.studio/dom-tools.js"></script>
 </body>

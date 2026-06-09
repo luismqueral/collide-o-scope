@@ -31,6 +31,8 @@ pub struct AppSnapshot {
     pub ntsc: NtscSnapshot,
     pub layers: Vec<LayerSnapshot>,
     pub library: Vec<String>,
+    #[serde(default)]
+    pub patches: Vec<String>,
     pub paused: bool,
     /// Export progress: 0.0 = idle, 0.0..1.0 = rendering, 1.0 = done
     #[serde(default)]
@@ -48,6 +50,7 @@ impl Default for AppSnapshot {
             ntsc: NtscSnapshot::default(),
             layers: Vec::new(),
             library: Vec::new(),
+            patches: Vec::new(),
             paused: false,
             export_progress: 0.0,
             export_error: String::new(),
@@ -180,6 +183,7 @@ impl NtscSnapshot {
 /// Per-layer info sent to the browser.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerSnapshot {
+    pub id: u64,
     pub filename: String,
     pub visible: bool,
     pub paused: bool,
@@ -242,6 +246,15 @@ pub enum WebAction {
     /// Cancel a running export
     #[serde(rename = "cancel_export")]
     CancelExport,
+    /// Save the current state as a named patch in the patches folder
+    #[serde(rename = "save_patch")]
+    SavePatch { name: String },
+    /// Load a named patch from the patches folder
+    #[serde(rename = "load_patch")]
+    LoadPatch { name: String },
+    /// Delete a named patch from the patches folder
+    #[serde(rename = "delete_patch")]
+    DeletePatch { name: String },
 }
 
 impl EffectsSnapshot {

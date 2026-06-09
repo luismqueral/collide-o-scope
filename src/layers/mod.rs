@@ -49,6 +49,9 @@ impl BlendMode {
 }
 
 pub struct Layer {
+    /// Stable identifier assigned by `App::add_layer`, used by the web UI to
+    /// track cards across reorders. Survives MoveLayer/RemoveLayer.
+    pub id: u64,
     pub filename: String,
     pub decoder: VideoDecoder,
     pub texture: wgpu::Texture,
@@ -101,6 +104,7 @@ impl Layer {
         effects.resolution = [width as f32, height as f32];
 
         Ok(Self {
+            id: 0,
             filename,
             decoder,
             texture,

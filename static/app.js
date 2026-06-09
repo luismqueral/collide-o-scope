@@ -4,6 +4,7 @@ const statusEl = document.getElementById('ws-status');
 const layersList = document.getElementById('layers-list');
 const layersEmpty = document.getElementById('layers-empty');
 const libraryGrid = document.getElementById('library-grid');
+const patchesList = document.getElementById('patches-list');
 
 // --- WebSocket ---
 
@@ -34,6 +35,7 @@ function connect() {
         syncNtsc(msg.ntsc);
         syncLayers(msg.layers);
         syncLibrary(msg.library);
+        syncPatches(msg.patches || []);
         syncTransport(msg.paused);
         syncExport(msg.export_progress, msg.export_error);
       }
@@ -115,18 +117,21 @@ document.querySelectorAll('.param-row[data-ntsc]').forEach((row) => {
       const v = parseFloat(slider.value);
       valueEl.textContent = formatValue(v, min, max, step);
       sendAction({ action: 'set_ntsc_param', param, value: v });
+      flagVhsModified();
     });
   }
 
   if (checkbox) {
     checkbox.addEventListener('change', () => {
       sendAction({ action: 'set_ntsc_param', param, value: checkbox.checked });
+      flagVhsModified();
     });
   }
 
   if (select) {
     select.addEventListener('change', () => {
       sendAction({ action: 'set_ntsc_param', param, value: parseInt(select.value) });
+      flagVhsModified();
     });
   }
 });
@@ -135,7 +140,8 @@ document.querySelectorAll('.param-row[data-ntsc]').forEach((row) => {
 
 document.querySelectorAll('.fx-group-header').forEach((header) => {
   header.addEventListener('click', (e) => {
-    if (e.target.classList.contains('group-reset')) return;
+    // Don't collapse when interacting with header controls (reset/randomize/preset).
+    if (e.target.closest('.group-reset, .group-rand, .vhs-preset, .preset-modified')) return;
     const group = header.closest('.fx-group');
     group.classList.toggle('collapsed');
   });
@@ -149,6 +155,107 @@ document.querySelectorAll('.group-reset').forEach((btn) => {
     sendAction({ action: 'reset_group', group: btn.dataset.group });
   });
 });
+
+// --- Master group randomize (sliders only) ---
+
+document.querySelectorAll('.group-rand').forEach((btn) => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    randomizeGroup(btn.closest('.fx-group'));
+  });
+});
+
+// Randomize every range slider in a master FX group, leaving toggles/selects alone.
+function randomizeGroup(group) {
+  if (!group) return;
+  const body = group.querySelector('.fx-group-body');
+  if (!body) return;
+  body.querySelectorAll('.param-row').forEach((row) => {
+    const slider = row.querySelector('input[type="range"]');
+    if (!slider) return; // sliders only — skip toggles/selects
+    const min = parseFloat(slider.min);
+    const max = parseFloat(slider.max);
+    const step = parseFloat(slider.step) || 0.01;
+    const v = randInRange(min, max, step);
+    slider.value = v;
+    const valEl = row.querySelector('.value');
+    if (valEl) valEl.textContent = formatValue(v, min, max, step);
+    if (row.dataset.param) {
+      sendAction({ action: 'set_param', param: row.dataset.param, value: v });
+    } else if (row.dataset.ntsc) {
+      sendAction({ action: 'set_ntsc_param', param: row.dataset.ntsc, value: v });
+    }
+  });
+  if (group.id === 'vhs-group') flagVhsModified();
+}
+
+// --- VHS presets ---
+// Full parameter sets keyed by `data-ntsc` field names. Applying a preset sends
+// one set_ntsc_param per field; the next state push syncs the DOM controls.
+
+const VHS_PRESETS = {
+  'Clean': {
+    enabled: true, tape_speed: 0,
+    head_switching_enabled: false, head_switching_height: 8, head_switching_shift: 0,
+    tracking_noise_enabled: false, tracking_noise_height: 24, tracking_noise_wave: 0, tracking_noise_snow: 0,
+    snow_intensity: 0, composite_noise_intensity: 0, luma_noise_intensity: 0, chroma_noise_intensity: 0, chroma_loss: 0,
+    edge_wave_enabled: false, edge_wave_intensity: 0, edge_wave_speed: 0.5,
+    luma_smear: 0, composite_sharpening: 0.5,
+  },
+  'Worn Tape': {
+    enabled: true, tape_speed: 1,
+    head_switching_enabled: false, head_switching_height: 8, head_switching_shift: 0,
+    tracking_noise_enabled: false, tracking_noise_height: 24, tracking_noise_wave: 0, tracking_noise_snow: 0,
+    snow_intensity: 0.05, composite_noise_intensity: 0.08, luma_noise_intensity: 0.04, chroma_noise_intensity: 0.10, chroma_loss: 0.002,
+    edge_wave_enabled: true, edge_wave_intensity: 3, edge_wave_speed: 1.0,
+    luma_smear: 0.15, composite_sharpening: 0.8,
+  },
+  'Heavy Damage': {
+    enabled: true, tape_speed: 2,
+    head_switching_enabled: true, head_switching_height: 12, head_switching_shift: 40,
+    tracking_noise_enabled: true, tracking_noise_height: 60, tracking_noise_wave: 20, tracking_noise_snow: 0.5,
+    snow_intensity: 0.30, composite_noise_intensity: 0.25, luma_noise_intensity: 0.12, chroma_noise_intensity: 0.30, chroma_loss: 0.006,
+    edge_wave_enabled: true, edge_wave_intensity: 10, edge_wave_speed: 2.0,
+    luma_smear: 0.4, composite_sharpening: 1.2,
+  },
+  'Tracking Trouble': {
+    enabled: true, tape_speed: 1,
+    head_switching_enabled: true, head_switching_height: 16, head_switching_shift: 60,
+    tracking_noise_enabled: true, tracking_noise_height: 90, tracking_noise_wave: 35, tracking_noise_snow: 0.7,
+    snow_intensity: 0.2, composite_noise_intensity: 0.10, luma_noise_intensity: 0, chroma_noise_intensity: 0, chroma_loss: 0,
+    edge_wave_enabled: true, edge_wave_intensity: 6, edge_wave_speed: 3.0,
+    luma_smear: 0.2, composite_sharpening: 0,
+  },
+};
+
+let currentVhsPreset = null;
+let vhsModified = false;
+
+const vhsPresetSelect = document.querySelector('.vhs-preset');
+const presetModifiedEl = document.querySelector('.preset-modified');
+
+if (vhsPresetSelect) {
+  vhsPresetSelect.addEventListener('change', (e) => {
+    e.stopPropagation();
+    const name = vhsPresetSelect.value;
+    const preset = VHS_PRESETS[name];
+    if (!preset) return;
+    // Direct sendAction (no DOM events dispatched) so this never self-flags as modified.
+    for (const [param, value] of Object.entries(preset)) {
+      sendAction({ action: 'set_ntsc_param', param, value });
+    }
+    currentVhsPreset = name;
+    vhsModified = false;
+    if (presetModifiedEl) presetModifiedEl.style.display = 'none';
+  });
+}
+
+// Mark the active preset as modified once the user tweaks any VHS control.
+function flagVhsModified() {
+  if (!currentVhsPreset || vhsModified) return;
+  vhsModified = true;
+  if (presetModifiedEl) presetModifiedEl.style.display = '';
+}
 
 // --- Transport buttons ---
 
@@ -231,7 +338,10 @@ layersList.addEventListener('click', (e) => {
   if (!card) return;
   const index = parseInt(card.dataset.index);
 
-  if (e.target.closest('.layer-play-btn')) {
+  if (e.target.closest('.layer-fx-rand')) {
+    e.stopPropagation();
+    randomizeLayerGroup(e.target.closest('.fx-group'), index);
+  } else if (e.target.closest('.layer-thumb-wrap')) {
     e.stopPropagation();
     sendAction({ action: 'toggle_layer_pause', index });
   } else if (e.target.closest('.layer-vis-btn')) {
@@ -240,11 +350,26 @@ layersList.addEventListener('click', (e) => {
   } else if (e.target.closest('.layer-remove-btn')) {
     e.stopPropagation();
     sendAction({ action: 'remove_layer', index });
+  } else if (e.target.closest('.fx-group-header')) {
+    // Collapse/expand a single FX group inside the layer body.
+    e.target.closest('.fx-group').classList.toggle('collapsed');
   } else if (e.target.closest('.layer-grip')) {
     // grip is for dragging only — don't toggle expand
   } else if (e.target.closest('.layer-header')) {
     card.classList.toggle('expanded');
   }
+});
+
+// Double-click a layer's title bar to collapse/expand all its FX groups at once.
+// Excludes the interactive header controls so they keep their own behavior.
+layersList.addEventListener('dblclick', (e) => {
+  const header = e.target.closest('.layer-header');
+  if (!header) return;
+  if (e.target.closest('.layer-thumb-wrap, .layer-vis-btn, .layer-remove-btn, .layer-grip')) return;
+  const card = header.closest('.layer-card');
+  const groups = card.querySelectorAll('.layer-body .fx-group');
+  const anyOpen = Array.from(groups).some((g) => !g.classList.contains('collapsed'));
+  groups.forEach((g) => g.classList.toggle('collapsed', anyOpen));
 });
 
 layersList.addEventListener('input', (e) => {
@@ -275,24 +400,16 @@ layersList.addEventListener('change', (e) => {
   }
 });
 
-// --- Layer drag-and-drop reorder ---
-// Only the `.layer-grip` handle is draggable so sliders/buttons keep working.
+// --- Layer reorder (pointer events) ---
+// HTML5 drag-and-drop proved flaky on non-first cards, so we drive reorder with
+// raw pointer events instead. Pointer capture isn't used; we hang move/up
+// listeners on `document` so the gesture survives the pointer leaving the grip.
 // Rust is authoritative for order: we send move_layer and let the next state
 // push re-render. `dragging` blocks syncLayers from churning mid-drag.
 
 let dragSrcIndex = null;
+let dragSrcCard = null;
 let dragging = false;
-
-layersList.addEventListener('dragstart', (e) => {
-  const grip = e.target.closest('.layer-grip');
-  if (!grip) { e.preventDefault(); return; } // block default img drag etc.
-  const card = grip.closest('.layer-card');
-  dragSrcIndex = parseInt(card.dataset.index);
-  dragging = true;
-  card.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', String(dragSrcIndex)); // Firefox needs data
-});
 
 function clearDropMarkers() {
   layersList.querySelectorAll('.drop-before, .drop-after').forEach((c) => {
@@ -300,28 +417,36 @@ function clearDropMarkers() {
   });
 }
 
-layersList.addEventListener('dragover', (e) => {
-  if (!dragging) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  const card = e.target.closest('.layer-card');
+// Locate the card under the pointer (elementFromPoint sees the topmost node, so
+// walk up to its .layer-card) and mark which edge we'd drop against.
+function updateDropTarget(clientY) {
   clearDropMarkers();
-  if (!card) return;
+  const el = document.elementFromPoint(lastPointerX, clientY);
+  const card = el && el.closest('.layer-card');
+  if (!card || !layersList.contains(card)) return;
   const rect = card.getBoundingClientRect();
-  const before = (e.clientY - rect.top) < rect.height / 2;
+  const before = (clientY - rect.top) < rect.height / 2;
   card.classList.add(before ? 'drop-before' : 'drop-after');
-});
+}
 
-layersList.addEventListener('drop', (e) => {
+let lastPointerX = 0;
+
+function onDragMove(e) {
   if (!dragging) return;
   e.preventDefault();
-  const card = e.target.closest('.layer-card');
-  clearDropMarkers();
-  if (card) {
-    const targetIndex = parseInt(card.dataset.index);
-    const rect = card.getBoundingClientRect();
-    const before = (e.clientY - rect.top) < rect.height / 2;
-    const insertion = before ? targetIndex : targetIndex + 1;
+  lastPointerX = e.clientX;
+  updateDropTarget(e.clientY);
+}
+
+function onDragEnd(e) {
+  if (!dragging) return;
+  // Resolve the drop position from whichever card carries a marker.
+  const beforeCard = layersList.querySelector('.drop-before');
+  const afterCard = layersList.querySelector('.drop-after');
+  const marked = beforeCard || afterCard;
+  if (marked) {
+    const targetIndex = parseInt(marked.dataset.index);
+    const insertion = beforeCard ? targetIndex : targetIndex + 1;
     // Adjust for the gap left by removing the source first.
     let to = dragSrcIndex < insertion ? insertion - 1 : insertion;
     to = Math.max(0, Math.min(to, layersList.children.length - 1));
@@ -329,13 +454,30 @@ layersList.addEventListener('drop', (e) => {
       sendAction({ action: 'move_layer', from: dragSrcIndex, to });
     }
   }
-});
-
-layersList.addEventListener('dragend', () => {
-  layersList.querySelectorAll('.dragging').forEach((c) => c.classList.remove('dragging'));
+  if (dragSrcCard) dragSrcCard.classList.remove('dragging');
+  layersList.classList.remove('reordering');
   clearDropMarkers();
   dragging = false;
   dragSrcIndex = null;
+  dragSrcCard = null;
+  document.removeEventListener('pointermove', onDragMove);
+  document.removeEventListener('pointerup', onDragEnd);
+}
+
+layersList.addEventListener('pointerdown', (e) => {
+  const grip = e.target.closest('.layer-grip');
+  if (!grip) return;
+  e.preventDefault();
+  const card = grip.closest('.layer-card');
+  if (!card) return;
+  dragSrcIndex = parseInt(card.dataset.index);
+  dragSrcCard = card;
+  dragging = true;
+  lastPointerX = e.clientX;
+  card.classList.add('dragging');
+  layersList.classList.add('reordering'); // CSS collapses all bodies while dragging
+  document.addEventListener('pointermove', onDragMove);
+  document.addEventListener('pointerup', onDragEnd);
 });
 
 // --- Sync layers ---
@@ -345,124 +487,177 @@ function syncLayers(layers) {
   if (dragging) return; // don't reorder DOM mid-drag
   layersEmpty.style.display = layers.length === 0 ? 'block' : 'none';
 
-  // Rebuild if count changed
-  if (layersList.children.length !== layers.length) {
-    layersList.innerHTML = '';
-    layers.forEach((layer, i) => {
-      layersList.appendChild(createLayerCard(layer, i));
-    });
-  } else {
-    layers.forEach((layer, i) => {
-      updateLayerCard(layersList.children[i], layer, i);
-    });
-  }
+  // Reconcile by stable layer id. Re-appending an existing node *relocates* it,
+  // so the whole card (thumbnail, expanded state, slider DOM) follows its layer
+  // across reorders instead of being morphed in place.
+  const existing = new Map();
+  Array.from(layersList.children).forEach((card) => {
+    existing.set(card.dataset.id, card);
+  });
+
+  // Drop cards whose layer no longer exists.
+  const liveIds = new Set(layers.map((l) => String(l.id)));
+  existing.forEach((card, id) => {
+    if (!liveIds.has(id)) {
+      card.remove();
+      existing.delete(id);
+    }
+  });
+
+  // Place cards in server order. CRITICAL: only touch the DOM when a card is
+  // actually out of position. An unconditional appendChild here detaches and
+  // reattaches every card on every state push (~30fps), which rips nodes out
+  // from under the pointer mid-click/drag (broken buttons, broken reorder) and
+  // makes the list flicker. insertBefore is a no-op-free reorder: untouched
+  // when order is unchanged, minimal moves when it isn't.
+  layers.forEach((layer, i) => {
+    const id = String(layer.id);
+    let card = existing.get(id);
+    if (!card) card = createLayerCard(layer, i);
+    const atPos = layersList.children[i];
+    if (atPos !== card) {
+      layersList.insertBefore(card, atPos || null);
+    }
+    updateLayerCard(card, layer, i);
+  });
 }
 
 function createLayerCard(layer, index) {
   const card = document.createElement('div');
   card.className = 'layer-card expanded';
   card.dataset.index = index;
+  card.dataset.id = layer.id;
 
   card.innerHTML = `
     <div class="layer-header">
-      <span class="layer-grip" draggable="true" title="Drag to reorder">\u2261</span>
-      <img class="layer-thumb" src="/thumb/${encodeURIComponent(layer.filename)}" alt="">
+      <span class="layer-grip" title="Drag to reorder"><i data-lucide="grip-vertical"></i></span>
+      <span class="layer-thumb-wrap ${layer.paused ? 'paused' : ''}" title="Play/Pause">
+        <img class="layer-thumb" src="/thumb/${encodeURIComponent(layer.filename)}" alt="">
+        <span class="layer-thumb-state"><i data-lucide="play"></i></span>
+      </span>
       <span class="layer-num">${index + 1}</span>
-      <button class="layer-play-btn" title="Play/Pause">${layer.paused ? '\u25B6' : '\u25A0'}</button>
       <span class="layer-title">${layer.filename || 'Untitled'}</span>
-      <button class="layer-vis-btn ${layer.visible ? 'visible' : ''}" title="Visibility">${layer.visible ? '\u25C9' : '\u25CB'}</button>
-      <button class="layer-remove-btn" title="Remove">\u00D7</button>
+      <button class="layer-vis-btn ${layer.visible ? 'visible' : ''}" data-visible="${layer.visible}" title="Visibility"><i data-lucide="${layer.visible ? 'eye' : 'eye-off'}"></i></button>
+      <button class="layer-remove-btn" title="Remove"><i data-lucide="x"></i></button>
     </div>
     <div class="layer-progress"><div class="layer-progress-fill" style="width:${(layer.progress * 100).toFixed(1)}%"></div></div>
     <div class="layer-body">
-      <div class="param-row" data-param="opacity">
-        <label>Opacity</label>
-        <input type="range" min="0" max="1" step="0.01" value="${layer.opacity}">
-        <span class="value">${layer.opacity.toFixed(2)}</span>
-      </div>
-      <div class="param-row" data-param="speed">
-        <label>Speed</label>
-        <input type="range" min="0.25" max="4" step="0.25" value="${layer.speed}">
-        <span class="value">${layer.speed.toFixed(2)}</span>
-      </div>
-      <div class="param-row select-row" data-param="blend_mode">
-        <label>Blend</label>
-        <select>
-          <option value="normal" ${layer.blend_mode === 'normal' ? 'selected' : ''}>Normal</option>
-          <option value="screen" ${layer.blend_mode === 'screen' ? 'selected' : ''}>Screen</option>
-          <option value="multiply" ${layer.blend_mode === 'multiply' ? 'selected' : ''}>Multiply</option>
-          <option value="difference" ${layer.blend_mode === 'difference' ? 'selected' : ''}>Difference</option>
-        </select>
-      </div>
-
-      <div class="layer-fx-group">
-        <div class="layer-fx-label">COLOR</div>
-        <div class="param-row" data-param="hue_shift">
-          <label>Hue</label>
-          <input type="range" min="-180" max="180" step="1" value="${layer.hue_shift}">
-          <span class="value">${formatValue(layer.hue_shift, -180, 180, 1)}</span>
+      <div class="fx-group" data-layer-group="blend">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">BLEND</span>
         </div>
-        <div class="param-row" data-param="saturation">
-          <label>Saturation</label>
-          <input type="range" min="-1" max="1" step="0.01" value="${layer.saturation}">
-          <span class="value">${formatValue(layer.saturation, -1, 1, 0.01)}</span>
-        </div>
-        <div class="param-row" data-param="brightness">
-          <label>Brightness</label>
-          <input type="range" min="-1" max="1" step="0.01" value="${layer.brightness}">
-          <span class="value">${formatValue(layer.brightness, -1, 1, 0.01)}</span>
-        </div>
-        <div class="param-row" data-param="contrast">
-          <label>Contrast</label>
-          <input type="range" min="-1" max="1" step="0.01" value="${layer.contrast}">
-          <span class="value">${formatValue(layer.contrast, -1, 1, 0.01)}</span>
+        <div class="fx-group-body">
+          <div class="param-row" data-param="opacity">
+            <label>Opacity</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.opacity}">
+            <span class="value">${layer.opacity.toFixed(2)}</span>
+          </div>
+          <div class="param-row" data-param="speed">
+            <label>Speed</label>
+            <input type="range" min="0.25" max="4" step="0.25" value="${layer.speed}">
+            <span class="value">${layer.speed.toFixed(2)}</span>
+          </div>
+          <div class="param-row select-row" data-param="blend_mode">
+            <label>Blend</label>
+            <select>
+              <option value="normal" ${layer.blend_mode === 'normal' ? 'selected' : ''}>Normal</option>
+              <option value="screen" ${layer.blend_mode === 'screen' ? 'selected' : ''}>Screen</option>
+              <option value="multiply" ${layer.blend_mode === 'multiply' ? 'selected' : ''}>Multiply</option>
+              <option value="difference" ${layer.blend_mode === 'difference' ? 'selected' : ''}>Difference</option>
+            </select>
+          </div>
         </div>
       </div>
 
-      <div class="layer-fx-group">
-        <div class="layer-fx-label">DIGITAL</div>
-        <div class="param-row" data-param="pixelate">
-          <label>Pixelate</label>
-          <input type="range" min="1" max="32" step="1" value="${layer.pixelate}">
-          <span class="value">${formatValue(layer.pixelate, 1, 32, 1)}</span>
+      <div class="fx-group collapsed" data-layer-group="color">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">COLOR</span>
+          <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
         </div>
-        <div class="param-row" data-param="rgb_split">
-          <label>RGB Split</label>
-          <input type="range" min="0" max="30" step="0.5" value="${layer.rgb_split}">
-          <span class="value">${formatValue(layer.rgb_split, 0, 30, 0.5)}</span>
+        <div class="fx-group-body">
+          <div class="param-row" data-param="hue_shift">
+            <label>Hue</label>
+            <input type="range" min="-180" max="180" step="1" value="${layer.hue_shift}">
+            <span class="value">${formatValue(layer.hue_shift, -180, 180, 1)}</span>
+          </div>
+          <div class="param-row" data-param="saturation">
+            <label>Saturation</label>
+            <input type="range" min="-1" max="1" step="0.01" value="${layer.saturation}">
+            <span class="value">${formatValue(layer.saturation, -1, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="brightness">
+            <label>Brightness</label>
+            <input type="range" min="-1" max="1" step="0.01" value="${layer.brightness}">
+            <span class="value">${formatValue(layer.brightness, -1, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="contrast">
+            <label>Contrast</label>
+            <input type="range" min="-1" max="1" step="0.01" value="${layer.contrast}">
+            <span class="value">${formatValue(layer.contrast, -1, 1, 0.01)}</span>
+          </div>
         </div>
-        <div class="param-row" data-param="posterize">
-          <label>Posterize</label>
-          <input type="range" min="0" max="16" step="1" value="${layer.posterize}">
-          <span class="value">${formatValue(layer.posterize, 0, 16, 1)}</span>
+      </div>
+
+      <div class="fx-group collapsed" data-layer-group="digital">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">DIGITAL</span>
+          <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
         </div>
-        <div class="param-row toggle-row" data-param="invert">
-          <label>Invert</label>
-          <label class="toggle"><input type="checkbox" ${layer.invert ? 'checked' : ''}><span class="toggle-slider"></span></label>
+        <div class="fx-group-body">
+          <div class="param-row" data-param="pixelate">
+            <label>Pixelate</label>
+            <input type="range" min="1" max="32" step="1" value="${layer.pixelate}">
+            <span class="value">${formatValue(layer.pixelate, 1, 32, 1)}</span>
+          </div>
+          <div class="param-row" data-param="rgb_split">
+            <label>RGB Split</label>
+            <input type="range" min="0" max="30" step="0.5" value="${layer.rgb_split}">
+            <span class="value">${formatValue(layer.rgb_split, 0, 30, 0.5)}</span>
+          </div>
+          <div class="param-row" data-param="posterize">
+            <label>Posterize</label>
+            <input type="range" min="0" max="16" step="1" value="${layer.posterize}">
+            <span class="value">${formatValue(layer.posterize, 0, 16, 1)}</span>
+          </div>
+          <div class="param-row toggle-row" data-param="invert">
+            <label>Invert</label>
+            <label class="toggle"><input type="checkbox" ${layer.invert ? 'checked' : ''}><span class="toggle-slider"></span></label>
+          </div>
         </div>
       </div>
     </div>
   `;
 
+  renderIcons(card); // swap this card's <i data-lucide> placeholders for <svg>
   return card;
 }
 
 function updateLayerCard(card, layer, index) {
   if (!card) return;
   card.dataset.index = index;
+  card.dataset.id = layer.id;
   const num = card.querySelector('.layer-num');
   if (num) num.textContent = index + 1;
 
-  const playBtn = card.querySelector('.layer-play-btn');
   const title = card.querySelector('.layer-title');
   const visBtn = card.querySelector('.layer-vis-btn');
   const progressFill = card.querySelector('.layer-progress-fill');
+  const thumbWrap = card.querySelector('.layer-thumb-wrap');
 
-  if (playBtn) playBtn.textContent = layer.paused ? '\u25B6' : '\u25A0';
   if (title) title.textContent = layer.filename || 'Untitled';
+  if (thumbWrap) thumbWrap.classList.toggle('paused', !!layer.paused);
   if (visBtn) {
-    visBtn.textContent = layer.visible ? '\u25C9' : '\u25CB';
-    visBtn.className = `layer-vis-btn ${layer.visible ? 'visible' : ''}`;
+    // Rebuild the eye <svg> only when visibility actually changes (never per-frame).
+    const prev = visBtn.dataset.visible === 'true';
+    if (prev !== layer.visible) {
+      visBtn.dataset.visible = String(layer.visible);
+      visBtn.classList.toggle('visible', layer.visible);
+      visBtn.innerHTML = `<i data-lucide="${layer.visible ? 'eye' : 'eye-off'}"></i>`;
+      renderIcons(visBtn);
+    }
   }
   if (progressFill) {
     progressFill.style.width = `${(layer.progress * 100).toFixed(1)}%`;
@@ -574,6 +769,72 @@ function syncLibrary(files) {
   });
 }
 
+// --- Sync patches ---
+
+let lastPatchesKey = null;
+
+function syncPatches(patches) {
+  if (!patches) return;
+
+  // Only rebuild when the set of names changes (avoids clobbering hover state).
+  const key = patches.join('\n');
+  if (key === lastPatchesKey) return;
+  lastPatchesKey = key;
+
+  patchesList.innerHTML = '';
+
+  if (patches.length === 0) {
+    patchesList.innerHTML = '<p class="dim" style="padding:6px 8px;">No saved patches</p>';
+    return;
+  }
+
+  patches.forEach((name) => {
+    const row = document.createElement('div');
+    row.className = 'patch-row';
+
+    const label = document.createElement('span');
+    label.className = 'patch-name';
+    label.textContent = name;
+    label.title = `Load "${name}"`;
+    label.addEventListener('click', () => {
+      sendAction({ action: 'load_patch', name });
+    });
+    row.appendChild(label);
+
+    const del = document.createElement('button');
+    del.className = 'patch-del';
+    del.textContent = '×';
+    del.title = `Delete "${name}"`;
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm(`Delete patch "${name}"?`)) {
+        sendAction({ action: 'delete_patch', name });
+      }
+    });
+    row.appendChild(del);
+
+    patchesList.appendChild(row);
+  });
+}
+
+// --- Save patch (inline name field + save icon) ---
+
+function savePatch() {
+  const input = document.getElementById('patch-name');
+  const name = input.value.trim();
+  if (!name) return;
+  sendAction({ action: 'save_patch', name });
+  input.value = '';
+}
+
+document.getElementById('patch-save').addEventListener('click', savePatch);
+document.getElementById('patch-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    savePatch();
+  }
+});
+
 // --- Sync transport ---
 
 function syncTransport(paused) {
@@ -648,3 +909,39 @@ function formatValue(v, min, max, step) {
   if (step >= 0.01) return v.toFixed(1);
   return v.toFixed(3);
 }
+
+// Render Lucide icons within `el` only. Guarded so a blocked CDN degrades to
+// empty (decorative) buttons instead of throwing — titles still convey function.
+function renderIcons(el) {
+  if (window.lucide && el) lucide.createIcons({ root: el });
+}
+
+// Pick a random value in [min, max] snapped to `step`, without float drift.
+function randInRange(min, max, step) {
+  const s = step > 0 ? step : 0.01;
+  const steps = Math.max(1, Math.round((max - min) / s));
+  const v = min + Math.round(Math.random() * steps) * s;
+  const decimals = (String(s).split('.')[1] || '').length;
+  return parseFloat(v.toFixed(decimals));
+}
+
+// Randomize the range sliders of one per-layer FX group (COLOR/DIGITAL).
+// Sliders only — the invert toggle and any selects are left untouched.
+function randomizeLayerGroup(fxGroup, index) {
+  if (!fxGroup) return;
+  fxGroup.querySelectorAll('.param-row[data-param]').forEach((row) => {
+    const slider = row.querySelector('input[type="range"]');
+    if (!slider) return;
+    const min = parseFloat(slider.min);
+    const max = parseFloat(slider.max);
+    const step = parseFloat(slider.step) || 0.01;
+    const v = randInRange(min, max, step);
+    slider.value = v;
+    const valEl = row.querySelector('.value');
+    if (valEl) valEl.textContent = formatValue(v, min, max, step);
+    sendAction({ action: 'set_layer_param', index, param: row.dataset.param, value: v });
+  });
+}
+
+// Render the static (master-panel) Lucide placeholders once on load.
+if (window.lucide) lucide.createIcons();

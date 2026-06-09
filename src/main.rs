@@ -36,6 +36,7 @@ struct App {
     renderer: Option<Renderer>,
     layers: Vec<Layer>,
     selected_layer: Option<usize>,
+    next_layer_id: u64,
     master_effects: effects::EffectUniforms,
     master_paused: bool,
     last_frame_time: Instant,
@@ -44,6 +45,8 @@ struct App {
     // Library
     library_folder: Option<PathBuf>,
     library_files: Vec<PathBuf>,
+    // Saved patch names (file stems), cached; re-scanned on save/delete
+    patch_files: Vec<String>,
     // YAML editor
     yaml_editor: patch::editor::EditorState,
     // egui state
@@ -69,12 +72,15 @@ impl App {
         // Generate thumbnails on background thread
         generate_thumbnails(&library_files, web_state.clone());
 
+        let patch_files = scan_patches(&patches_dir(&library_folder));
+
         Self {
             initial_video,
             window: None,
             renderer: None,
             layers: Vec::new(),
             selected_layer: None,
+            next_layer_id: 0,
             master_effects: effects::EffectUniforms::default(),
             master_paused: false,
             last_frame_time: Instant::now(),
@@ -82,6 +88,7 @@ impl App {
             modifiers: ModifiersState::empty(),
             library_folder,
             library_files,
+            patch_files,
             yaml_editor: patch::editor::EditorState::default(),
             egui_ctx: egui::Context::default(),
             egui_winit: None,
@@ -96,7 +103,9 @@ impl App {
     fn add_layer(&mut self, path: &str) {
         let renderer = self.renderer.as_ref().unwrap();
         match Layer::new(path, &renderer.device) {
-            Ok(layer) => {
+            Ok(mut layer) => {
+                layer.id = self.next_layer_id;
+                self.next_layer_id += 1;
                 self.layers.push(layer);
                 self.selected_layer = Some(self.layers.len() - 1);
             }
@@ -323,6 +332,98 @@ impl App {
                     job.cancel();
                 }
             }
+            WebAction::SavePatch { name } => {
+                let name = sanitize_patch_name(&name);
+                if name.is_empty() {
+                    return;
+                }
+                let dir = patches_dir(&self.library_folder);
+                if let Err(e) = std::fs::create_dir_all(&dir) {
+                    log::error!("Failed to create patches dir: {e}");
+                    return;
+                }
+                let patch = patch::PatchState::capture(
+                    &self.master_effects,
+                    &self.layers,
+                    &self.ntsc_state.params,
+                );
+                match serde_yaml::to_string(&patch) {
+                    Ok(yaml) => {
+                        let path = dir.join(format!("{name}.yaml"));
+                        if let Err(e) = std::fs::write(&path, &yaml) {
+                            log::error!("Failed to write patch {name}: {e}");
+                        } else {
+                            self.patch_files = scan_patches(&dir);
+                            log::info!("Saved patch '{name}'");
+                        }
+                    }
+                    Err(e) => log::error!("Failed to serialize patch: {e}"),
+                }
+            }
+            WebAction::LoadPatch { name } => {
+                let name = sanitize_patch_name(&name);
+                if name.is_empty() {
+                    return;
+                }
+                let dir = patches_dir(&self.library_folder);
+                let path = dir.join(format!("{name}.yaml"));
+                let yaml = match std::fs::read_to_string(&path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("Failed to read patch {name}: {e}");
+                        return;
+                    }
+                };
+                let patch = match serde_yaml::from_str::<patch::PatchState>(&yaml) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        log::error!("Failed to parse patch {name}: {e}");
+                        return;
+                    }
+                };
+                // Rebuild layers from scratch: PatchState::apply only zips against
+                // existing layers, so we recreate decoders via add_layer here.
+                self.layers.clear();
+                self.selected_layer = None;
+                for cfg in &patch.layers {
+                    let resolved = self.library_files.iter().find(|p| {
+                        p.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .as_deref()
+                            == Some(&cfg.filename)
+                    });
+                    match resolved {
+                        Some(p) => {
+                            let path_str = p.to_string_lossy().to_string();
+                            self.add_layer(&path_str);
+                            if let Some(layer) = self.layers.last_mut() {
+                                cfg.apply_to_layer(layer);
+                            }
+                        }
+                        None => log::warn!(
+                            "Patch '{name}' references missing video '{}', skipping",
+                            cfg.filename
+                        ),
+                    }
+                }
+                patch.master.apply_to_uniforms(&mut self.master_effects);
+                if let Some(n) = &patch.ntsc {
+                    self.ntsc_state.params = n.to_params();
+                }
+                log::info!("Loaded patch '{name}' ({} layers)", self.layers.len());
+            }
+            WebAction::DeletePatch { name } => {
+                let name = sanitize_patch_name(&name);
+                if name.is_empty() {
+                    return;
+                }
+                let dir = patches_dir(&self.library_folder);
+                let path = dir.join(format!("{name}.yaml"));
+                if let Err(e) = std::fs::remove_file(&path) {
+                    log::error!("Failed to delete patch {name}: {e}");
+                }
+                self.patch_files = scan_patches(&dir);
+            }
         }
     }
 
@@ -335,6 +436,7 @@ impl App {
             effects: EffectsSnapshot::from_uniforms(&self.master_effects),
             ntsc: NtscSnapshot::from_params(&self.ntsc_state.params),
             layers: self.layers.iter().map(|l| LayerSnapshot {
+                id: l.id,
                 filename: l.filename.clone(),
                 visible: l.visible,
                 paused: l.paused,
@@ -354,6 +456,7 @@ impl App {
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())
             }).collect(),
+            patches: self.patch_files.clone(),
             paused: self.master_paused,
             export_progress: self.export_job.as_ref()
                 .map(|j| if j.is_done() { 1.0 } else { j.progress.progress_f32() })
@@ -392,6 +495,44 @@ fn scan_folder(folder: &PathBuf) -> Vec<PathBuf> {
         .collect();
     files.sort();
     files
+}
+
+/// Folder where patch YAML files are stored. Mirrors the renders folder:
+/// a `patches/` dir next to the library folder (i.e. project root), falling
+/// back to `./patches` when no library folder is set.
+fn patches_dir(library_folder: &Option<PathBuf>) -> PathBuf {
+    library_folder
+        .as_ref()
+        .map(|f| f.parent().unwrap_or(f).join("patches"))
+        .unwrap_or_else(|| PathBuf::from("patches"))
+}
+
+/// List saved patch names (file stems, without the `.yaml` extension), sorted.
+/// Returns an empty list if the folder does not exist yet.
+fn scan_patches(dir: &PathBuf) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && p.extension().map(|x| x == "yaml").unwrap_or(false))
+        .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
+        .collect();
+    names.sort();
+    names
+}
+
+/// Sanitize a user-supplied patch name into a safe filename stem. Keeps
+/// alphanumerics, dash, underscore and space; replaces anything else with `_`.
+/// This prevents path traversal (e.g. `../`) and other unsafe characters.
+fn sanitize_patch_name(name: &str) -> String {
+    let cleaned: String = name
+        .trim()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+        .collect();
+    cleaned.trim().chars().take(48).collect()
 }
 
 /// Generate thumbnails and preview frames for all library files using ffmpeg CLI.
@@ -1387,6 +1528,16 @@ fn main() {
     env_logger::init();
 
     let args: Vec<String> = std::env::args().collect();
+
+    // Headless subcommands bail out before any window / web server is created.
+    if args.get(1).map(|s| s.as_str()) == Some("render") {
+        if let Err(e) = run_cli_render(&args[2..]) {
+            eprintln!("render failed: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let arg = args.get(1).cloned();
 
     // Detect if arg is a folder (library) or a file (single layer)
@@ -1421,4 +1572,76 @@ fn main() {
     let event_loop = EventLoop::new().unwrap();
     let mut app = App::new(initial_video, library_folder, web_state);
     event_loop.run_app(&mut app).unwrap();
+}
+
+/// Headless `render` subcommand: load a patch YAML and render it to an MP4.
+///
+/// Usage:
+///   collide-o-scope render --patch <file.yaml> --library <folder> \
+///       [--out <file.mp4>] [--duration <secs>] [--fps <n>] [--res <WxH>]
+fn run_cli_render(args: &[String]) -> Result<(), String> {
+    let mut patch_path: Option<String> = None;
+    let mut library: Option<String> = None;
+    let mut out = "experiments/headless-output/out.mp4".to_string();
+    let mut width: u32 = 1280;
+    let mut height: u32 = 720;
+    let mut fps: u32 = 30;
+    let mut duration: f32 = 10.0;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--patch" => patch_path = args.get(i + 1).cloned(),
+            "--library" => library = args.get(i + 1).cloned(),
+            "--out" => {
+                if let Some(v) = args.get(i + 1) {
+                    out = v.clone();
+                }
+            }
+            "--duration" => {
+                duration = args
+                    .get(i + 1)
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("bad --duration")?;
+            }
+            "--fps" => {
+                fps = args
+                    .get(i + 1)
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("bad --fps")?;
+            }
+            "--res" => {
+                let v = args.get(i + 1).ok_or("missing value for --res")?;
+                let (w, h) = v.split_once('x').ok_or("--res must look like 1280x720")?;
+                width = w.parse().map_err(|_| "bad --res width")?;
+                height = h.parse().map_err(|_| "bad --res height")?;
+            }
+            other => return Err(format!("unknown argument: {other}")),
+        }
+        i += 2;
+    }
+
+    let patch_path = patch_path.ok_or("missing --patch <file.yaml>")?;
+    let library = library.ok_or("missing --library <folder>")?;
+
+    let yaml =
+        std::fs::read_to_string(&patch_path).map_err(|e| format!("reading {patch_path}: {e}"))?;
+    let patch: patch::PatchState =
+        serde_yaml::from_str(&yaml).map_err(|e| format!("parsing {patch_path}: {e}"))?;
+
+    let config = render_export::ExportConfig {
+        width,
+        height,
+        fps,
+        duration_secs: duration,
+        output_path: out.clone(),
+    };
+
+    println!(
+        "rendering {} layer(s) -> {out} ({width}x{height} @ {fps}fps, {duration}s)",
+        patch.layers.len()
+    );
+    render_export::render_blocking(patch, config, &library)?;
+    println!("done: {out}");
+    Ok(())
 }
