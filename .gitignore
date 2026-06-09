@@ -1,3 +1,9 @@
 /target
 experiments/*/target
 .DS_Store
+
+# Media + render output (large binaries, not source)
+/videos/
+/renders/
+/test.mp4
+/experiments/headless-output/
