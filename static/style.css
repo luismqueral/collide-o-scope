@@ -261,6 +261,38 @@ body {
   display: block;
 }
 
+/* Drag-to-reorder */
+.layer-grip {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+}
+
+.layer-grip:active { cursor: grabbing; }
+
+.layer-card.dragging { opacity: 0.5; }
+
+.layer-card.drop-before { border-top: 2px solid var(--accent); }
+.layer-card.drop-after { border-bottom: 2px solid var(--accent); }
+
+/* Per-layer FX groups (color / digital) */
+.layer-fx-group {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.layer-fx-label {
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
 /* === RIGHT: TRANSPORT + MASTER FX === */
 .col-right {
   border-left: 1px solid var(--border);

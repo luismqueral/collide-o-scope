@@ -187,6 +187,16 @@ pub struct LayerSnapshot {
     pub speed: f32,
     pub blend_mode: String,
     pub progress: f32,
+    // Per-layer effects (color)
+    pub hue_shift: f32,
+    pub saturation: f32,
+    pub brightness: f32,
+    pub contrast: f32,
+    // Per-layer effects (digital)
+    pub pixelate: f32,
+    pub rgb_split: f32,
+    pub posterize: f32,
+    pub invert: bool,
 }
 
 /// Actions the browser can request (processed by the render loop).
@@ -202,6 +212,9 @@ pub enum WebAction {
     /// Remove a layer by index
     #[serde(rename = "remove_layer")]
     RemoveLayer { index: usize },
+    /// Move a layer from one index to another (drag-and-drop reorder)
+    #[serde(rename = "move_layer")]
+    MoveLayer { from: usize, to: usize },
     /// Toggle layer visibility
     #[serde(rename = "toggle_visibility")]
     ToggleVisibility { index: usize },

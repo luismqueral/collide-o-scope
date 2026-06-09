@@ -36,6 +36,16 @@ impl BlendMode {
             BlendMode::Difference => "Difference",
         }
     }
+
+    /// Lowercase id used on the wire (matches the web UI <option> values).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BlendMode::Normal => "normal",
+            BlendMode::Screen => "screen",
+            BlendMode::Multiply => "multiply",
+            BlendMode::Difference => "difference",
+        }
+    }
 }
 
 pub struct Layer {

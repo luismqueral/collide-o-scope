@@ -143,6 +143,26 @@ impl App {
                     }
                 }
             }
+            WebAction::MoveLayer { from, to } => {
+                let len = self.layers.len();
+                if from < len && to < len && from != to {
+                    let layer = self.layers.remove(from);
+                    self.layers.insert(to, layer);
+                    // Keep the egui selection pointing at the same layer.
+                    if let Some(sel) = self.selected_layer {
+                        self.selected_layer = Some(if sel == from {
+                            to
+                        } else if from < sel && sel <= to {
+                            sel - 1
+                        } else if to <= sel && sel < from {
+                            sel + 1
+                        } else {
+                            sel
+                        });
+                    }
+                    log::info!("Layer moved {from} → {to}");
+                }
+            }
             WebAction::ToggleVisibility { index } => {
                 if index < self.layers.len() {
                     self.layers[index].visible = !self.layers[index].visible;
@@ -217,6 +237,46 @@ impl App {
                                 };
                             }
                         }
+                        "hue_shift" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.hue_shift = (v as f32).clamp(-180.0, 180.0);
+                            }
+                        }
+                        "saturation" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.saturation = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "brightness" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.brightness = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "contrast" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.contrast = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "pixelate" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.pixelate_size = (v as f32).clamp(1.0, 32.0);
+                            }
+                        }
+                        "rgb_split" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.rgb_split = (v as f32).clamp(0.0, 30.0);
+                            }
+                        }
+                        "posterize" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.posterize = (v as f32).clamp(0.0, 16.0);
+                            }
+                        }
+                        "invert" => {
+                            if let Some(b) = value.as_bool() {
+                                layer.effects.invert = if b { 1.0 } else { 0.0 };
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -280,8 +340,16 @@ impl App {
                 paused: l.paused,
                 opacity: l.opacity,
                 speed: l.speed,
-                blend_mode: l.blend_mode.label().to_string(),
+                blend_mode: l.blend_mode.as_str().to_string(),
                 progress: l.decoder.progress(),
+                hue_shift: l.effects.hue_shift,
+                saturation: l.effects.saturation,
+                brightness: l.effects.brightness,
+                contrast: l.effects.contrast,
+                pixelate: l.effects.pixelate_size,
+                rgb_split: l.effects.rgb_split,
+                posterize: l.effects.posterize,
+                invert: l.effects.invert > 0.5,
             }).collect(),
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())

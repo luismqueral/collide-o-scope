@@ -222,10 +222,127 @@ function syncNtsc(ntsc) {
   }
 }
 
+// --- Layer event delegation ---
+// All layer-card controls are handled here (not per-card) so that indices are
+// read live from `card.dataset.index` and stay correct across reordering.
+
+layersList.addEventListener('click', (e) => {
+  const card = e.target.closest('.layer-card');
+  if (!card) return;
+  const index = parseInt(card.dataset.index);
+
+  if (e.target.closest('.layer-play-btn')) {
+    e.stopPropagation();
+    sendAction({ action: 'toggle_layer_pause', index });
+  } else if (e.target.closest('.layer-vis-btn')) {
+    e.stopPropagation();
+    sendAction({ action: 'toggle_visibility', index });
+  } else if (e.target.closest('.layer-remove-btn')) {
+    e.stopPropagation();
+    sendAction({ action: 'remove_layer', index });
+  } else if (e.target.closest('.layer-grip')) {
+    // grip is for dragging only — don't toggle expand
+  } else if (e.target.closest('.layer-header')) {
+    card.classList.toggle('expanded');
+  }
+});
+
+layersList.addEventListener('input', (e) => {
+  const slider = e.target;
+  if (slider.type !== 'range') return;
+  const row = slider.closest('.param-row[data-param]');
+  const card = slider.closest('.layer-card');
+  if (!row || !card) return;
+  const index = parseInt(card.dataset.index);
+  const param = row.dataset.param;
+  const v = parseFloat(slider.value);
+  const valEl = row.querySelector('.value');
+  if (valEl) valEl.textContent = formatValue(v, parseFloat(slider.min), parseFloat(slider.max), parseFloat(slider.step));
+  sendAction({ action: 'set_layer_param', index, param, value: v });
+});
+
+layersList.addEventListener('change', (e) => {
+  const el = e.target;
+  const row = el.closest('.param-row[data-param]');
+  const card = el.closest('.layer-card');
+  if (!row || !card) return;
+  const index = parseInt(card.dataset.index);
+  const param = row.dataset.param;
+  if (el.tagName === 'SELECT') {
+    sendAction({ action: 'set_layer_param', index, param, value: el.value });
+  } else if (el.type === 'checkbox') {
+    sendAction({ action: 'set_layer_param', index, param, value: el.checked });
+  }
+});
+
+// --- Layer drag-and-drop reorder ---
+// Only the `.layer-grip` handle is draggable so sliders/buttons keep working.
+// Rust is authoritative for order: we send move_layer and let the next state
+// push re-render. `dragging` blocks syncLayers from churning mid-drag.
+
+let dragSrcIndex = null;
+let dragging = false;
+
+layersList.addEventListener('dragstart', (e) => {
+  const grip = e.target.closest('.layer-grip');
+  if (!grip) { e.preventDefault(); return; } // block default img drag etc.
+  const card = grip.closest('.layer-card');
+  dragSrcIndex = parseInt(card.dataset.index);
+  dragging = true;
+  card.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', String(dragSrcIndex)); // Firefox needs data
+});
+
+function clearDropMarkers() {
+  layersList.querySelectorAll('.drop-before, .drop-after').forEach((c) => {
+    c.classList.remove('drop-before', 'drop-after');
+  });
+}
+
+layersList.addEventListener('dragover', (e) => {
+  if (!dragging) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const card = e.target.closest('.layer-card');
+  clearDropMarkers();
+  if (!card) return;
+  const rect = card.getBoundingClientRect();
+  const before = (e.clientY - rect.top) < rect.height / 2;
+  card.classList.add(before ? 'drop-before' : 'drop-after');
+});
+
+layersList.addEventListener('drop', (e) => {
+  if (!dragging) return;
+  e.preventDefault();
+  const card = e.target.closest('.layer-card');
+  clearDropMarkers();
+  if (card) {
+    const targetIndex = parseInt(card.dataset.index);
+    const rect = card.getBoundingClientRect();
+    const before = (e.clientY - rect.top) < rect.height / 2;
+    const insertion = before ? targetIndex : targetIndex + 1;
+    // Adjust for the gap left by removing the source first.
+    let to = dragSrcIndex < insertion ? insertion - 1 : insertion;
+    to = Math.max(0, Math.min(to, layersList.children.length - 1));
+    if (to !== dragSrcIndex) {
+      sendAction({ action: 'move_layer', from: dragSrcIndex, to });
+    }
+  }
+});
+
+layersList.addEventListener('dragend', () => {
+  layersList.querySelectorAll('.dragging').forEach((c) => c.classList.remove('dragging'));
+  clearDropMarkers();
+  dragging = false;
+  dragSrcIndex = null;
+});
+
 // --- Sync layers ---
 
 function syncLayers(layers) {
   if (!layers) return;
+  if (dragging) return; // don't reorder DOM mid-drag
   layersEmpty.style.display = layers.length === 0 ? 'block' : 'none';
 
   // Rebuild if count changed
@@ -248,6 +365,7 @@ function createLayerCard(layer, index) {
 
   card.innerHTML = `
     <div class="layer-header">
+      <span class="layer-grip" draggable="true" title="Drag to reorder">\u2261</span>
       <img class="layer-thumb" src="/thumb/${encodeURIComponent(layer.filename)}" alt="">
       <span class="layer-num">${index + 1}</span>
       <button class="layer-play-btn" title="Play/Pause">${layer.paused ? '\u25B6' : '\u25A0'}</button>
@@ -257,17 +375,17 @@ function createLayerCard(layer, index) {
     </div>
     <div class="layer-progress"><div class="layer-progress-fill" style="width:${(layer.progress * 100).toFixed(1)}%"></div></div>
     <div class="layer-body">
-      <div class="param-row" data-layer="${index}" data-param="opacity">
+      <div class="param-row" data-param="opacity">
         <label>Opacity</label>
         <input type="range" min="0" max="1" step="0.01" value="${layer.opacity}">
         <span class="value">${layer.opacity.toFixed(2)}</span>
       </div>
-      <div class="param-row" data-layer="${index}" data-param="speed">
+      <div class="param-row" data-param="speed">
         <label>Speed</label>
         <input type="range" min="0.25" max="4" step="0.25" value="${layer.speed}">
         <span class="value">${layer.speed.toFixed(2)}</span>
       </div>
-      <div class="param-row select-row" data-layer="${index}" data-param="blend_mode">
+      <div class="param-row select-row" data-param="blend_mode">
         <label>Blend</label>
         <select>
           <option value="normal" ${layer.blend_mode === 'normal' ? 'selected' : ''}>Normal</option>
@@ -276,62 +394,65 @@ function createLayerCard(layer, index) {
           <option value="difference" ${layer.blend_mode === 'difference' ? 'selected' : ''}>Difference</option>
         </select>
       </div>
+
+      <div class="layer-fx-group">
+        <div class="layer-fx-label">COLOR</div>
+        <div class="param-row" data-param="hue_shift">
+          <label>Hue</label>
+          <input type="range" min="-180" max="180" step="1" value="${layer.hue_shift}">
+          <span class="value">${formatValue(layer.hue_shift, -180, 180, 1)}</span>
+        </div>
+        <div class="param-row" data-param="saturation">
+          <label>Saturation</label>
+          <input type="range" min="-1" max="1" step="0.01" value="${layer.saturation}">
+          <span class="value">${formatValue(layer.saturation, -1, 1, 0.01)}</span>
+        </div>
+        <div class="param-row" data-param="brightness">
+          <label>Brightness</label>
+          <input type="range" min="-1" max="1" step="0.01" value="${layer.brightness}">
+          <span class="value">${formatValue(layer.brightness, -1, 1, 0.01)}</span>
+        </div>
+        <div class="param-row" data-param="contrast">
+          <label>Contrast</label>
+          <input type="range" min="-1" max="1" step="0.01" value="${layer.contrast}">
+          <span class="value">${formatValue(layer.contrast, -1, 1, 0.01)}</span>
+        </div>
+      </div>
+
+      <div class="layer-fx-group">
+        <div class="layer-fx-label">DIGITAL</div>
+        <div class="param-row" data-param="pixelate">
+          <label>Pixelate</label>
+          <input type="range" min="1" max="32" step="1" value="${layer.pixelate}">
+          <span class="value">${formatValue(layer.pixelate, 1, 32, 1)}</span>
+        </div>
+        <div class="param-row" data-param="rgb_split">
+          <label>RGB Split</label>
+          <input type="range" min="0" max="30" step="0.5" value="${layer.rgb_split}">
+          <span class="value">${formatValue(layer.rgb_split, 0, 30, 0.5)}</span>
+        </div>
+        <div class="param-row" data-param="posterize">
+          <label>Posterize</label>
+          <input type="range" min="0" max="16" step="1" value="${layer.posterize}">
+          <span class="value">${formatValue(layer.posterize, 0, 16, 1)}</span>
+        </div>
+        <div class="param-row toggle-row" data-param="invert">
+          <label>Invert</label>
+          <label class="toggle"><input type="checkbox" ${layer.invert ? 'checked' : ''}><span class="toggle-slider"></span></label>
+        </div>
+      </div>
     </div>
   `;
-
-  // Toggle expand
-  card.querySelector('.layer-header').addEventListener('click', (e) => {
-    if (e.target.tagName === 'BUTTON') return;
-    card.classList.toggle('expanded');
-  });
-
-  // Play/pause
-  card.querySelector('.layer-play-btn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    console.log('[layer] play/pause clicked, index:', index);
-    sendAction({ action: 'toggle_layer_pause', index });
-  });
-
-  // Visibility
-  card.querySelector('.layer-vis-btn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    console.log('[layer] visibility clicked, index:', index);
-    sendAction({ action: 'toggle_visibility', index });
-  });
-
-  // Remove
-  card.querySelector('.layer-remove-btn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    sendAction({ action: 'remove_layer', index });
-  });
-
-  // Layer param sliders
-  card.querySelectorAll('.layer-body .param-row[data-param]').forEach((row) => {
-    const param = row.dataset.param;
-    const slider = row.querySelector('input[type="range"]');
-    const valueEl = row.querySelector('.value');
-    const select = row.querySelector('select');
-
-    if (slider) {
-      slider.addEventListener('input', () => {
-        const v = parseFloat(slider.value);
-        if (valueEl) valueEl.textContent = v.toFixed(2);
-        sendAction({ action: 'set_layer_param', index, param, value: v });
-      });
-    }
-
-    if (select) {
-      select.addEventListener('change', () => {
-        sendAction({ action: 'set_layer_param', index, param, value: select.value });
-      });
-    }
-  });
 
   return card;
 }
 
 function updateLayerCard(card, layer, index) {
   if (!card) return;
+  card.dataset.index = index;
+  const num = card.querySelector('.layer-num');
+  if (num) num.textContent = index + 1;
+
   const playBtn = card.querySelector('.layer-play-btn');
   const title = card.querySelector('.layer-title');
   const visBtn = card.querySelector('.layer-vis-btn');
@@ -347,34 +468,29 @@ function updateLayerCard(card, layer, index) {
     progressFill.style.width = `${(layer.progress * 100).toFixed(1)}%`;
   }
 
-  // Sync layer param sliders (skip if user is actively dragging)
-  const opacityRow = card.querySelector('.param-row[data-param="opacity"]');
-  if (opacityRow) {
-    const slider = opacityRow.querySelector('input[type="range"]');
-    const valEl = opacityRow.querySelector('.value');
-    if (slider && document.activeElement !== slider) {
-      slider.value = layer.opacity;
-      if (valEl) valEl.textContent = layer.opacity.toFixed(2);
-    }
-  }
+  // Sync every param row from the snapshot, skipping any control the user is
+  // actively manipulating so we don't clobber in-progress input.
+  card.querySelectorAll('.param-row[data-param]').forEach((row) => {
+    const param = row.dataset.param;
+    const value = layer[param];
+    if (value === undefined) return;
 
-  const speedRow = card.querySelector('.param-row[data-param="speed"]');
-  if (speedRow) {
-    const slider = speedRow.querySelector('input[type="range"]');
-    const valEl = speedRow.querySelector('.value');
-    if (slider && document.activeElement !== slider) {
-      slider.value = layer.speed;
-      if (valEl) valEl.textContent = layer.speed.toFixed(2);
-    }
-  }
+    const slider = row.querySelector('input[type="range"]');
+    const valEl = row.querySelector('.value');
+    const checkbox = row.querySelector('input[type="checkbox"]');
+    const select = row.querySelector('select');
 
-  const blendRow = card.querySelector('.param-row[data-param="blend_mode"]');
-  if (blendRow) {
-    const select = blendRow.querySelector('select');
+    if (slider && document.activeElement !== slider) {
+      slider.value = value;
+      if (valEl) valEl.textContent = formatValue(value, parseFloat(slider.min), parseFloat(slider.max), parseFloat(slider.step));
+    }
+    if (checkbox) {
+      checkbox.checked = !!value;
+    }
     if (select && document.activeElement !== select) {
-      select.value = layer.blend_mode;
+      select.value = (typeof value === 'string') ? value.toLowerCase() : value;
     }
-  }
+  });
 }
 
 // --- Sync library ---
