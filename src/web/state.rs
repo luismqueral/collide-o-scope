@@ -34,12 +34,19 @@ pub struct AppSnapshot {
     #[serde(default)]
     pub patches: Vec<String>,
     pub paused: bool,
+    /// Master content framerate (frame-hold / stutter). 30 = smooth (default).
+    #[serde(default = "default_framerate")]
+    pub framerate: f32,
     /// Export progress: 0.0 = idle, 0.0..1.0 = rendering, 1.0 = done
     #[serde(default)]
     pub export_progress: f32,
     /// Non-empty when export encountered an error
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub export_error: String,
+}
+
+fn default_framerate() -> f32 {
+    30.0
 }
 
 impl Default for AppSnapshot {
@@ -52,6 +59,7 @@ impl Default for AppSnapshot {
             library: Vec::new(),
             patches: Vec::new(),
             paused: false,
+            framerate: 30.0,
             export_progress: 0.0,
             export_error: String::new(),
         }
@@ -189,6 +197,7 @@ pub struct LayerSnapshot {
     pub paused: bool,
     pub opacity: f32,
     pub speed: f32,
+    pub fps: f32,
     pub blend_mode: String,
     pub progress: f32,
     // Per-layer effects (color)
@@ -237,6 +246,9 @@ pub enum WebAction {
     /// Set a per-layer parameter (opacity, speed, blend_mode)
     #[serde(rename = "set_layer_param")]
     SetLayerParam { index: usize, param: String, value: serde_json::Value },
+    /// Set the master content framerate (frame-hold / stutter look)
+    #[serde(rename = "set_master_framerate")]
+    SetMasterFramerate { value: f32 },
     /// Set an NTSC/VHS effect parameter
     #[serde(rename = "set_ntsc_param")]
     SetNtscParam { param: String, value: serde_json::Value },

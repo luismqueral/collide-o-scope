@@ -33,6 +33,7 @@ function connect() {
       if (msg.type === 'state') {
         syncEffects(msg.effects);
         syncNtsc(msg.ntsc);
+        syncFramerate(msg.framerate);
         syncLayers(msg.layers);
         syncLibrary(msg.library);
         syncPatches(msg.patches || []);
@@ -93,6 +94,28 @@ document.querySelectorAll('.param-row[data-param]').forEach((row) => {
     });
   }
 });
+
+// --- Master content framerate (frame-hold / stutter) ---
+// Distinct from set_param effects: routed via its own action so the generic
+// loop above (which sends set_param) doesn't pick it up.
+const fpsRow = document.querySelector('.param-row[data-master-param="framerate"]');
+if (fpsRow) {
+  const min = parseFloat(fpsRow.dataset.min);
+  const max = parseFloat(fpsRow.dataset.max);
+  const step = parseFloat(fpsRow.dataset.step);
+  const slider = fpsRow.querySelector('input[type="range"]');
+  const valueEl = fpsRow.querySelector('.value');
+  slider.min = min;
+  slider.max = max;
+  slider.step = step;
+  slider.value = max; // default 30 = smooth
+  valueEl.textContent = formatValue(max, min, max, step);
+  slider.addEventListener('input', () => {
+    const v = parseFloat(slider.value);
+    valueEl.textContent = formatValue(v, min, max, step);
+    sendAction({ action: 'set_master_framerate', value: v });
+  });
+}
 
 // --- Initialize NTSC/VHS sliders ---
 
@@ -171,6 +194,7 @@ function randomizeGroup(group) {
   const body = group.querySelector('.fx-group-body');
   if (!body) return;
   body.querySelectorAll('.param-row').forEach((row) => {
+    if (row.dataset.masterParam) return; // skip master framerate (own action, not an effect)
     const slider = row.querySelector('input[type="range"]');
     if (!slider) return; // sliders only — skip toggles/selects
     const min = parseFloat(slider.min);
@@ -295,6 +319,23 @@ function syncEffects(effects) {
     if (select) {
       select.value = value;
     }
+  }
+}
+
+// --- Sync master framerate from server ---
+
+function syncFramerate(framerate) {
+  if (framerate == null) return;
+  const row = document.querySelector('.param-row[data-master-param="framerate"]');
+  if (!row) return;
+  const slider = row.querySelector('input[type="range"]');
+  const valueEl = row.querySelector('.value');
+  if (slider && valueEl && document.activeElement !== slider) {
+    slider.value = framerate;
+    const min = parseFloat(row.dataset.min);
+    const max = parseFloat(row.dataset.max);
+    const step = parseFloat(row.dataset.step);
+    valueEl.textContent = formatValue(framerate, min, max, step);
   }
 }
 
@@ -557,6 +598,11 @@ function createLayerCard(layer, index) {
             <label>Speed</label>
             <input type="range" min="0.25" max="4" step="0.25" value="${layer.speed}">
             <span class="value">${layer.speed.toFixed(2)}</span>
+          </div>
+          <div class="param-row" data-param="fps" data-min="1" data-max="30" data-step="1">
+            <label>FPS</label>
+            <input type="range" min="1" max="30" step="1" value="${layer.fps}">
+            <span class="value">${layer.fps.toFixed(0)}</span>
           </div>
           <div class="param-row select-row" data-param="blend_mode">
             <label>Blend</label>

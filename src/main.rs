@@ -41,6 +41,10 @@ struct App {
     master_paused: bool,
     last_frame_time: Instant,
     start_time: Instant,
+    // Master content framerate (frame-hold / stutter). 30 = smooth (default).
+    master_fps: f32,
+    last_content_advance: Instant,
+    content_time: f32,
     modifiers: ModifiersState,
     // Library
     library_folder: Option<PathBuf>,
@@ -85,6 +89,9 @@ impl App {
             master_paused: false,
             last_frame_time: Instant::now(),
             start_time: Instant::now(),
+            master_fps: 30.0,
+            last_content_advance: Instant::now(),
+            content_time: 0.0,
             modifiers: ModifiersState::empty(),
             library_folder,
             library_files,
@@ -128,6 +135,9 @@ impl App {
                 let mut snap = web::state::EffectsSnapshot::from_uniforms(&self.master_effects);
                 snap.apply_param(&param, &value);
                 snap.apply_to_uniforms(&mut self.master_effects);
+            }
+            WebAction::SetMasterFramerate { value } => {
+                self.master_fps = value.clamp(1.0, TARGET_FPS as f32);
             }
             WebAction::AddLayer { filename } => {
                 // Find the full path from the library
@@ -234,6 +244,11 @@ impl App {
                         "speed" => {
                             if let Some(v) = value.as_f64() {
                                 layer.speed = (v as f32).clamp(0.25, 4.0);
+                            }
+                        }
+                        "fps" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.fps = (v as f32).clamp(1.0, 60.0);
                             }
                         }
                         "blend_mode" => {
@@ -442,6 +457,7 @@ impl App {
                 paused: l.paused,
                 opacity: l.opacity,
                 speed: l.speed,
+                fps: l.fps,
                 blend_mode: l.blend_mode.as_str().to_string(),
                 progress: l.decoder.progress(),
                 hue_shift: l.effects.hue_shift,
@@ -458,6 +474,7 @@ impl App {
             }).collect(),
             patches: self.patch_files.clone(),
             paused: self.master_paused,
+            framerate: self.master_fps,
             export_progress: self.export_job.as_ref()
                 .map(|j| if j.is_done() { 1.0 } else { j.progress.progress_f32() })
                 .unwrap_or(0.0),
@@ -879,15 +896,27 @@ impl ApplicationHandler for App {
                 if now - self.last_frame_time >= FRAME_DURATION {
                     self.last_frame_time = now;
 
-                    // Decode next frame for each layer (per-layer timing, speed, pause)
-                    if !self.master_paused {
-                        for layer in &mut self.layers {
-                            if !layer.paused && layer.ready_for_frame() {
-                                if let Some(frame_data) = layer.decoder.next_frame() {
-                                    let renderer = self.renderer.as_ref().unwrap();
-                                    layer.upload_frame(&renderer.queue, &frame_data);
+                    // Master content clock: gate content advancement (decode + the
+                    // animated `time` uniform) at master_fps so the look stutters
+                    // without making the web UI laggy (drain/push/present stay below).
+                    // At the default 30 this short-circuits to advance every frame.
+                    let content_interval = Duration::from_secs_f32(1.0 / self.master_fps);
+                    let advance_content = self.master_fps >= TARGET_FPS as f32
+                        || now - self.last_content_advance >= content_interval;
+                    if advance_content {
+                        self.last_content_advance = now;
+                        self.content_time = self.start_time.elapsed().as_secs_f32();
+
+                        // Decode next frame for each layer (per-layer timing, speed, pause)
+                        if !self.master_paused {
+                            for layer in &mut self.layers {
+                                if !layer.paused && layer.ready_for_frame() {
+                                    if let Some(frame_data) = layer.decoder.next_frame() {
+                                        let renderer = self.renderer.as_ref().unwrap();
+                                        layer.upload_frame(&renderer.queue, &frame_data);
+                                    }
+                                    layer.last_decode = Instant::now();
                                 }
-                                layer.last_decode = Instant::now();
                             }
                         }
                     }
@@ -940,8 +969,10 @@ impl ApplicationHandler for App {
                         .egui_ctx
                         .tessellate(full_output.shapes, full_output.pixels_per_point);
 
-                    // Set time uniform on all effects (drives animated noise/breathing)
-                    let elapsed = self.start_time.elapsed().as_secs_f32();
+                    // Set time uniform on all effects (drives animated noise/breathing).
+                    // Driven by the HELD content_time so animated effects stutter in
+                    // lockstep with held video frames at low master_fps.
+                    let elapsed = self.content_time;
                     for layer in &mut self.layers {
                         layer.effects.time = elapsed;
                     }
