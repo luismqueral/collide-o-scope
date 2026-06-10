@@ -134,6 +134,7 @@ function applyAutomationState(valueEl, param, autos, errors) {
   } else {
     valueEl.classList.remove('automated');
     delete valueEl.dataset.expr;
+    delete valueEl.dataset.aectl;     // no formula → drop the cached knob state
   }
   if (err) {
     valueEl.classList.add('error');
@@ -1629,9 +1630,11 @@ function scopeName(t) {
   return t.scope === 'master' ? 'Master' : `Layer ${t.index + 1}`;
 }
 
-// Open the modal locked to a param. If it already has a formula we can't
-// reverse-parse arbitrary expressions (§5), so show it in raw mode; otherwise
-// start from default controls.
+// Open the modal locked to a param. If it already has a formula, try to restore
+// the knob state that built it (cached at Apply time) so editing resumes where
+// it left off; if that cache is missing or doesn't match (hand-typed / foreign
+// expression — we can't reverse-parse arbitrary fasteval, §5), fall back to raw
+// mode. With no formula at all, start from default controls.
 function openEditor(target, valueEl) {
   aeTarget = target;
   aeValueEl = valueEl;
@@ -1640,11 +1643,21 @@ function openEditor(target, valueEl) {
   document.getElementById('ae-context').textContent =
     `Automate \u00B7 ${scopeName(target)} \u203A ${target.label}`;
 
+  const ps = document.getElementById('ae-presets');
+  if (ps) ps.selectedIndex = 0;       // reset the preset picker to its placeholder
+
+  const existing = valueEl && valueEl.dataset.expr;
+  let useRaw = false;
+  if (existing) {
+    const cached = readCachedControls(valueEl, target, existing);
+    if (cached) aeControls = cached;  // resume knob editing
+    else useRaw = true;               // can't reconstruct → show the raw text
+  }
+
   setupGhost();
   syncControlsUI();
-  const existing = valueEl && valueEl.dataset.expr;
-  if (existing) {
-    enterRawMode(existing);           // knobs detached until a shape is picked
+  if (useRaw) {
+    enterRawMode(existing);
   } else {
     exitRawMode();
     recompute();
@@ -1652,6 +1665,20 @@ function openEditor(target, valueEl) {
 
   document.getElementById('automation').removeAttribute('hidden');
   startPreview();
+}
+
+// Return the controls cached on a value cell iff they still rebuild to exactly
+// the installed expression. The exact-match guard means a stale cache (the user
+// later hand-typed a different formula) is rejected, falling back to raw mode.
+function readCachedControls(valueEl, target, expr) {
+  const raw = valueEl.dataset.aectl;
+  if (!raw) return null;
+  try {
+    const c = Object.assign(defaultControls(), JSON.parse(raw));
+    return buildExpr(c, target.lo, target.hi) === expr ? c : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 function closeEditor() {
@@ -1794,20 +1821,28 @@ function buildShapeButtons() {
 }
 
 function buildPresets() {
-  const box = document.getElementById('ae-presets');
-  if (!box || box.children.length) return;
-  PRESETS.forEach(([name, ctrl]) => {
-    const b = document.createElement('button');
-    b.className = 'ae-preset';
-    b.type = 'button';
-    b.textContent = name;
-    b.addEventListener('click', () => {
-      aeControls = Object.assign(defaultControls(), ctrl);
-      exitRawMode();
-      syncControlsUI();
-      recompute();
-    });
-    box.appendChild(b);
+  const sel = document.getElementById('ae-presets');
+  if (!sel || sel.children.length) return;
+  // Placeholder first option — the dropdown is a momentary "load a starting
+  // point" picker, so it snaps back here after each pick (see below).
+  const ph = document.createElement('option');
+  ph.value = '';
+  ph.textContent = 'Choose preset\u2026';
+  sel.appendChild(ph);
+  PRESETS.forEach(([name], i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener('change', () => {
+    const i = parseInt(sel.value, 10);
+    sel.selectedIndex = 0;             // snap back to the placeholder
+    if (Number.isNaN(i)) return;
+    aeControls = Object.assign(defaultControls(), PRESETS[i][1]);
+    exitRawMode();
+    syncControlsUI();
+    recompute();
   });
 }
 
@@ -1871,6 +1906,13 @@ function applyEditor() {
   if (!aeTarget) return;
   const expr = currentExpr();
   if (!expr) return;
+  // Cache the knob state on the value cell so reopening the editor can restore
+  // the sliders (we can't reverse-parse fasteval). Raw-mode formulas have no
+  // knob equivalent, so drop any stale cache instead.
+  if (aeValueEl) {
+    if (aeRawMode) delete aeValueEl.dataset.aectl;
+    else aeValueEl.dataset.aectl = JSON.stringify(aeControls);
+  }
   if (aeTarget.scope === 'master') {
     sendAction({ action: 'set_automation', param: aeTarget.param, expr });
   } else {
@@ -1900,18 +1942,24 @@ function copyText(text, btn) {
 const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#5a8fe6';
 const borderCol = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#2a2a35';
 
-// Plot one formula over a 4-unit window, auto-scaling Y, with a moving playhead.
+// Oscilloscope view: "now" is pinned to the canvas centre and the waveform
+// scrolls leftward through it (the right half is what's coming). The window
+// spans [now - span/2, now + span/2] in the active timebase, so the curve keeps
+// moving up and down indefinitely with no wrap jump — readable for long actions.
 function drawCurve(card, nowSec) {
   const { canvas, ctx, fn, xUnit } = card;
   const W = canvas.width, H = canvas.height;
   const pad = 4;
-  const span = 4;             // 4 beats or 4 seconds across the canvas
-  const samples = 120;
+  const span = 4;             // window width: 4 beats or 4 seconds
+  const samples = 200;
 
-  // Sample the curve across the window. Beat cards map x→beats, time cards x→sec.
+  // Centre the sampling window on the live playhead position.
+  const center = (xUnit === 'beat') ? liveBeat : nowSec;
+  const start = center - span / 2;
+
   const ys = new Array(samples);
   for (let i = 0; i < samples; i++) {
-    const u = (i / (samples - 1)) * span;   // 0..span
+    const u = start + (i / (samples - 1)) * span;   // absolute beat/sec
     let v;
     if (xUnit === 'beat') {
       // At the live tempo, beats convert to seconds for the `t` arg.
@@ -1920,33 +1968,29 @@ function drawCurve(card, nowSec) {
     } else {
       v = fn(u, u * liveBpm / 60, liveBpm);
     }
-    ys[i] = Number.isFinite(v) ? v : 0;
+    ys[i] = Number.isFinite(v) ? clamp(v, 0, 1) : 0;
   }
 
-  // Auto-scale Y to the sampled range with 10% padding.
-  let lo = Math.min(...ys), hi = Math.max(...ys);
-  if (hi - lo < 1e-6) { lo -= 0.5; hi += 0.5; }
-  const range = hi - lo;
-  lo -= range * 0.1; hi += range * 0.1;
+  // Fixed 0..1 axis (the preview is normalised) → stable while scrolling, and
+  // vertically aligned with the live-value ghost slider beneath the canvas.
+  const lo = -0.05, hi = 1.05;
   const yToPx = (v) => H - pad - ((v - lo) / (hi - lo)) * (H - 2 * pad);
   const xToPx = (i) => pad + (i / (samples - 1)) * (W - 2 * pad);
 
   ctx.clearRect(0, 0, W, H);
 
-  // Baseline at y=0 if it falls within range.
+  // Guide lines at 0 (bottom) and 1 (top).
   ctx.strokeStyle = borderCol;
   ctx.lineWidth = 1;
-  if (lo < 0 && hi > 0) {
-    const zy = yToPx(0);
+  [0, 1].forEach((g) => {
+    const gy = yToPx(g);
     ctx.beginPath();
-    ctx.moveTo(pad, zy);
-    ctx.lineTo(W - pad, zy);
+    ctx.moveTo(pad, gy);
+    ctx.lineTo(W - pad, gy);
     ctx.stroke();
-  } else {
-    ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
-  }
+  });
 
-  // The curve.
+  // The scrolling curve.
   ctx.strokeStyle = accent;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -1956,15 +2000,8 @@ function drawCurve(card, nowSec) {
   }
   ctx.stroke();
 
-  // Moving playhead. Beat cards align to the live beat phase; time cards use
-  // wall-clock seconds. Both wrap within the 4-unit window.
-  let phase;
-  if (xUnit === 'beat') {
-    phase = (liveBeat % span + span) % span;
-  } else {
-    phase = nowSec % span;
-  }
-  const px = pad + (phase / span) * (W - 2 * pad);
+  // Fixed centre playhead = "now".
+  const px = pad + 0.5 * (W - 2 * pad);
   ctx.strokeStyle = accent;
   ctx.globalAlpha = 0.5;
   ctx.beginPath();
@@ -1973,13 +2010,13 @@ function drawCurve(card, nowSec) {
   ctx.stroke();
   ctx.globalAlpha = 1;
 
-  // Dot riding the curve at the playhead.
-  const fi = (phase / span) * (samples - 1);
-  const i0 = Math.floor(fi), i1 = Math.min(i0 + 1, samples - 1);
-  const yv = lerp(ys[i0], ys[i1], fi - i0);
+  // Dot riding the curve at the centre sample (matches the ghost slider value).
+  const mid = (samples - 1) / 2;
+  const i0 = Math.floor(mid), i1 = Math.min(i0 + 1, samples - 1);
+  const yv = lerp(ys[i0], ys[i1], mid - i0);
   ctx.fillStyle = accent;
   ctx.beginPath();
-  ctx.arc(px, yToPx(yv), 2.5, 0, TAU);
+  ctx.arc(px, yToPx(yv), 3, 0, TAU);
   ctx.fill();
 }
 

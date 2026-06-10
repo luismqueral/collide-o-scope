@@ -1036,24 +1036,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-bottom: 1px solid var(--border);
 }
 
-.ae-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ae-preset {
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text);
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 10px;
-  font-family: inherit;
-}
-
-.ae-preset:hover { border-color: var(--accent); color: var(--accent); }
+.ae-presets-select { flex: 1; }
 
 /* Control rack. */
 .ae-controls {
@@ -1090,13 +1073,16 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .ae-shape {
-  padding: 3px 7px;
+  min-width: 38px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-dim);
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
   font-family: inherit;
 }
 

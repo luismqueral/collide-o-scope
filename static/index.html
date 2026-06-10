@@ -305,7 +305,7 @@
 
         <div class="ae-presets-row">
           <span class="ae-lbl">Preset</span>
-          <div class="ae-presets" id="ae-presets"><!-- preset chips via JS --></div>
+          <select class="ae-select ae-presets-select" id="ae-presets"><!-- preset options via JS --></select>
         </div>
 
         <div class="ae-controls">
@@ -336,7 +336,10 @@
             <span class="ae-lbl">Depth</span>
             <input type="range" id="ae-depth" min="0" max="100" step="1" value="100">
             <span class="ae-val" id="ae-depth-val">100%</span>
-            <span class="ae-lbl ae-lbl-center">Center</span>
+          </div>
+
+          <div class="ae-ctl">
+            <span class="ae-lbl">Center</span>
             <input type="range" id="ae-center" min="0" max="100" step="1" value="50">
             <span class="ae-val" id="ae-center-val">50%</span>
           </div>
