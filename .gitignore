@@ -2,6 +2,9 @@
 experiments/*/target
 .DS_Store
 
+# Local agent state
+/.claude/
+
 # Media + render output (large binaries, not source)
 /videos/
 /renders/
