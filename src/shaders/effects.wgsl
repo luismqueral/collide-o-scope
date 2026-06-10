@@ -42,6 +42,16 @@ struct Uniforms {
     chroma_color_r: f32,
     chroma_color_g: f32,
     chroma_color_b: f32,
+    // Shift: slice (scanline-band displacement glitch)
+    slice_intensity: f32,
+    slice_height: f32,
+    slice_prob: f32,
+    slice_speed: f32,
+    // Shift: block (rectangular block displacement) + pad
+    block_size: f32,
+    block_intensity: f32,
+    block_prob: f32,
+    _pad: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -269,6 +279,28 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
         let d = length(c) / max(uniforms.bulge_radius, 0.05);
         let scale = 1.0 + uniforms.bulge_strength * (1.0 - clamp(d, 0.0, 1.0));
         sample_uv = c / scale + 0.5;
+    }
+
+    // --- Pixel shifting / glitch (UV displacement reseeded in discrete steps) ---
+    // Slice shift: horizontal scanline-bands jump sideways (VHS tracking-tear look).
+    if uniforms.slice_intensity > 0.0 {
+        let seed = floor(uniforms.time * uniforms.slice_speed);
+        let band = floor(uv.y * uniforms.resolution.y / max(uniforms.slice_height, 1.0));
+        if hash(vec2f(band, seed)) > 1.0 - uniforms.slice_prob {
+            sample_uv.x += (hash(vec2f(band, seed + 7.0)) - 0.5) * uniforms.slice_intensity;
+        }
+    }
+    // Block mosh: rectangular blocks jump in 2D (datamosh look). No own speed knob —
+    // reseeds at a fixed ~10 steps/sec.
+    if uniforms.block_intensity > 0.0 {
+        let grid = uniforms.resolution / max(uniforms.block_size, 4.0);
+        let cell = floor(uv * grid);
+        let seed = floor(uniforms.time * 10.0);
+        if hash(vec2f(cell.x + cell.y * 57.0, seed)) > 1.0 - uniforms.block_prob {
+            let ox = (hash(vec2f(cell.x, seed + 3.0)) - 0.5) * uniforms.block_intensity;
+            let oy = (hash(vec2f(cell.y, seed + 9.0)) - 0.5) * uniforms.block_intensity;
+            sample_uv += vec2f(ox, oy);
+        }
     }
 
     // --- Downsample (lossy video look) ---

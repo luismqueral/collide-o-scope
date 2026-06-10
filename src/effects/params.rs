@@ -1,5 +1,5 @@
 /// GPU-side effect parameters, uploaded as a uniform buffer each frame.
-/// Must be 16-byte aligned (144 bytes total = 9 × vec4).
+/// Must be 16-byte aligned (176 bytes total = 11 × vec4).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct EffectUniforms {
@@ -47,6 +47,16 @@ pub struct EffectUniforms {
     pub chroma_color_r: f32,  // key color red (sRGB 0..1)
     pub chroma_color_g: f32,  // key color green (sRGB 0..1)
     pub chroma_color_b: f32,  // key color blue (sRGB 0..1)
+    // vec4 #10 — Shift: slice (scanline-band displacement glitch)
+    pub slice_intensity: f32, // 0..1 max horizontal shift (fraction of width)
+    pub slice_height: f32,    // 1..128 band thickness in pixels
+    pub slice_prob: f32,      // 0..1 fraction of bands that shift each step
+    pub slice_speed: f32,     // 0..30 reseed rate (steps/sec)
+    // vec4 #11 — Shift: block (rectangular block displacement) + pad
+    pub block_size: f32,      // 4..128 block edge in pixels
+    pub block_intensity: f32, // 0..1 max offset (fraction of frame)
+    pub block_prob: f32,      // 0..1 fraction of blocks displaced
+    pub _pad: f32,            // keep 16-byte alignment (11 × vec4)
 }
 
 impl Default for EffectUniforms {
@@ -87,6 +97,14 @@ impl Default for EffectUniforms {
             chroma_color_r: 0.0,
             chroma_color_g: 1.0,
             chroma_color_b: 0.0,
+            slice_intensity: 0.0,
+            slice_height: 16.0,
+            slice_prob: 0.3,
+            slice_speed: 8.0,
+            block_size: 32.0,
+            block_intensity: 0.0,
+            block_prob: 0.2,
+            _pad: 0.0,
         }
     }
 }

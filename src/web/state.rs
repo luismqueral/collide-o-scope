@@ -225,6 +225,14 @@ pub struct LayerSnapshot {
     pub chroma_smoothness: f32,
     pub chroma_spill: f32,
     pub chroma_color: String,
+    // Per-layer effects (pixel shift / glitch)
+    pub slice_intensity: f32,
+    pub slice_height: f32,
+    pub slice_prob: f32,
+    pub slice_speed: f32,
+    pub block_size: f32,
+    pub block_intensity: f32,
+    pub block_prob: f32,
 }
 
 /// Actions the browser can request (processed by the render loop).

@@ -56,6 +56,13 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
         "chroma_threshold" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "key tolerance" }),
         "chroma_smoothness" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "key feather" }),
         "chroma_spill" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "key spill suppress" }),
+        "slice_intensity" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "band shift amount" }),
+        "slice_height" => Some(ParamMeta { step: 1.0, min: 1.0, max: 128.0, desc: "band thickness px" }),
+        "slice_prob" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "bands shifted" }),
+        "slice_speed" => Some(ParamMeta { step: 1.0, min: 0.0, max: 30.0, desc: "reseed steps/sec" }),
+        "block_size" => Some(ParamMeta { step: 4.0, min: 4.0, max: 128.0, desc: "block edge px" }),
+        "block_intensity" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "block offset amount" }),
+        "block_prob" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "blocks displaced" }),
         _ => None,
     }
 }
@@ -261,12 +268,32 @@ pub struct EffectsConfig {
     pub chroma_g: f32,
     #[serde(default)]
     pub chroma_b: f32,
+    // Pixel shift / glitch
+    #[serde(default)]
+    pub slice_intensity: f32,
+    #[serde(default = "default_slice_height")]
+    pub slice_height: f32,
+    #[serde(default = "default_slice_prob")]
+    pub slice_prob: f32,
+    #[serde(default = "default_slice_speed")]
+    pub slice_speed: f32,
+    #[serde(default = "default_block_size")]
+    pub block_size: f32,
+    #[serde(default)]
+    pub block_intensity: f32,
+    #[serde(default = "default_block_prob")]
+    pub block_prob: f32,
 }
 
 fn default_wave_freq() -> f32 { 8.0 }
 fn default_half() -> f32 { 0.5 }
 fn default_chroma_threshold() -> f32 { 0.4 }
 fn default_chroma_smoothness() -> f32 { 0.1 }
+fn default_slice_height() -> f32 { 16.0 }
+fn default_slice_prob() -> f32 { 0.3 }
+fn default_slice_speed() -> f32 { 8.0 }
+fn default_block_size() -> f32 { 32.0 }
+fn default_block_prob() -> f32 { 0.2 }
 
 impl Default for EffectsConfig {
     fn default() -> Self {
@@ -303,6 +330,13 @@ impl Default for EffectsConfig {
             chroma_r: 0.0,
             chroma_g: 1.0,
             chroma_b: 0.0,
+            slice_intensity: 0.0,
+            slice_height: 16.0,
+            slice_prob: 0.3,
+            slice_speed: 8.0,
+            block_size: 32.0,
+            block_intensity: 0.0,
+            block_prob: 0.2,
         }
     }
 }
@@ -344,6 +378,13 @@ impl EffectsConfig {
             chroma_r: u.chroma_color_r,
             chroma_g: u.chroma_color_g,
             chroma_b: u.chroma_color_b,
+            slice_intensity: u.slice_intensity,
+            slice_height: u.slice_height,
+            slice_prob: u.slice_prob,
+            slice_speed: u.slice_speed,
+            block_size: u.block_size,
+            block_intensity: u.block_intensity,
+            block_prob: u.block_prob,
         }
     }
 
@@ -380,6 +421,13 @@ impl EffectsConfig {
         u.chroma_color_r = self.chroma_r.clamp(0.0, 1.0);
         u.chroma_color_g = self.chroma_g.clamp(0.0, 1.0);
         u.chroma_color_b = self.chroma_b.clamp(0.0, 1.0);
+        u.slice_intensity = self.slice_intensity.clamp(0.0, 1.0);
+        u.slice_height = self.slice_height.clamp(1.0, 128.0);
+        u.slice_prob = self.slice_prob.clamp(0.0, 1.0);
+        u.slice_speed = self.slice_speed.clamp(0.0, 30.0);
+        u.block_size = self.block_size.clamp(4.0, 128.0);
+        u.block_intensity = self.block_intensity.clamp(0.0, 1.0);
+        u.block_prob = self.block_prob.clamp(0.0, 1.0);
     }
 
     /// Get fields organized into groups for display.
@@ -427,6 +475,15 @@ impl EffectsConfig {
                 ("chroma_g", format!("{:.2}", self.chroma_g)),
                 ("chroma_b", format!("{:.2}", self.chroma_b)),
             ]),
+            ("shift", vec![
+                ("slice_intensity", format!("{:.2}", self.slice_intensity)),
+                ("slice_height", format!("{:.1}", self.slice_height)),
+                ("slice_prob", format!("{:.2}", self.slice_prob)),
+                ("slice_speed", format!("{:.1}", self.slice_speed)),
+                ("block_size", format!("{:.1}", self.block_size)),
+                ("block_intensity", format!("{:.2}", self.block_intensity)),
+                ("block_prob", format!("{:.2}", self.block_prob)),
+            ]),
         ]
     }
 
@@ -465,6 +522,13 @@ impl EffectsConfig {
             "chroma_r" => { if let Ok(v) = value.parse() { self.chroma_r = v; return true; } }
             "chroma_g" => { if let Ok(v) = value.parse() { self.chroma_g = v; return true; } }
             "chroma_b" => { if let Ok(v) = value.parse() { self.chroma_b = v; return true; } }
+            "slice_intensity" => { if let Ok(v) = value.parse() { self.slice_intensity = v; return true; } }
+            "slice_height" => { if let Ok(v) = value.parse() { self.slice_height = v; return true; } }
+            "slice_prob" => { if let Ok(v) = value.parse() { self.slice_prob = v; return true; } }
+            "slice_speed" => { if let Ok(v) = value.parse() { self.slice_speed = v; return true; } }
+            "block_size" => { if let Ok(v) = value.parse() { self.block_size = v; return true; } }
+            "block_intensity" => { if let Ok(v) = value.parse() { self.block_intensity = v; return true; } }
+            "block_prob" => { if let Ok(v) = value.parse() { self.block_prob = v; return true; } }
             _ => {}
         }
         false

@@ -371,6 +371,41 @@ impl App {
                                 layer.effects.chroma_color_b = b;
                             }
                         }
+                        "slice_intensity" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.slice_intensity = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "slice_height" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.slice_height = (v as f32).clamp(1.0, 128.0);
+                            }
+                        }
+                        "slice_prob" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.slice_prob = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "slice_speed" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.slice_speed = (v as f32).clamp(0.0, 30.0);
+                            }
+                        }
+                        "block_size" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.block_size = (v as f32).clamp(4.0, 128.0);
+                            }
+                        }
+                        "block_intensity" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.block_intensity = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "block_prob" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.block_prob = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -555,6 +590,13 @@ impl App {
                     l.effects.chroma_color_g,
                     l.effects.chroma_color_b,
                 ),
+                slice_intensity: l.effects.slice_intensity,
+                slice_height: l.effects.slice_height,
+                slice_prob: l.effects.slice_prob,
+                slice_speed: l.effects.slice_speed,
+                block_size: l.effects.block_size,
+                block_intensity: l.effects.block_intensity,
+                block_prob: l.effects.block_prob,
             }).collect(),
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())

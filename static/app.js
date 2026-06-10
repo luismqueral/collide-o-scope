@@ -762,6 +762,51 @@ function createLayerCard(layer, index) {
           <p class="layer-hint">Reveals layers below — use on upper layers.</p>
         </div>
       </div>
+
+      <div class="fx-group collapsed" data-layer-group="shift">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">SHIFT</span>
+          <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+        </div>
+        <div class="fx-group-body">
+          <div class="param-row" data-param="slice_intensity">
+            <label>Slice Amt</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.slice_intensity}">
+            <span class="value">${formatValue(layer.slice_intensity, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="slice_height">
+            <label>Slice H</label>
+            <input type="range" min="1" max="128" step="1" value="${layer.slice_height}">
+            <span class="value">${formatValue(layer.slice_height, 1, 128, 1)}</span>
+          </div>
+          <div class="param-row" data-param="slice_prob">
+            <label>Slice Prob</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.slice_prob}">
+            <span class="value">${formatValue(layer.slice_prob, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="slice_speed">
+            <label>Slice Spd</label>
+            <input type="range" min="0" max="30" step="1" value="${layer.slice_speed}">
+            <span class="value">${formatValue(layer.slice_speed, 0, 30, 1)}</span>
+          </div>
+          <div class="param-row" data-param="block_size">
+            <label>Block Size</label>
+            <input type="range" min="4" max="128" step="1" value="${layer.block_size}">
+            <span class="value">${formatValue(layer.block_size, 4, 128, 1)}</span>
+          </div>
+          <div class="param-row" data-param="block_intensity">
+            <label>Block Amt</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.block_intensity}">
+            <span class="value">${formatValue(layer.block_intensity, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="block_prob">
+            <label>Block Prob</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.block_prob}">
+            <span class="value">${formatValue(layer.block_prob, 0, 1, 0.01)}</span>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 
