@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use crate::automation::Expr;
 use crate::effects::EffectUniforms;
 use crate::layers::Layer;
 use crate::ntsc::NtscParams;
@@ -344,8 +347,13 @@ pub fn build_yaml_editor_content(
 }
 
 /// Save full patch state to a YAML file via native dialog.
-pub fn save_patch(master: &EffectUniforms, layers: &[Layer], ntsc_params: &NtscParams) {
-    let patch = PatchState::capture(master, layers, ntsc_params);
+pub fn save_patch(
+    master: &EffectUniforms,
+    master_automations: &HashMap<String, Expr>,
+    layers: &[Layer],
+    ntsc_params: &NtscParams,
+) {
+    let patch = PatchState::capture(master, master_automations, layers, ntsc_params);
     let yaml = serde_yaml::to_string(&patch).unwrap_or_default();
 
     if let Some(path) = rfd::FileDialog::new()
@@ -360,23 +368,33 @@ pub fn save_patch(master: &EffectUniforms, layers: &[Layer], ntsc_params: &NtscP
 }
 
 /// Load a patch from a YAML file via native dialog.
-pub fn load_patch(master: &mut EffectUniforms, layers: &mut Vec<Layer>, ntsc_params: &mut NtscParams) {
-    if let Some(path) = rfd::FileDialog::new()
+///
+/// Returns the recompiled master automations (and any parse errors) so the
+/// caller can install them on the app; `None` if the dialog was cancelled or
+/// the file failed to load.
+pub fn load_patch(
+    master: &mut EffectUniforms,
+    layers: &mut Vec<Layer>,
+    ntsc_params: &mut NtscParams,
+) -> Option<(HashMap<String, Expr>, HashMap<String, String>)> {
+    let path = rfd::FileDialog::new()
         .add_filter("YAML", &["yaml", "yml"])
-        .pick_file()
-    {
-        match std::fs::read_to_string(&path) {
-            Ok(yaml) => match serde_yaml::from_str::<PatchState>(&yaml) {
-                Ok(patch) => {
-                    patch.apply(master, layers, ntsc_params);
-                }
-                Err(e) => {
-                    eprintln!("Failed to parse patch: {e}");
-                }
-            },
-            Err(e) => {
-                eprintln!("Failed to read file: {e}");
+        .pick_file()?;
+
+    match std::fs::read_to_string(&path) {
+        Ok(yaml) => match serde_yaml::from_str::<PatchState>(&yaml) {
+            Ok(patch) => {
+                patch.apply(master, layers, ntsc_params);
+                Some(patch.compile_master_automations())
             }
+            Err(e) => {
+                eprintln!("Failed to parse patch: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("Failed to read file: {e}");
+            None
         }
     }
 }

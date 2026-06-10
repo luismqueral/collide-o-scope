@@ -1,8 +1,11 @@
 #[allow(dead_code)]
 pub mod editor;
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
+use crate::automation::Expr;
 use crate::effects::EffectUniforms;
 use crate::layers::{BlendMode, Layer};
 use crate::ntsc::NtscParams;
@@ -58,6 +61,9 @@ pub struct PatchState {
     pub layers: Vec<LayerConfig>,
     #[serde(default)]
     pub ntsc: Option<NtscConfig>,
+    /// Master param automations: param name → expression text.
+    #[serde(default)]
+    pub master_automations: HashMap<String, String>,
 }
 
 /// Serializable NTSC/VHS effect parameters for patch files.
@@ -174,6 +180,9 @@ pub struct LayerConfig {
     pub visible: bool,
     #[serde(default)]
     pub effects: EffectsConfig,
+    /// Per-layer param automations: param name → expression text.
+    #[serde(default)]
+    pub automations: HashMap<String, String>,
 }
 
 fn default_blend() -> String {
@@ -363,6 +372,9 @@ impl LayerConfig {
             paused: layer.paused,
             visible: layer.visible,
             effects: EffectsConfig::from_uniforms(&layer.effects),
+            automations: layer.automations.iter()
+                .map(|(k, v)| (k.clone(), v.source.clone()))
+                .collect(),
         }
     }
 
@@ -379,6 +391,15 @@ impl LayerConfig {
         layer.paused = self.paused;
         layer.visible = self.visible;
         self.effects.apply_to_uniforms(&mut layer.effects);
+        // Recompile saved automation expressions into the layer.
+        layer.automations.clear();
+        layer.automation_errors.clear();
+        for (param, expr) in &self.automations {
+            match Expr::new(expr) {
+                Ok(compiled) => { layer.automations.insert(param.clone(), compiled); }
+                Err(e) => { layer.automation_errors.insert(param.clone(), e); }
+            }
+        }
     }
 
     /// Get top-level layer fields as (key, value_string) pairs.
@@ -412,11 +433,19 @@ impl LayerConfig {
 // --- Full patch snapshot ---
 
 impl PatchState {
-    pub fn capture(master: &EffectUniforms, layers: &[Layer], ntsc_params: &NtscParams) -> Self {
+    pub fn capture(
+        master: &EffectUniforms,
+        master_automations: &HashMap<String, Expr>,
+        layers: &[Layer],
+        ntsc_params: &NtscParams,
+    ) -> Self {
         Self {
             master: EffectsConfig::from_uniforms(master),
             layers: layers.iter().map(LayerConfig::from_layer).collect(),
             ntsc: Some(NtscConfig::from_params(ntsc_params)),
+            master_automations: master_automations.iter()
+                .map(|(k, v)| (k.clone(), v.source.clone()))
+                .collect(),
         }
     }
 
@@ -428,5 +457,21 @@ impl PatchState {
         if let Some(ref ntsc) = self.ntsc {
             *ntsc_params = ntsc.to_params();
         }
+    }
+
+    /// Recompile the saved master automation expressions, returning the
+    /// compiled map and any parse errors. The caller installs these into its
+    /// own `App` automation maps (master automations are not stored on the
+    /// `EffectUniforms` struct).
+    pub fn compile_master_automations(&self) -> (HashMap<String, Expr>, HashMap<String, String>) {
+        let mut compiled = HashMap::new();
+        let mut errors = HashMap::new();
+        for (param, expr) in &self.master_automations {
+            match Expr::new(expr) {
+                Ok(c) => { compiled.insert(param.clone(), c); }
+                Err(e) => { errors.insert(param.clone(), e); }
+            }
+        }
+        (compiled, errors)
     }
 }

@@ -82,4 +82,29 @@ impl EffectUniforms {
         *self = Self::default();
         self.resolution = res;
     }
+
+    /// Set a numeric field by its web param name (the same names used by
+    /// `EffectsSnapshot::apply_param`), clamping to the field's documented
+    /// range. Used to write automation-driven values each frame. Non-numeric
+    /// params (invert, color_grain, grain_algo) are intentionally ignored —
+    /// only continuous params are automatable.
+    pub fn set_by_name(&mut self, param: &str, v: f32) {
+        match param {
+            "pixelate" => self.pixelate_size = v.clamp(1.0, 32.0),
+            "rgb_split" => self.rgb_split = v.clamp(0.0, 30.0),
+            "hue_shift" => self.hue_shift = v.clamp(-180.0, 180.0),
+            "saturation" => self.saturation = v.clamp(-1.0, 1.0),
+            "brightness" => self.brightness = v.clamp(-1.0, 1.0),
+            "contrast" => self.contrast = v.clamp(-1.0, 1.0),
+            "posterize" => self.posterize = v.clamp(0.0, 16.0),
+            "grain_intensity" => self.grain_intensity = v.clamp(0.0, 0.3),
+            "grain_size" => self.grain_size = v.clamp(1.0, 4.0),
+            "vignette" => self.vignette = v.clamp(0.0, 1.5),
+            "color_drift" => self.color_drift = v.clamp(0.0, 0.02),
+            "breathe_scale" => self.breathe_scale = v.clamp(0.0, 0.05),
+            "breathe_rotation" => self.breathe_rotation = v.clamp(0.0, 2.0),
+            "breathe_position" => self.breathe_position = v.clamp(0.0, 0.02),
+            _ => {}
+        }
+    }
 }

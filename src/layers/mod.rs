@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::time::Instant;
 
+use crate::automation::Expr;
 use crate::effects::EffectUniforms;
 use crate::video::VideoDecoder;
 
@@ -54,6 +56,9 @@ pub struct Layer {
     pub speed: f32,           // 0.25..4.0 playback multiplier (1.0 = normal)
     pub fps: f32,             // target decode FPS (e.g. 30.0)
     pub last_decode: Instant, // tracks per-layer frame timing
+    // Parameter automation
+    pub automations: HashMap<String, Expr>, // param name → compiled expression
+    pub automation_errors: HashMap<String, String>, // param name → parse error
 }
 
 impl Layer {
@@ -105,6 +110,8 @@ impl Layer {
             speed: 1.0,
             fps: 30.0,
             last_decode: Instant::now(),
+            automations: HashMap::new(),
+            automation_errors: HashMap::new(),
         })
     }
 

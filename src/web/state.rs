@@ -38,6 +38,12 @@ pub struct AppSnapshot {
     /// Non-empty when export encountered an error
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub export_error: String,
+    /// Master param automations: param name → expression text.
+    #[serde(default)]
+    pub automations: HashMap<String, String>,
+    /// Master automation parse errors: param name → error message.
+    #[serde(default)]
+    pub automation_errors: HashMap<String, String>,
 }
 
 impl Default for AppSnapshot {
@@ -51,6 +57,8 @@ impl Default for AppSnapshot {
             paused: false,
             export_progress: 0.0,
             export_error: String::new(),
+            automations: HashMap::new(),
+            automation_errors: HashMap::new(),
         }
     }
 }
@@ -187,6 +195,12 @@ pub struct LayerSnapshot {
     pub speed: f32,
     pub blend_mode: String,
     pub progress: f32,
+    /// Per-layer param automations: param name → expression text.
+    #[serde(default)]
+    pub automations: HashMap<String, String>,
+    /// Per-layer automation parse errors: param name → error message.
+    #[serde(default)]
+    pub automation_errors: HashMap<String, String>,
 }
 
 /// Actions the browser can request (processed by the render loop).
@@ -229,6 +243,18 @@ pub enum WebAction {
     /// Cancel a running export
     #[serde(rename = "cancel_export")]
     CancelExport,
+    /// Automate a master param with an expression
+    #[serde(rename = "set_automation")]
+    SetAutomation { param: String, expr: String },
+    /// Clear automation on a master param
+    #[serde(rename = "clear_automation")]
+    ClearAutomation { param: String },
+    /// Automate a per-layer param with an expression
+    #[serde(rename = "set_layer_automation")]
+    SetLayerAutomation { index: usize, param: String, expr: String },
+    /// Clear automation on a per-layer param
+    #[serde(rename = "clear_layer_automation")]
+    ClearLayerAutomation { index: usize, param: String },
 }
 
 impl EffectsSnapshot {

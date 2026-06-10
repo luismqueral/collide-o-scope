@@ -1,6 +1,7 @@
 #![allow(deprecated)] // egui 0.34 deprecation warnings for panel API renames
 #![allow(dead_code)] // Old egui UI code kept as reference during web UI migration
 
+mod automation;
 mod effects;
 mod input;
 mod layers;
@@ -37,6 +38,10 @@ struct App {
     layers: Vec<Layer>,
     selected_layer: Option<usize>,
     master_effects: effects::EffectUniforms,
+    // Master param automations: param name → compiled expression
+    master_automations: std::collections::HashMap<String, automation::Expr>,
+    // Master automation parse errors: param name → error message
+    master_automation_errors: std::collections::HashMap<String, String>,
     master_paused: bool,
     last_frame_time: Instant,
     start_time: Instant,
@@ -76,6 +81,8 @@ impl App {
             layers: Vec::new(),
             selected_layer: None,
             master_effects: effects::EffectUniforms::default(),
+            master_automations: std::collections::HashMap::new(),
+            master_automation_errors: std::collections::HashMap::new(),
             master_paused: false,
             last_frame_time: Instant::now(),
             start_time: Instant::now(),
@@ -228,6 +235,7 @@ impl App {
                 if self.export_job.is_none() || self.export_job.as_ref().unwrap().is_done() {
                     let patch = patch::PatchState::capture(
                         &self.master_effects,
+                        &self.master_automations,
                         &self.layers,
                         &self.ntsc_state.params,
                     );
@@ -263,6 +271,44 @@ impl App {
                     job.cancel();
                 }
             }
+            WebAction::SetAutomation { param, expr } => {
+                match automation::Expr::new(&expr) {
+                    Ok(compiled) => {
+                        self.master_automations.insert(param.clone(), compiled);
+                        self.master_automation_errors.remove(&param);
+                    }
+                    Err(e) => {
+                        self.master_automations.remove(&param);
+                        self.master_automation_errors.insert(param, e);
+                    }
+                }
+            }
+            WebAction::ClearAutomation { param } => {
+                self.master_automations.remove(&param);
+                self.master_automation_errors.remove(&param);
+            }
+            WebAction::SetLayerAutomation { index, param, expr } => {
+                if index < self.layers.len() {
+                    let layer = &mut self.layers[index];
+                    match automation::Expr::new(&expr) {
+                        Ok(compiled) => {
+                            layer.automations.insert(param.clone(), compiled);
+                            layer.automation_errors.remove(&param);
+                        }
+                        Err(e) => {
+                            layer.automations.remove(&param);
+                            layer.automation_errors.insert(param, e);
+                        }
+                    }
+                }
+            }
+            WebAction::ClearLayerAutomation { index, param } => {
+                if index < self.layers.len() {
+                    let layer = &mut self.layers[index];
+                    layer.automations.remove(&param);
+                    layer.automation_errors.remove(&param);
+                }
+            }
         }
     }
 
@@ -282,6 +328,10 @@ impl App {
                 speed: l.speed,
                 blend_mode: l.blend_mode.label().to_string(),
                 progress: l.decoder.progress(),
+                automations: l.automations.iter()
+                    .map(|(k, v)| (k.clone(), v.source.clone()))
+                    .collect(),
+                automation_errors: l.automation_errors.clone(),
             }).collect(),
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())
@@ -300,6 +350,10 @@ impl App {
                     }
                 })
                 .unwrap_or_default(),
+            automations: self.master_automations.iter()
+                .map(|(k, v)| (k.clone(), v.source.clone()))
+                .collect(),
+            automation_errors: self.master_automation_errors.clone(),
         };
 
         // Non-blocking: try to write + broadcast
@@ -600,17 +654,21 @@ impl ApplicationHandler for App {
                         PhysicalKey::Code(KeyCode::KeyS) => {
                             patch::editor::save_patch(
                                 &self.master_effects,
+                                &self.master_automations,
                                 &self.layers,
                                 &self.ntsc_state.params,
                             );
                             return;
                         }
                         PhysicalKey::Code(KeyCode::KeyO) => {
-                            patch::editor::load_patch(
+                            if let Some((autos, errors)) = patch::editor::load_patch(
                                 &mut self.master_effects,
                                 &mut self.layers,
                                 &mut self.ntsc_state.params,
-                            );
+                            ) {
+                                self.master_automations = autos;
+                                self.master_automation_errors = errors;
+                            }
                             return;
                         }
                         _ => {}
@@ -735,8 +793,16 @@ impl ApplicationHandler for App {
                     let elapsed = self.start_time.elapsed().as_secs_f32();
                     for layer in &mut self.layers {
                         layer.effects.time = elapsed;
+                        // Evaluate any automated params against `t = elapsed`.
+                        for (param, expr) in &layer.automations {
+                            layer.effects.set_by_name(param, expr.eval(elapsed));
+                        }
                     }
                     self.master_effects.time = elapsed;
+                    // Evaluate master automations (same `t` so live matches export).
+                    for (param, expr) in &self.master_automations {
+                        self.master_effects.set_by_name(param, expr.eval(elapsed));
+                    }
 
                     let renderer = self.renderer.as_mut().unwrap();
                     let mut encoder = renderer.device.create_command_encoder(
