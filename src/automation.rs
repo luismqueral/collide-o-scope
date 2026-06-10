@@ -41,10 +41,15 @@ impl Expr {
         })
     }
 
-    /// Evaluate the expression at time `t` (seconds). Never panics: any eval
-    /// error (e.g. unknown function) collapses to 0.0.
-    pub fn eval(&self, t: f32) -> f32 {
+    /// Evaluate the expression at time `t` (seconds). `beat` is the number of
+    /// musical beats elapsed since the last tap downbeat and `bpm` is the current
+    /// tempo — both let formulas sync to music (e.g. `sin(beat*tau)` pulses once
+    /// per beat). Never panics: any eval error (e.g. unknown function) collapses
+    /// to 0.0.
+    pub fn eval(&self, t: f32, beat: f32, bpm: f32) -> f32 {
         let t = t as f64;
+        let beat = beat as f64;
+        let bpm = bpm as f64;
         // The namespace closure resolves `t`, constants, and all helper functions.
         // fasteval passes unknown function names here too, so our custom
         // oscillators/shaping helpers are handled in this single match.
@@ -55,6 +60,12 @@ impl Expr {
                 "t" => Some(t),
                 "pi" => Some(std::f64::consts::PI),
                 "tau" => Some(std::f64::consts::TAU),
+                // Musical time: `beat` advances 1.0 per beat at the tapped tempo,
+                // `bpm` is the current tempo. Pair with the period-1 oscillators
+                // (e.g. `saw(beat)` ramps once per beat, `square(beat/4)` flips
+                // once per 4-beat bar).
+                "beat" => Some(beat),
+                "bpm" => Some(bpm),
 
                 // Oscillators (period = 1 second, output -1..1)
                 "tri" => Some(tri(arg(0))),

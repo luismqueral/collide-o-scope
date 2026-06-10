@@ -44,6 +44,12 @@ pub struct AppSnapshot {
     /// Master automation parse errors: param name → error message.
     #[serde(default)]
     pub automation_errors: HashMap<String, String>,
+    /// Current tap-tempo tempo (beats per minute).
+    #[serde(default)]
+    pub bpm: f32,
+    /// Beats elapsed since the last tap downbeat (drives the UI beat pulse).
+    #[serde(default)]
+    pub beat: f32,
 }
 
 impl Default for AppSnapshot {
@@ -59,6 +65,8 @@ impl Default for AppSnapshot {
             export_error: String::new(),
             automations: HashMap::new(),
             automation_errors: HashMap::new(),
+            bpm: 120.0,
+            beat: 0.0,
         }
     }
 }
@@ -255,6 +263,12 @@ pub enum WebAction {
     /// Clear automation on a per-layer param
     #[serde(rename = "clear_layer_automation")]
     ClearLayerAutomation { index: usize, param: String },
+    /// Register a tempo tap (render loop timestamps it and updates bpm/downbeat)
+    #[serde(rename = "tap_tempo")]
+    TapTempo,
+    /// Set the tempo directly (manual BPM entry)
+    #[serde(rename = "set_bpm")]
+    SetBpm { value: f32 },
 }
 
 impl EffectsSnapshot {

@@ -28,6 +28,9 @@ pub struct ExportConfig {
     pub fps: u32,
     pub duration_secs: f32,
     pub output_path: String,
+    /// Tempo for beat-synced automations. Export uses downbeat 0 (deterministic),
+    /// so beat-synced formulas match the live preview's frequency.
+    pub bpm: f32,
 }
 
 /// Shared state for progress/cancellation between the render thread and the UI.
@@ -503,12 +506,15 @@ fn run_export(
 
         // Update time uniform for effects (breathe, grain seed, etc.)
         let time = frame_num as f32 * frame_interval;
+        // Beat phase for export starts at downbeat 0, so beat-synced formulas
+        // are deterministic and match the live preview's tempo/frequency.
+        let beat = time * config.bpm / 60.0;
         master_effects.time = time;
 
         // Apply master automations for this frame. Uses the same `time` as the
         // live render loop, so exported video matches the live preview.
         for (param, expr) in &master_automations {
-            master_effects.set_by_name(param, expr.eval(time));
+            master_effects.set_by_name(param, expr.eval(time, beat, config.bpm));
         }
 
         // Advance decoders based on each layer's speed/fps
@@ -547,7 +553,7 @@ fn run_export(
 
             // Apply this layer's automations for the frame.
             for (param, expr) in &layer.automations {
-                layer.effects.set_by_name(param, expr.eval(time));
+                layer.effects.set_by_name(param, expr.eval(time, beat, config.bpm));
             }
         }
 

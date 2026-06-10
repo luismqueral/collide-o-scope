@@ -35,6 +35,9 @@
         <div class="transport-row">
           <button class="transport-btn" id="btn-play-all" title="Play All">&#x25B6;</button>
           <button class="transport-btn" id="btn-stop" title="Reset FX">&#x21BA;</button>
+          <button class="transport-btn" id="btn-tap" title="Tap tempo (or press T)">TAP</button>
+          <span class="bpm-readout" id="bpm-readout" title="Click to set BPM">120</span>
+          <span class="beat-dot" id="beat-dot" title="beat"></span>
           <span class="ws-dot" id="ws-status" title="connecting..."></span>
         </div>
         <h3 class="panel-title">Master Effects</h3>
@@ -245,6 +248,71 @@
         </div>
       </aside>
     </main>
+
+    <!-- AUTOMATION EDITOR (modal overlay) -->
+    <div class="ae-modal" id="automation" hidden>
+      <div class="ae-panel">
+        <div class="ae-head">
+          <span class="ae-context" id="ae-context">Automate</span>
+          <button class="ae-close" id="ae-close" title="Close (Esc)">&times;</button>
+        </div>
+
+        <div class="ae-presets-row">
+          <span class="ae-lbl">Preset</span>
+          <div class="ae-presets" id="ae-presets"><!-- preset chips via JS --></div>
+        </div>
+
+        <div class="ae-controls">
+          <div class="ae-ctl ae-ctl-shape">
+            <span class="ae-lbl">Shape</span>
+            <div class="ae-shapes" id="ae-shapes"><!-- shape buttons via JS --></div>
+          </div>
+
+          <div class="ae-ctl">
+            <span class="ae-lbl">Sync</span>
+            <div class="ae-seg" id="ae-sync">
+              <button data-sync="beat" class="active">Beat</button>
+              <button data-sync="free">Free</button>
+            </div>
+            <span class="ae-lbl ae-lbl-rate">Rate</span>
+            <select id="ae-rate" class="ae-select"></select>
+          </div>
+
+          <div class="ae-ctl">
+            <span class="ae-lbl">Depth</span>
+            <input type="range" id="ae-depth" min="0" max="100" step="1" value="100">
+            <span class="ae-val" id="ae-depth-val">100%</span>
+            <span class="ae-lbl ae-lbl-center">Center</span>
+            <input type="range" id="ae-center" min="0" max="100" step="1" value="50">
+            <span class="ae-val" id="ae-center-val">50%</span>
+          </div>
+
+          <div class="ae-ctl" id="ae-phase-row">
+            <span class="ae-lbl" id="ae-phase-lbl">Phase</span>
+            <input type="range" id="ae-phase" min="0" max="360" step="1" value="0">
+            <span class="ae-val" id="ae-phase-val">0&deg;</span>
+            <label class="ae-invert"><input type="checkbox" id="ae-invert"> Invert</label>
+          </div>
+        </div>
+
+        <div class="ae-preview-wrap">
+          <canvas id="ae-preview" class="ae-preview" width="560" height="120"></canvas>
+        </div>
+
+        <div class="ae-formula-row">
+          <code class="ae-formula" id="ae-formula"></code>
+          <input type="text" class="ae-raw-input" id="ae-raw-input" hidden>
+          <button class="ae-btn" id="ae-editraw" title="Edit the raw expression">Edit raw</button>
+        </div>
+
+        <div class="ae-foot">
+          <button class="ae-btn ae-remove" id="ae-remove">Remove</button>
+          <span class="ae-foot-spacer"></span>
+          <button class="ae-btn" id="ae-copy">Copy</button>
+          <button class="ae-btn ae-apply" id="ae-apply">Apply</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

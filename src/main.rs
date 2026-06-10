@@ -45,6 +45,12 @@ struct App {
     master_paused: bool,
     last_frame_time: Instant,
     start_time: Instant,
+    // Tap-tempo state. `tap_bpm` is the current tempo; `tap_downbeat` is the
+    // elapsed-seconds moment of the last tap (beat phase 0); `tap_times` holds
+    // recent tap timestamps (elapsed secs) so we can average their spacing.
+    tap_bpm: f32,
+    tap_downbeat: f32,
+    tap_times: Vec<f32>,
     modifiers: ModifiersState,
     // Library
     library_folder: Option<PathBuf>,
@@ -86,6 +92,9 @@ impl App {
             master_paused: false,
             last_frame_time: Instant::now(),
             start_time: Instant::now(),
+            tap_bpm: 120.0,
+            tap_downbeat: 0.0,
+            tap_times: Vec::new(),
             modifiers: ModifiersState::empty(),
             library_folder,
             library_files,
@@ -261,6 +270,7 @@ impl App {
                         fps,
                         duration_secs,
                         output_path,
+                        bpm: self.tap_bpm,
                     };
                     self.export_job = Some(render_export::ExportJob::start(patch, config, &lib_folder));
                     log::info!("Export started");
@@ -309,6 +319,40 @@ impl App {
                     layer.automation_errors.remove(&param);
                 }
             }
+            WebAction::TapTempo => {
+                // Stamp the tap against the same clock the formulas use, so the
+                // resulting beat phase lines up with `beat` in eval().
+                let now = self.start_time.elapsed().as_secs_f32();
+                // If it's been a while since the last tap, start a fresh run —
+                // the user is tapping a new tempo, not continuing the old one.
+                if let Some(&last) = self.tap_times.last() {
+                    if now - last > 2.0 {
+                        self.tap_times.clear();
+                    }
+                }
+                self.tap_times.push(now);
+                // Keep only the most recent handful of taps for the average.
+                if self.tap_times.len() > 8 {
+                    let start = self.tap_times.len() - 8;
+                    self.tap_times.drain(..start);
+                }
+                // Need at least two taps to measure an interval.
+                if self.tap_times.len() >= 2 {
+                    let first = self.tap_times[0];
+                    let span = now - first;
+                    let intervals = (self.tap_times.len() - 1) as f32;
+                    let avg = span / intervals;
+                    if avg > 0.0 {
+                        self.tap_bpm = (60.0 / avg).clamp(30.0, 300.0);
+                    }
+                }
+                // Every tap is a downbeat: reset beat phase to 0 here.
+                self.tap_downbeat = now;
+            }
+            WebAction::SetBpm { value } => {
+                // Manual tempo entry — set the tempo but leave beat phase alone.
+                self.tap_bpm = value.clamp(30.0, 300.0);
+            }
         }
     }
 
@@ -354,6 +398,9 @@ impl App {
                 .map(|(k, v)| (k.clone(), v.source.clone()))
                 .collect(),
             automation_errors: self.master_automation_errors.clone(),
+            bpm: self.tap_bpm,
+            beat: (self.start_time.elapsed().as_secs_f32() - self.tap_downbeat)
+                * self.tap_bpm / 60.0,
         };
 
         // Non-blocking: try to write + broadcast
@@ -791,17 +838,21 @@ impl ApplicationHandler for App {
 
                     // Set time uniform on all effects (drives animated noise/breathing)
                     let elapsed = self.start_time.elapsed().as_secs_f32();
+                    // Musical time for beat-synced formulas: `beat` counts beats
+                    // since the last tap downbeat at the current tempo.
+                    let bpm = self.tap_bpm;
+                    let beat = (elapsed - self.tap_downbeat) * bpm / 60.0;
                     for layer in &mut self.layers {
                         layer.effects.time = elapsed;
                         // Evaluate any automated params against `t = elapsed`.
                         for (param, expr) in &layer.automations {
-                            layer.effects.set_by_name(param, expr.eval(elapsed));
+                            layer.effects.set_by_name(param, expr.eval(elapsed, beat, bpm));
                         }
                     }
                     self.master_effects.time = elapsed;
                     // Evaluate master automations (same `t` so live matches export).
                     for (param, expr) in &self.master_automations {
-                        self.master_effects.set_by_name(param, expr.eval(elapsed));
+                        self.master_effects.set_by_name(param, expr.eval(elapsed, beat, bpm));
                     }
 
                     let renderer = self.renderer.as_mut().unwrap();

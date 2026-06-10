@@ -305,6 +305,57 @@ body {
 .ws-dot.connected { background: #4a4; }
 .ws-dot.disconnected { background: #a44; }
 
+/* Tempo readout — click to type an exact BPM. */
+.bpm-readout {
+  position: relative;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  background: var(--value-bg);
+  border-radius: 3px;
+  padding: 2px 6px;
+  min-width: 34px;
+  text-align: center;
+  cursor: text;
+}
+
+.bpm-readout:hover { background: var(--accent); color: #000; }
+
+/* Inline editor for the BPM readout (the shared .value-input rule is scoped
+   to .param-row, so style this instance explicitly). */
+.bpm-readout .value-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: center;
+  color: var(--accent);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  outline: none;
+  z-index: 10;
+}
+
+/* Beat pulse dot — pops on each downbeat via the `.on` class. */
+.beat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.25;
+  transform: scale(1);
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+}
+
+.beat-dot.on {
+  opacity: 1;
+  transform: scale(1.5);
+  transition: none;
+}
+
 .panel-title {
   font-size: 11px;
   font-weight: 600;
@@ -392,6 +443,34 @@ body {
   height: var(--row-height);
 }
 
+/* Automatable rows grow a narrow column for the ƒ launcher, between the
+   slider and the value cell. */
+.param-row.has-fx {
+  grid-template-columns: var(--label-width) 1fr auto var(--value-width);
+}
+
+/* The ƒ launcher: dim by default, accent when an automation is active. */
+.fx-launcher {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.12s, color 0.12s;
+}
+
+.fx-launcher:hover { opacity: 1; color: var(--text); }
+
+.fx-launcher.active {
+  opacity: 1;
+  color: var(--accent);
+}
+
 .param-row label {
   font-size: 11px;
   color: var(--text);
@@ -416,23 +495,11 @@ body {
   color: #000;
 }
 
-/* Automated param: ƒ marker before the (frozen) live value. */
-.param-row .value.automated::before {
-  content: 'ƒ ';
-  color: var(--accent);
-  font-style: italic;
-}
-
-.param-row .value.automated:hover::before {
-  color: #000;
-}
+/* Automated param: the live value is frozen; the ƒ launcher (accent when
+   active) is the "this is animated" indicator now, so no text marker here. */
 
 /* Bad formula: surface the parse error in red. */
 .param-row .value.error {
-  color: #e55;
-}
-
-.param-row .value.error::before {
   color: #e55;
 }
 
@@ -635,3 +702,287 @@ input[type="range"]::-webkit-slider-thumb:hover {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ===== Automation Editor (modal overlay) ===== */
+.ae-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.ae-modal[hidden] { display: none; }
+
+.ae-panel {
+  width: min(640px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+/* Header — fixed context title (the param this was opened for). */
+.ae-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ae-context {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ae-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.ae-close:hover { color: var(--text); }
+
+/* Shared label / value-readout typography. */
+.ae-lbl {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.ae-val {
+  font-size: 10px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
+}
+
+/* Preset strip. */
+.ae-presets-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ae-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ae-preset {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  font-family: inherit;
+}
+
+.ae-preset:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Control rack. */
+.ae-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.ae-ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The leading label in each control row is fixed-width so sliders align. */
+.ae-ctl > .ae-lbl:first-child {
+  width: 48px;
+  flex-shrink: 0;
+}
+
+.ae-ctl input[type="range"] { flex: 1; }
+
+/* Secondary inline labels (Rate / Center) sit between controls. */
+.ae-lbl-rate,
+.ae-lbl-center { flex-shrink: 0; }
+
+/* Shape button row. */
+.ae-shapes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+}
+
+.ae-shape {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  font-family: inherit;
+}
+
+.ae-shape:hover { border-color: var(--accent); color: var(--text); }
+.ae-shape.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* Segmented sync toggle (Beat / Free). */
+.ae-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.ae-seg button {
+  background: var(--surface-2);
+  border: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.ae-seg button + button { border-left: 1px solid var(--border); }
+.ae-seg button.active { background: var(--accent); color: var(--bg); }
+
+.ae-select {
+  background: var(--value-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-family: inherit;
+  outline: none;
+}
+
+.ae-select:focus { border-color: var(--accent); }
+
+.ae-invert {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+/* Live preview canvas. */
+.ae-preview-wrap {
+  padding: 0 14px 12px;
+}
+
+.ae-preview {
+  width: 100%;
+  height: 120px;
+  background: var(--value-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: block;
+}
+
+/* Generated-formula line + raw escape hatch. */
+.ae-formula-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+
+.ae-formula {
+  flex: 1;
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--value-bg);
+  border-radius: 2px;
+  padding: 4px 6px;
+  word-break: break-all;
+}
+
+.ae-raw-input {
+  flex: 1;
+  font-size: 10px;
+  font-family: inherit;
+  color: var(--accent);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  padding: 3px 6px;
+  outline: none;
+}
+
+.ae-raw-input[hidden] { display: none; }
+
+/* Footer actions. */
+.ae-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.ae-foot-spacer { flex: 1; }
+
+.ae-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.ae-btn:hover { border-color: var(--text); }
+
+.ae-apply {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ae-apply:hover { background: var(--accent); color: var(--bg); }
+
+.ae-remove {
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+.ae-remove:hover { border-color: #e55; color: #e55; }
+
+/* Raw mode: dim the knob rack + presets so it's clear they're detached. */
+.ae-modal.raw .ae-controls,
+.ae-modal.raw .ae-presets-row {
+  opacity: 0.4;
+  pointer-events: none;
+}
