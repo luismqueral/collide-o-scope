@@ -22,15 +22,52 @@ struct Uniforms {
     breathe_rotation: f32,
     breathe_position: f32,
     vignette: f32,
-    // Analog: color drift
+    // Analog: color drift + Warp: wave
     color_drift: f32,
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    wave_amp: f32,
+    wave_freq: f32,
+    wave_speed: f32,
+    // Warp: wave axis + swirl + bulge strength
+    wave_axis: f32,
+    swirl_angle: f32,
+    swirl_radius: f32,
+    bulge_strength: f32,
+    // Warp: bulge radius + Chroma: enable/threshold/smoothness
+    bulge_radius: f32,
+    chroma_enable: f32,
+    chroma_threshold: f32,
+    chroma_smoothness: f32,
+    // Chroma: spill + key color (sRGB 0..1)
+    chroma_spill: f32,
+    chroma_color_r: f32,
+    chroma_color_g: f32,
+    chroma_color_b: f32,
+    // Shift: slice (scanline-band displacement glitch)
+    slice_intensity: f32,
+    slice_height: f32,
+    slice_prob: f32,
+    slice_speed: f32,
+    // Shift: block (rectangular block displacement)
+    block_size: f32,
+    block_intensity: f32,
+    block_prob: f32,
+    block_speed: f32,
+    // Shift: chroma fringing + slice axis + continuous jitter
+    shift_chroma: f32,
+    slice_axis: f32,
+    jitter_amount: f32,
+    jitter_speed: f32,
+    // Shift: datamosh + Layer transform: position/size
+    datamosh: f32,
+    layer_x: f32,
+    layer_y: f32,
+    layer_scale: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
+// Previous output frame (for datamosh feedback trails).
+@group(0) @binding(2) var prev_tex: texture_2d<f32>;
 @group(1) @binding(0) var<uniform> uniforms: Uniforms;
 
 // --- Hash / noise functions (ported from legacy GLSL) ---
@@ -217,13 +254,96 @@ fn hsl_to_rgb(hsl: vec3f) -> vec3f {
     );
 }
 
+// Linear -> sRGB (textures are Rgba8UnormSrgb, so samples arrive linear;
+// convert to sRGB so chroma key compares in the same space the UI picks in).
+fn linear_to_srgb(c: vec3f) -> vec3f {
+    let cutoff = c < vec3f(0.0031308);
+    let low = c * 12.92;
+    let high = 1.055 * pow(max(c, vec3f(0.0)), vec3f(1.0 / 2.4)) - 0.055;
+    return select(high, low, cutoff);
+}
+
 @fragment
 fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
     var sample_uv = uv;
 
+    // --- Layer transform: scale + position. Areas outside the moved/scaled
+    // frame become transparent (out_alpha = 0 at the end) so the layers below
+    // show through. Defaults (scale 1, x/y 0) skip this entirely. ---
+    var layer_oob = false;
+    if uniforms.layer_scale != 1.0 || uniforms.layer_x != 0.0 || uniforms.layer_y != 0.0 {
+        sample_uv = (sample_uv - 0.5) / max(uniforms.layer_scale, 0.01) + 0.5;
+        sample_uv += vec2f(-uniforms.layer_x, uniforms.layer_y); // +x = right, +y = up
+        if sample_uv.x < 0.0 || sample_uv.x > 1.0 || sample_uv.y < 0.0 || sample_uv.y > 1.0 {
+            layer_oob = true;
+        }
+    }
+
     // --- Breathing (UV distortion before sampling) ---
     if uniforms.breathe_scale > 0.0 || uniforms.breathe_rotation > 0.0 || uniforms.breathe_position > 0.0 {
         sample_uv = apply_breathing(sample_uv);
+    }
+
+    // --- Warps (UV displacement) ---
+    if uniforms.wave_amp > 0.0 {
+        let t = uniforms.time * uniforms.wave_speed;
+        if uniforms.wave_axis != 1.0 { sample_uv.x += sin(uv.y * uniforms.wave_freq + t) * uniforms.wave_amp; }
+        if uniforms.wave_axis != 0.0 { sample_uv.y += sin(uv.x * uniforms.wave_freq + t) * uniforms.wave_amp; }
+    }
+    if abs(uniforms.swirl_angle) > 0.1 {
+        let c = sample_uv - 0.5;
+        let d = length(c);
+        let falloff = smoothstep(uniforms.swirl_radius, 0.0, d);
+        let a = uniforms.swirl_angle * 0.01745329 * falloff;
+        let cs = cos(a); let sn = sin(a);
+        sample_uv = vec2f(c.x * cs - c.y * sn, c.x * sn + c.y * cs) + 0.5;
+    }
+    if abs(uniforms.bulge_strength) > 0.001 {
+        let c = sample_uv - 0.5;
+        let d = length(c) / max(uniforms.bulge_radius, 0.05);
+        let scale = 1.0 + uniforms.bulge_strength * (1.0 - clamp(d, 0.0, 1.0));
+        sample_uv = c / scale + 0.5;
+    }
+
+    // --- Pixel shifting / glitch (UV displacement reseeded in discrete steps) ---
+    var glitch_dx = 0.0; // horizontal displacement so far, fed into chroma fringing
+    var mosh_amt = 0.0;  // 1.0 inside a displaced block, fed into datamosh feedback
+    // Slice shift: scanline-bands jump (axis 0 = horizontal bands shift X,
+    // 1 = vertical bands shift Y, 2 = both). VHS tracking-tear look.
+    if uniforms.slice_intensity > 0.0 {
+        let seed = floor(uniforms.time * uniforms.slice_speed);
+        if uniforms.slice_axis != 1.0 {
+            let band = floor(uv.y * uniforms.resolution.y / max(uniforms.slice_height, 1.0));
+            if hash(vec2f(band, seed)) > 1.0 - uniforms.slice_prob {
+                let dx = (hash(vec2f(band, seed + 7.0)) - 0.5) * uniforms.slice_intensity;
+                sample_uv.x += dx;
+                glitch_dx += dx;
+            }
+        }
+        if uniforms.slice_axis != 0.0 {
+            let band = floor(uv.x * uniforms.resolution.x / max(uniforms.slice_height, 1.0));
+            if hash(vec2f(band, seed + 19.0)) > 1.0 - uniforms.slice_prob {
+                sample_uv.y += (hash(vec2f(band, seed + 23.0)) - 0.5) * uniforms.slice_intensity;
+            }
+        }
+    }
+    // Block mosh: rectangular blocks jump in 2D (datamosh look).
+    if uniforms.block_intensity > 0.0 {
+        let grid = uniforms.resolution / max(uniforms.block_size, 4.0);
+        let cell = floor(uv * grid);
+        let seed = floor(uniforms.time * uniforms.block_speed);
+        if hash(vec2f(cell.x + cell.y * 57.0, seed)) > 1.0 - uniforms.block_prob {
+            let ox = (hash(vec2f(cell.x, seed + 3.0)) - 0.5) * uniforms.block_intensity;
+            let oy = (hash(vec2f(cell.y, seed + 9.0)) - 0.5) * uniforms.block_intensity;
+            sample_uv += vec2f(ox, oy);
+            glitch_dx += ox;
+            mosh_amt = 1.0;
+        }
+    }
+    // Continuous jitter: smooth per-scanline horizontal wobble (analog instability).
+    if uniforms.jitter_amount > 0.0 {
+        let w = value_noise(vec2f(uv.y * uniforms.resolution.y * 0.25, uniforms.time * uniforms.jitter_speed));
+        sample_uv.x += (w - 0.5) * uniforms.jitter_amount;
     }
 
     // --- Downsample (lossy video look) ---
@@ -239,9 +359,17 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
         sample_uv = floor(sample_uv * res / block) * block / res;
     }
 
-    // --- Color drift (per-frame random chromatic aberration) ---
+    // --- Chroma fringing on displaced (glitched) regions ---
     var color: vec4f;
-    if uniforms.color_drift > 0.0 {
+    if uniforms.shift_chroma > 0.0 && abs(glitch_dx) > 0.0001 {
+        let cshift = glitch_dx * uniforms.shift_chroma;
+        let r = textureSample(tex, samp, vec2f(sample_uv.x + cshift, sample_uv.y)).r;
+        let g = textureSample(tex, samp, sample_uv).g;
+        let b = textureSample(tex, samp, vec2f(sample_uv.x - cshift, sample_uv.y)).b;
+        let a = textureSample(tex, samp, sample_uv).a;
+        color = vec4f(r, g, b, a);
+    } else if uniforms.color_drift > 0.0 {
+        // --- Color drift (per-frame random chromatic aberration) ---
         let seed = floor(uniforms.time * 30.0);
         let r_shift = (hash(vec2f(seed, 10.0)) - 0.5) * uniforms.color_drift;
         let b_shift = (hash(vec2f(seed, 11.0)) - 0.5) * uniforms.color_drift;
@@ -260,6 +388,15 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
         color = vec4f(r, g, b, a);
     } else {
         color = textureSample(tex, samp, sample_uv);
+    }
+
+    // --- Datamosh: displaced blocks bleed the previous output frame ---
+    // Sampling the held previous frame at the displaced UV makes blocks drag
+    // last frame's pixels; because that frame already held the smear, trails
+    // accumulate (bounded by mix, so they fade rather than blow out).
+    if uniforms.datamosh > 0.0 && mosh_amt > 0.0 {
+        let prev = textureSample(prev_tex, samp, sample_uv);
+        color = mix(color, prev, uniforms.datamosh);
     }
 
     var rgb = color.rgb;
@@ -308,5 +445,26 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
         rgb += grain;
     }
 
-    return vec4f(clamp(rgb, vec3f(0.0), vec3f(1.0)), color.a);
+    // --- Chroma key (write alpha so lower layers show through) ---
+    var out_alpha = color.a;
+    if uniforms.chroma_enable > 0.5 {
+        let key = vec3f(uniforms.chroma_color_r, uniforms.chroma_color_g, uniforms.chroma_color_b); // sRGB 0..1
+        let px = linear_to_srgb(clamp(color.rgb, vec3f(0.0), vec3f(1.0))); // raw sample -> sRGB
+        let key_hsl = rgb_to_hsl(key);
+        let px_hsl = rgb_to_hsl(px);
+        var dh = abs(px_hsl.x - key_hsl.x);
+        dh = min(dh, 1.0 - dh); // hue wraps
+        let dist = length(vec2f(dh * 2.0, px_hsl.y - key_hsl.y));
+        let k = smoothstep(uniforms.chroma_threshold, uniforms.chroma_threshold + uniforms.chroma_smoothness + 0.001, dist);
+        out_alpha = out_alpha * k;
+        // spill: pull toward grey where we're near the key hue
+        let luma = dot(rgb, vec3f(0.299, 0.587, 0.114));
+        rgb = mix(vec3f(luma), rgb, mix(1.0, k, uniforms.chroma_spill));
+    }
+
+    // Layer transform pushed this fragment outside the source frame: make it
+    // fully transparent so the layers below show through (no edge smearing).
+    if layer_oob { out_alpha = 0.0; }
+
+    return vec4f(clamp(rgb, vec3f(0.0), vec3f(1.0)), out_alpha);
 }

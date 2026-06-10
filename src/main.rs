@@ -24,12 +24,32 @@ use winit::keyboard::ModifiersState;
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 
 use input::{apply_action, map_key, ControlFlow};
-use layers::{is_video_file, BlendMode, Layer};
+use layers::{is_supported_media, BlendMode, Layer};
 use renderer::Renderer;
 use web::state::WebState;
 
 const TARGET_FPS: u64 = 30;
 const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
+
+/// Output pixel dims for a ratio label + quality (= length of the SHORTER side).
+/// 16:9/1080 → 1920×1080, 9:16/1080 → 1080×1920, 1:1/1080 → 1080×1080.
+/// Result dims are forced even (h264/encoder-friendly for export).
+fn output_dims(ratio: &str, quality: u32) -> (u32, u32) {
+    let short = quality.max(2);
+    let (rw, rh): (f32, f32) = match ratio {
+        "4:3" => (4.0, 3.0),
+        "1:1" => (1.0, 1.0),
+        "9:16" => (9.0, 16.0),
+        "21:9" => (21.0, 9.0),
+        _ => (16.0, 9.0), // default + "16:9"
+    };
+    let (w, h) = if rw >= rh {
+        (((short as f32) * rw / rh).round() as u32, short) // landscape/square: height = short
+    } else {
+        (short, ((short as f32) * rh / rw).round() as u32) // portrait: width = short
+    };
+    (w & !1, h & !1) // even dims
+}
 
 struct App {
     initial_video: Option<String>,
@@ -37,6 +57,7 @@ struct App {
     renderer: Option<Renderer>,
     layers: Vec<Layer>,
     selected_layer: Option<usize>,
+    next_layer_id: u64,
     master_effects: effects::EffectUniforms,
     // Master param automations: param name → compiled expression
     master_automations: std::collections::HashMap<String, automation::Expr>,
@@ -51,10 +72,19 @@ struct App {
     tap_bpm: f32,
     tap_downbeat: f32,
     tap_times: Vec<f32>,
+    // Master content framerate (frame-hold / stutter). 30 = smooth (default).
+    master_fps: f32,
+    last_content_advance: Instant,
+    content_time: f32,
+    // Master output size: aspect ratio label + quality (shorter-side px).
+    output_ratio: String,
+    output_quality: u32,
     modifiers: ModifiersState,
     // Library
     library_folder: Option<PathBuf>,
     library_files: Vec<PathBuf>,
+    // Saved patch names (file stems), cached; re-scanned on save/delete
+    patch_files: Vec<String>,
     // YAML editor
     yaml_editor: patch::editor::EditorState,
     // egui state
@@ -80,12 +110,15 @@ impl App {
         // Generate thumbnails on background thread
         generate_thumbnails(&library_files, web_state.clone());
 
+        let patch_files = scan_patches(&patches_dir(&library_folder));
+
         Self {
             initial_video,
             window: None,
             renderer: None,
             layers: Vec::new(),
             selected_layer: None,
+            next_layer_id: 0,
             master_effects: effects::EffectUniforms::default(),
             master_automations: std::collections::HashMap::new(),
             master_automation_errors: std::collections::HashMap::new(),
@@ -95,9 +128,15 @@ impl App {
             tap_bpm: 120.0,
             tap_downbeat: 0.0,
             tap_times: Vec::new(),
+            master_fps: 30.0,
+            last_content_advance: Instant::now(),
+            content_time: 0.0,
+            output_ratio: "16:9".to_string(),
+            output_quality: 1080,
             modifiers: ModifiersState::empty(),
             library_folder,
             library_files,
+            patch_files,
             yaml_editor: patch::editor::EditorState::default(),
             egui_ctx: egui::Context::default(),
             egui_winit: None,
@@ -112,7 +151,9 @@ impl App {
     fn add_layer(&mut self, path: &str) {
         let renderer = self.renderer.as_ref().unwrap();
         match Layer::new(path, &renderer.device) {
-            Ok(layer) => {
+            Ok(mut layer) => {
+                layer.id = self.next_layer_id;
+                self.next_layer_id += 1;
                 self.layers.push(layer);
                 self.selected_layer = Some(self.layers.len() - 1);
             }
@@ -136,6 +177,29 @@ impl App {
                 snap.apply_param(&param, &value);
                 snap.apply_to_uniforms(&mut self.master_effects);
             }
+            WebAction::SetMasterFramerate { value } => {
+                self.master_fps = value.clamp(1.0, TARGET_FPS as f32);
+            }
+            WebAction::SetOutputSize { ratio, quality } => {
+                self.output_ratio = ratio;
+                self.output_quality = quality.clamp(120, 4320);
+                let (w, h) = output_dims(&self.output_ratio, self.output_quality);
+                if let Some(r) = self.renderer.as_mut() {
+                    r.set_output_size(w, h);
+                    self.master_effects.resolution = [w as f32, h as f32];
+                    // output_view moved — rebind the egui preview texture.
+                    if let (Some(egui_r), Some(id)) =
+                        (self.egui_renderer.as_mut(), self.video_egui_texture_id)
+                    {
+                        egui_r.update_egui_texture_from_wgpu_texture(
+                            &r.device,
+                            &r.output_view,
+                            wgpu::FilterMode::Linear,
+                            id,
+                        );
+                    }
+                }
+            }
             WebAction::AddLayer { filename } => {
                 // Find the full path from the library
                 if let Some(path) = self.library_files.iter().find(|p| {
@@ -157,6 +221,26 @@ impl App {
                             self.selected_layer = Some(self.layers.len() - 1);
                         }
                     }
+                }
+            }
+            WebAction::MoveLayer { from, to } => {
+                let len = self.layers.len();
+                if from < len && to < len && from != to {
+                    let layer = self.layers.remove(from);
+                    self.layers.insert(to, layer);
+                    // Keep the egui selection pointing at the same layer.
+                    if let Some(sel) = self.selected_layer {
+                        self.selected_layer = Some(if sel == from {
+                            to
+                        } else if from < sel && sel <= to {
+                            sel - 1
+                        } else if to <= sel && sel < from {
+                            sel + 1
+                        } else {
+                            sel
+                        });
+                    }
+                    log::info!("Layer moved {from} → {to}");
                 }
             }
             WebAction::ToggleVisibility { index } => {
@@ -223,6 +307,11 @@ impl App {
                                 layer.speed = (v as f32).clamp(0.25, 4.0);
                             }
                         }
+                        "fps" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.fps = (v as f32).clamp(1.0, 60.0);
+                            }
+                        }
                         "blend_mode" => {
                             if let Some(s) = value.as_str() {
                                 layer.blend_mode = match s {
@@ -231,6 +320,196 @@ impl App {
                                     "difference" => crate::layers::BlendMode::Difference,
                                     _ => crate::layers::BlendMode::Normal,
                                 };
+                            }
+                        }
+                        "hue_shift" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.hue_shift = (v as f32).clamp(-180.0, 180.0);
+                            }
+                        }
+                        "saturation" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.saturation = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "brightness" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.brightness = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "contrast" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.contrast = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "pixelate" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.pixelate_size = (v as f32).clamp(1.0, 32.0);
+                            }
+                        }
+                        "rgb_split" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.rgb_split = (v as f32).clamp(0.0, 30.0);
+                            }
+                        }
+                        "posterize" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.posterize = (v as f32).clamp(0.0, 16.0);
+                            }
+                        }
+                        "invert" => {
+                            if let Some(b) = value.as_bool() {
+                                layer.effects.invert = if b { 1.0 } else { 0.0 };
+                            }
+                        }
+                        "wave_amp" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.wave_amp = (v as f32).clamp(0.0, 0.1);
+                            }
+                        }
+                        "wave_freq" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.wave_freq = (v as f32).clamp(0.0, 50.0);
+                            }
+                        }
+                        "wave_speed" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.wave_speed = (v as f32).clamp(0.0, 10.0);
+                            }
+                        }
+                        "wave_axis" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.wave_axis = (v as f32).clamp(0.0, 2.0);
+                            } else if let Some(s) = value.as_str() {
+                                layer.effects.wave_axis = s.parse::<f32>().unwrap_or(0.0).clamp(0.0, 2.0);
+                            }
+                        }
+                        "swirl_angle" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.swirl_angle = (v as f32).clamp(-720.0, 720.0);
+                            }
+                        }
+                        "swirl_radius" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.swirl_radius = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "bulge_strength" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.bulge_strength = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "bulge_radius" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.bulge_radius = (v as f32).clamp(0.05, 1.0);
+                            }
+                        }
+                        "chroma_enable" => {
+                            if let Some(b) = value.as_bool() {
+                                layer.effects.chroma_enable = if b { 1.0 } else { 0.0 };
+                            }
+                        }
+                        "chroma_threshold" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.chroma_threshold = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "chroma_smoothness" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.chroma_smoothness = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "chroma_spill" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.chroma_spill = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "chroma_color" => {
+                            if let Some(s) = value.as_str() {
+                                let (r, g, b) = hex_to_rgb01(s);
+                                layer.effects.chroma_color_r = r;
+                                layer.effects.chroma_color_g = g;
+                                layer.effects.chroma_color_b = b;
+                            }
+                        }
+                        "slice_intensity" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.slice_intensity = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "slice_height" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.slice_height = (v as f32).clamp(1.0, 128.0);
+                            }
+                        }
+                        "slice_prob" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.slice_prob = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "slice_speed" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.slice_speed = (v as f32).clamp(0.0, 30.0);
+                            }
+                        }
+                        "block_size" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.block_size = (v as f32).clamp(4.0, 128.0);
+                            }
+                        }
+                        "block_intensity" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.block_intensity = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "block_prob" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.block_prob = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "block_speed" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.block_speed = (v as f32).clamp(0.0, 30.0);
+                            }
+                        }
+                        "shift_chroma" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.shift_chroma = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "slice_axis" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.slice_axis = (v as f32).clamp(0.0, 2.0);
+                            }
+                        }
+                        "jitter_amount" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.jitter_amount = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "jitter_speed" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.jitter_speed = (v as f32).clamp(0.0, 30.0);
+                            }
+                        }
+                        "datamosh" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.datamosh = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "layer_x" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.layer_x = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "layer_y" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.layer_y = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "layer_scale" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.layer_scale = (v as f32).clamp(0.1, 4.0);
                             }
                         }
                         _ => {}
@@ -353,6 +632,105 @@ impl App {
                 // Manual tempo entry — set the tempo but leave beat phase alone.
                 self.tap_bpm = value.clamp(30.0, 300.0);
             }
+            WebAction::SavePatch { name } => {
+                let name = sanitize_patch_name(&name);
+                if name.is_empty() {
+                    return;
+                }
+                let dir = patches_dir(&self.library_folder);
+                if let Err(e) = std::fs::create_dir_all(&dir) {
+                    log::error!("Failed to create patches dir: {e}");
+                    return;
+                }
+                let patch = patch::PatchState::capture(
+                    &self.master_effects,
+                    &self.master_automations,
+                    &self.layers,
+                    &self.ntsc_state.params,
+                );
+                match serde_yaml::to_string(&patch) {
+                    Ok(yaml) => {
+                        let path = dir.join(format!("{name}.yaml"));
+                        if let Err(e) = std::fs::write(&path, &yaml) {
+                            log::error!("Failed to write patch {name}: {e}");
+                        } else {
+                            self.patch_files = scan_patches(&dir);
+                            log::info!("Saved patch '{name}'");
+                        }
+                    }
+                    Err(e) => log::error!("Failed to serialize patch: {e}"),
+                }
+            }
+            WebAction::LoadPatch { name } => {
+                let name = sanitize_patch_name(&name);
+                if name.is_empty() {
+                    return;
+                }
+                let dir = patches_dir(&self.library_folder);
+                let path = dir.join(format!("{name}.yaml"));
+                let yaml = match std::fs::read_to_string(&path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("Failed to read patch {name}: {e}");
+                        return;
+                    }
+                };
+                let patch = match serde_yaml::from_str::<patch::PatchState>(&yaml) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        log::error!("Failed to parse patch {name}: {e}");
+                        return;
+                    }
+                };
+                // Rebuild layers from scratch: PatchState::apply only zips against
+                // existing layers, so we recreate decoders via add_layer here.
+                self.layers.clear();
+                self.selected_layer = None;
+                for cfg in &patch.layers {
+                    let resolved = self.library_files.iter().find(|p| {
+                        p.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .as_deref()
+                            == Some(&cfg.filename)
+                    });
+                    match resolved {
+                        Some(p) => {
+                            let path_str = p.to_string_lossy().to_string();
+                            self.add_layer(&path_str);
+                            if let Some(layer) = self.layers.last_mut() {
+                                cfg.apply_to_layer(layer);
+                            }
+                        }
+                        None => log::warn!(
+                            "Patch '{name}' references missing video '{}', skipping",
+                            cfg.filename
+                        ),
+                    }
+                }
+                patch.master.apply_to_uniforms(&mut self.master_effects);
+                if let Some(n) = &patch.ntsc {
+                    self.ntsc_state.params = n.to_params();
+                }
+                // Restore saved master automations (replacing whatever was live),
+                // so loading a patch reproduces its animated look, not just static
+                // values. Per-layer automations aren't stored in patches.
+                let (autos, errors) = patch.compile_master_automations();
+                self.master_automations = autos;
+                self.master_automation_errors = errors;
+                log::info!("Loaded patch '{name}' ({} layers)", self.layers.len());
+            }
+            WebAction::DeletePatch { name } => {
+                let name = sanitize_patch_name(&name);
+                if name.is_empty() {
+                    return;
+                }
+                let dir = patches_dir(&self.library_folder);
+                let path = dir.join(format!("{name}.yaml"));
+                if let Err(e) = std::fs::remove_file(&path) {
+                    log::error!("Failed to delete patch {name}: {e}");
+                }
+                self.patch_files = scan_patches(&dir);
+            }
         }
     }
 
@@ -365,22 +743,71 @@ impl App {
             effects: EffectsSnapshot::from_uniforms(&self.master_effects),
             ntsc: NtscSnapshot::from_params(&self.ntsc_state.params),
             layers: self.layers.iter().map(|l| LayerSnapshot {
+                id: l.id,
                 filename: l.filename.clone(),
                 visible: l.visible,
                 paused: l.paused,
                 opacity: l.opacity,
                 speed: l.speed,
-                blend_mode: l.blend_mode.label().to_string(),
+                fps: l.fps,
+                blend_mode: l.blend_mode.as_str().to_string(),
                 progress: l.decoder.progress(),
                 automations: l.automations.iter()
                     .map(|(k, v)| (k.clone(), v.source.clone()))
                     .collect(),
                 automation_errors: l.automation_errors.clone(),
+                hue_shift: l.effects.hue_shift,
+                saturation: l.effects.saturation,
+                brightness: l.effects.brightness,
+                contrast: l.effects.contrast,
+                pixelate: l.effects.pixelate_size,
+                rgb_split: l.effects.rgb_split,
+                posterize: l.effects.posterize,
+                invert: l.effects.invert > 0.5,
+                wave_amp: l.effects.wave_amp,
+                wave_freq: l.effects.wave_freq,
+                wave_speed: l.effects.wave_speed,
+                wave_axis: l.effects.wave_axis,
+                swirl_angle: l.effects.swirl_angle,
+                swirl_radius: l.effects.swirl_radius,
+                bulge_strength: l.effects.bulge_strength,
+                bulge_radius: l.effects.bulge_radius,
+                chroma_enable: l.effects.chroma_enable > 0.5,
+                chroma_threshold: l.effects.chroma_threshold,
+                chroma_smoothness: l.effects.chroma_smoothness,
+                chroma_spill: l.effects.chroma_spill,
+                chroma_color: rgb01_to_hex(
+                    l.effects.chroma_color_r,
+                    l.effects.chroma_color_g,
+                    l.effects.chroma_color_b,
+                ),
+                slice_intensity: l.effects.slice_intensity,
+                slice_height: l.effects.slice_height,
+                slice_prob: l.effects.slice_prob,
+                slice_speed: l.effects.slice_speed,
+                block_size: l.effects.block_size,
+                block_intensity: l.effects.block_intensity,
+                block_prob: l.effects.block_prob,
+                block_speed: l.effects.block_speed,
+                shift_chroma: l.effects.shift_chroma,
+                slice_axis: l.effects.slice_axis,
+                jitter_amount: l.effects.jitter_amount,
+                jitter_speed: l.effects.jitter_speed,
+                datamosh: l.effects.datamosh,
+                layer_x: l.effects.layer_x,
+                layer_y: l.effects.layer_y,
+                layer_scale: l.effects.layer_scale,
             }).collect(),
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())
             }).collect(),
+            patches: self.patch_files.clone(),
             paused: self.master_paused,
+            framerate: self.master_fps,
+            output_ratio: self.output_ratio.clone(),
+            output_quality: self.output_quality,
+            output_width: self.renderer.as_ref().map(|r| r.output_width).unwrap_or(0),
+            output_height: self.renderer.as_ref().map(|r| r.output_height).unwrap_or(0),
             export_progress: self.export_job.as_ref()
                 .map(|j| if j.is_done() { 1.0 } else { j.progress.progress_f32() })
                 .unwrap_or(0.0),
@@ -411,6 +838,26 @@ impl App {
     }
 }
 
+/// Parse a `#rrggbb` hex color into sRGB 0..1 components.
+fn hex_to_rgb01(hex: &str) -> (f32, f32, f32) {
+    let h = hex.trim_start_matches('#');
+    if h.len() == 6 {
+        if let Ok(n) = u32::from_str_radix(h, 16) {
+            let r = ((n >> 16) & 0xff) as f32 / 255.0;
+            let g = ((n >> 8) & 0xff) as f32 / 255.0;
+            let b = (n & 0xff) as f32 / 255.0;
+            return (r, g, b);
+        }
+    }
+    (0.0, 1.0, 0.0) // default green
+}
+
+/// Format sRGB 0..1 components into a `#rrggbb` hex string.
+fn rgb01_to_hex(r: f32, g: f32, b: f32) -> String {
+    let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", to_u8(r), to_u8(g), to_u8(b))
+}
+
 /// Scan a directory for video files, returning sorted list of paths.
 
 
@@ -421,10 +868,48 @@ fn scan_folder(folder: &PathBuf) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.is_file() && is_video_file(p))
+        .filter(|p| p.is_file() && is_supported_media(p))
         .collect();
     files.sort();
     files
+}
+
+/// Folder where patch YAML files are stored. Mirrors the renders folder:
+/// a `patches/` dir next to the library folder (i.e. project root), falling
+/// back to `./patches` when no library folder is set.
+fn patches_dir(library_folder: &Option<PathBuf>) -> PathBuf {
+    library_folder
+        .as_ref()
+        .map(|f| f.parent().unwrap_or(f).join("patches"))
+        .unwrap_or_else(|| PathBuf::from("patches"))
+}
+
+/// List saved patch names (file stems, without the `.yaml` extension), sorted.
+/// Returns an empty list if the folder does not exist yet.
+fn scan_patches(dir: &PathBuf) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && p.extension().map(|x| x == "yaml").unwrap_or(false))
+        .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
+        .collect();
+    names.sort();
+    names
+}
+
+/// Sanitize a user-supplied patch name into a safe filename stem. Keeps
+/// alphanumerics, dash, underscore and space; replaces anything else with `_`.
+/// This prevents path traversal (e.g. `../`) and other unsafe characters.
+fn sanitize_patch_name(name: &str) -> String {
+    let cleaned: String = name
+        .trim()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+        .collect();
+    cleaned.trim().chars().take(48).collect()
 }
 
 /// Generate thumbnails and preview frames for all library files using ffmpeg CLI.
@@ -574,15 +1059,10 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let mut output_width = 1280u32;
-        let mut output_height = 720u32;
-
-        if let Some(ref path) = self.initial_video {
-            if let Ok(decoder) = video::VideoDecoder::open(path) {
-                output_width = decoder.width;
-                output_height = decoder.height;
-            }
-        }
+        // Output canvas starts at the master output size (deliberate control).
+        // Source clips stretch into it (user accepted stretching).
+        let (output_width, output_height) = output_dims(&self.output_ratio, self.output_quality);
+        self.master_effects.resolution = [output_width as f32, output_height as f32];
 
         log::info!("Output: {}x{}", output_width, output_height);
 
@@ -670,7 +1150,7 @@ impl ApplicationHandler for App {
             WindowEvent::DroppedFile(path) => {
                 if path.is_dir() {
                     self.set_library_folder(path);
-                } else if is_video_file(&path) {
+                } else if is_supported_media(&path) {
                     if let Some(path_str) = path.to_str() {
                         let path_owned = path_str.to_string();
                         self.add_layer(&path_owned);
@@ -775,15 +1255,27 @@ impl ApplicationHandler for App {
                 if now - self.last_frame_time >= FRAME_DURATION {
                     self.last_frame_time = now;
 
-                    // Decode next frame for each layer (per-layer timing, speed, pause)
-                    if !self.master_paused {
-                        for layer in &mut self.layers {
-                            if !layer.paused && layer.ready_for_frame() {
-                                if let Some(frame_data) = layer.decoder.next_frame() {
-                                    let renderer = self.renderer.as_ref().unwrap();
-                                    layer.upload_frame(&renderer.queue, &frame_data);
+                    // Master content clock: gate content advancement (decode + the
+                    // animated `time` uniform) at master_fps so the look stutters
+                    // without making the web UI laggy (drain/push/present stay below).
+                    // At the default 30 this short-circuits to advance every frame.
+                    let content_interval = Duration::from_secs_f32(1.0 / self.master_fps);
+                    let advance_content = self.master_fps >= TARGET_FPS as f32
+                        || now - self.last_content_advance >= content_interval;
+                    if advance_content {
+                        self.last_content_advance = now;
+                        self.content_time = self.start_time.elapsed().as_secs_f32();
+
+                        // Decode next frame for each layer (per-layer timing, speed, pause)
+                        if !self.master_paused {
+                            for layer in &mut self.layers {
+                                if !layer.paused && layer.ready_for_frame() {
+                                    if let Some(frame_data) = layer.decoder.next_frame() {
+                                        let renderer = self.renderer.as_ref().unwrap();
+                                        layer.upload_frame(&renderer.queue, &frame_data);
+                                    }
+                                    layer.last_decode = Instant::now();
                                 }
-                                layer.last_decode = Instant::now();
                             }
                         }
                     }
@@ -836,12 +1328,17 @@ impl ApplicationHandler for App {
                         .egui_ctx
                         .tessellate(full_output.shapes, full_output.pixels_per_point);
 
-                    // Set time uniform on all effects (drives animated noise/breathing)
-                    let elapsed = self.start_time.elapsed().as_secs_f32();
-                    // Musical time for beat-synced formulas: `beat` counts beats
-                    // since the last tap downbeat at the current tempo.
+                    // Set time uniform on all effects (drives animated noise/breathing).
+                    // Driven by the HELD content_time so animated effects stutter in
+                    // lockstep with held video frames at low master_fps.
+                    let elapsed = self.content_time;
+                    // Musical time for beat-synced formulas: `beat` counts beats since
+                    // the last tap downbeat at the current tempo. It rides the real wall
+                    // clock (not content_time) so tempo sync stays locked to the music
+                    // even when a low master_fps stutters the content clock, and so its
+                    // phase matches the wall-clock `tap_downbeat` anchor set on each tap.
                     let bpm = self.tap_bpm;
-                    let beat = (elapsed - self.tap_downbeat) * bpm / 60.0;
+                    let beat = (self.start_time.elapsed().as_secs_f32() - self.tap_downbeat) * bpm / 60.0;
                     for layer in &mut self.layers {
                         layer.effects.time = elapsed;
                         // Evaluate any automated params against `t = elapsed`.
@@ -1436,6 +1933,16 @@ fn main() {
     env_logger::init();
 
     let args: Vec<String> = std::env::args().collect();
+
+    // Headless subcommands bail out before any window / web server is created.
+    if args.get(1).map(|s| s.as_str()) == Some("render") {
+        if let Err(e) = run_cli_render(&args[2..]) {
+            eprintln!("render failed: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let arg = args.get(1).cloned();
 
     // Detect if arg is a folder (library) or a file (single layer)
@@ -1470,4 +1977,79 @@ fn main() {
     let event_loop = EventLoop::new().unwrap();
     let mut app = App::new(initial_video, library_folder, web_state);
     event_loop.run_app(&mut app).unwrap();
+}
+
+/// Headless `render` subcommand: load a patch YAML and render it to an MP4.
+///
+/// Usage:
+///   collide-o-scope render --patch <file.yaml> --library <folder> \
+///       [--out <file.mp4>] [--duration <secs>] [--fps <n>] [--res <WxH>]
+fn run_cli_render(args: &[String]) -> Result<(), String> {
+    let mut patch_path: Option<String> = None;
+    let mut library: Option<String> = None;
+    let mut out = "experiments/headless-output/out.mp4".to_string();
+    let mut width: u32 = 1280;
+    let mut height: u32 = 720;
+    let mut fps: u32 = 30;
+    let mut duration: f32 = 10.0;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--patch" => patch_path = args.get(i + 1).cloned(),
+            "--library" => library = args.get(i + 1).cloned(),
+            "--out" => {
+                if let Some(v) = args.get(i + 1) {
+                    out = v.clone();
+                }
+            }
+            "--duration" => {
+                duration = args
+                    .get(i + 1)
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("bad --duration")?;
+            }
+            "--fps" => {
+                fps = args
+                    .get(i + 1)
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("bad --fps")?;
+            }
+            "--res" => {
+                let v = args.get(i + 1).ok_or("missing value for --res")?;
+                let (w, h) = v.split_once('x').ok_or("--res must look like 1280x720")?;
+                width = w.parse().map_err(|_| "bad --res width")?;
+                height = h.parse().map_err(|_| "bad --res height")?;
+            }
+            other => return Err(format!("unknown argument: {other}")),
+        }
+        i += 2;
+    }
+
+    let patch_path = patch_path.ok_or("missing --patch <file.yaml>")?;
+    let library = library.ok_or("missing --library <folder>")?;
+
+    let yaml =
+        std::fs::read_to_string(&patch_path).map_err(|e| format!("reading {patch_path}: {e}"))?;
+    let patch: patch::PatchState =
+        serde_yaml::from_str(&yaml).map_err(|e| format!("parsing {patch_path}: {e}"))?;
+
+    let config = render_export::ExportConfig {
+        width,
+        height,
+        fps,
+        duration_secs: duration,
+        output_path: out.clone(),
+        // Patches don't carry tempo; use the default so beat-synced formulas
+        // render deterministically (phase starts at 0 in offline export).
+        bpm: 120.0,
+    };
+
+    println!(
+        "rendering {} layer(s) -> {out} ({width}x{height} @ {fps}fps, {duration}s)",
+        patch.layers.len()
+    );
+    render_export::render_blocking(patch, config, &library)?;
+    println!("done: {out}");
+    Ok(())
 }

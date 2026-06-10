@@ -97,6 +97,19 @@ impl ExportJob {
     }
 }
 
+/// Render a patch to an MP4 synchronously, blocking until done.
+///
+/// This is the entry point for headless / CLI rendering — no background
+/// thread, no UI. It returns when the file is fully written (or errors).
+pub fn render_blocking(
+    patch: PatchState,
+    config: ExportConfig,
+    library_folder: &str,
+) -> Result<(), String> {
+    let progress = Arc::new(ExportProgress::new());
+    run_export(&patch, &config, &progress, library_folder)
+}
+
 /// Uniforms for the composite shader (must match renderer/state.rs).
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]

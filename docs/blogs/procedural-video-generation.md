@@ -10,7 +10,7 @@ now the question becomes: what if you don't write the patches by hand?
 
 ### the shape of the problem
 
-collide-o-scope already has a parameter space. every knob in the web panel maps to a float or a bool in a YAML file. a patch is just a point in that space — layer selection, blend modes, effect intensities, VHS settings. rendering is deterministic given a patch.
+`collide-o-scope` already has a parameter space. every knob in the web panel maps to a float or a bool in a YAML file. a patch is just a point in that space — layer selection, blend modes, effect intensities, VHS settings. rendering is deterministic given a patch.
 
 so generation reduces to: how do you navigate a high-dimensional parameter space and land on things that look good?
 
@@ -116,6 +116,20 @@ and because everything derives from a serializable YAML file, the entire history
 5. **batch generator** — ties 1–4 together. `--generate --count 10 --temperature 0.5 --audio drone.wav`
 
 each step is useful on its own. they compose into something larger.
+
+---
+
+### the rust of it
+
+in python a patch is a dict. you reach in by string key, you mutate it, you trust yourself not to typo `"saturaiton"`. the legacy generator leans on this — a `DEFAULTS` dict where a value can be a number or a `[min, max]` pair meaning "roll something in this window each run." flexible, untyped, easy to break.
+
+rust pushes the same idea through a type. a patch is a `PatchState` — master effects, a vector of layers, optional VHS settings — and it serializes to and from YAML for free. the compiler knows `saturation` is an `f32` and `blend_mode` is one of four variants. you can't typo your way into a broken render; it won't build.
+
+the walk doesn't need to know the names of the knobs. there's already a registry — `param_meta(name)` hands back a `{ step, min, max }` for every parameter, and `set_field(key, value)` writes one by name. so the engine is generic: for each field, nudge it by `gaussian() * temperature * step`, clamp to `[min, max]`, done. add a knob to the panel tomorrow and the walker picks it up with no extra code. the `step` from the registry is the natural unit of "one nudge" — the same number the keyboard uses for a single keypress — so temperature reads in human terms: 1.0 is roughly one keystroke of drift per parameter.
+
+the one missing piece is the dice. python has `random.Random(seed)` in the stdlib; rust keeps randomness out of the core language, so this means adding the `rand` crate and seeding a `StdRng::seed_from_u64(seed)`. same idea — a seed in, a reproducible sequence out — just an explicit dependency instead of a builtin. carry that seed into the metadata and any piece is re-renderable from its name.
+
+duration is the simplest instance of the `[min, max]` convention: each render rolls a length in the **60–180 second** window. long enough to breathe, short enough that a batch of ten doesn't take all night. the number lands in the `ExportConfig` the headless renderer already takes — nothing new in the pipeline, just one more rolled value.
 
 ---
 

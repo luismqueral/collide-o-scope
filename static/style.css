@@ -46,7 +46,6 @@ body {
 
 /* === LEFT: LIBRARY === */
 .col-left {
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -61,6 +60,106 @@ body {
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
 }
+
+/* Split left column: patches (top) + media library (bottom) */
+.patches-section {
+  display: flex;
+  flex-direction: column;
+  max-height: 40%;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.library-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.patches-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 6px;
+  flex-shrink: 0;
+}
+
+.patches-header .panel-title {
+  padding: 0;
+  border-bottom: none;
+  flex-shrink: 0;
+}
+
+.patch-name-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--value-bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+  padding: 2px 4px;
+  outline: none;
+}
+
+.patch-name-input:focus { border-color: var(--accent); }
+
+.patch-save-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.patch-save-btn:hover { color: var(--accent); }
+
+.patch-save-btn svg { width: 14px; height: 14px; }
+
+.patches-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 6px 6px;
+}
+
+.patch-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.patch-row:hover { background: var(--surface-2); }
+
+.patch-name {
+  flex: 1;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.patch-del {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0;
+}
+
+.patch-row:hover .patch-del { opacity: 1; }
+.patch-del:hover { color: #e55; }
 
 .library-grid {
   overflow-y: auto;
@@ -163,25 +262,49 @@ body {
   overflow: hidden;
 }
 
-.layer-card.expanded {
-  border-color: var(--accent);
-}
-
 .layer-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 8px;
   cursor: pointer;
   user-select: none;
 }
 
-.layer-thumb {
-  width: 32px;
-  height: 20px;
-  object-fit: cover;
-  border-radius: 2px;
+/* Click-to-play thumbnail wrapper with a paused-state overlay */
+.layer-thumb-wrap {
+  position: relative;
+  width: 48px;
+  height: 27px;
   flex-shrink: 0;
+  border-radius: 2px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.layer-thumb-wrap:hover {
+  outline: 1px solid var(--accent);
+}
+
+.layer-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.layer-thumb-state {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+
+.layer-thumb-wrap.paused .layer-thumb-state {
+  display: flex;
 }
 
 .layer-header:hover {
@@ -193,16 +316,6 @@ body {
   color: var(--text-dim);
   width: 14px;
   text-align: right;
-}
-
-.layer-play-btn {
-  background: none;
-  border: none;
-  color: var(--text);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 0;
-  width: 16px;
 }
 
 .layer-title {
@@ -253,7 +366,7 @@ body {
 /* Layer expanded content */
 .layer-body {
   display: none;
-  padding: 6px 8px 8px;
+  padding: 0;
   border-top: 1px solid var(--border);
 }
 
@@ -261,9 +374,58 @@ body {
   display: block;
 }
 
+/* Drag-to-reorder */
+.layer-grip {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+}
+
+.layer-grip:active { cursor: grabbing; }
+
+.layer-card.dragging { opacity: 0.5; }
+
+.layer-card.drop-before { border-top: 2px solid var(--accent); }
+.layer-card.drop-after { border-bottom: 2px solid var(--accent); }
+
+/* Per-layer FX groups are flat full-width sections within the layer card —
+   no nested-card chrome. Thin border lines divide one group from the next. */
+.layer-body .fx-group {
+  background: none;
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.layer-body .fx-group:last-child {
+  border-bottom: none;
+}
+
+/* Drop the inner top divider — the group header already sits flush, and the
+   .layer-body fx-group border-bottom handles separation between groups. */
+.layer-body .fx-group-body {
+  border-top: none;
+}
+
+.layer-fx-rand {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.layer-fx-rand:hover { color: var(--accent); }
+
 /* === RIGHT: TRANSPORT + MASTER FX === */
 .col-right {
-  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -275,7 +437,6 @@ body {
   justify-content: center;
   gap: 8px;
   padding: 10px;
-  border-bottom: 1px solid var(--border);
 }
 
 .transport-btn {
@@ -363,7 +524,6 @@ body {
   color: var(--text-dim);
   padding: 8px 10px 6px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
   text-align: center;
 }
 
@@ -557,6 +717,34 @@ input[type="range"]::-webkit-slider-thumb:hover {
   background: var(--accent-hover);
 }
 
+/* Color picker (chroma key) */
+.color-row {
+  grid-template-columns: var(--label-width) 1fr;
+}
+
+.color-row input[type="color"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--value-bg);
+  border-radius: 2px;
+  background: none;
+  cursor: pointer;
+}
+
+.color-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 1px; }
+.color-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 1px; }
+
+.layer-hint {
+  font-size: 9px;
+  color: var(--text-dim, #888);
+  margin: 4px 0 0;
+  line-height: 1.3;
+  opacity: 0.7;
+}
+
 /* Toggle */
 .toggle-row {
   grid-template-columns: var(--label-width) auto 1fr;
@@ -688,6 +876,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .export-status.success { color: #6c6; }
 .export-status.error { color: #e55; }
 
+/* Export group uses .group-header/.group-params; match the padding of the
+   other FX groups' .fx-group-header/.fx-group-body so it aligns above. */
+#export-group .group-header { padding: 6px 8px; }
+#export-group .group-params { padding: 4px 8px 6px; }
+
 #export-group select,
 #export-group input[type="number"] {
   background: var(--value-bg);
@@ -696,6 +889,68 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-radius: 3px;
   padding: 2px 6px;
   font-size: 12px;
+}
+
+/* === LUCIDE ICON SIZING === */
+/* Lucide renders <svg width/height=24>; constrain to fit the UI. */
+.layer-header svg,
+.group-rand svg,
+.layer-fx-rand svg {
+  width: 14px;
+  height: 14px;
+}
+
+.layer-thumb-state svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* === REORDER VIEW (drag-to-collapse) === */
+/* More specific than `.layer-card.expanded .layer-body`, so it wins. */
+.layers-list.reordering .layer-card .layer-body { display: none; }
+.layers-list.reordering .layer-progress { display: none; }
+
+.layers-list.reordering {
+  outline: 1px dashed var(--accent);
+  outline-offset: -2px;
+  border-radius: 4px;
+  background: rgba(90, 143, 230, 0.05);
+  user-select: none; /* stop text highlighting while dragging the grip */
+}
+
+/* === GROUP RANDOMIZE + VHS PRESETS === */
+.group-rand {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.group-rand:hover { color: var(--accent); }
+
+.vhs-preset {
+  background: var(--value-bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  font: inherit;
+  font-size: 9px;
+  padding: 1px 2px;
+  cursor: pointer;
+  outline: none;
+  max-width: 96px;
+}
+
+.vhs-preset:focus { border-color: var(--accent); }
+
+.preset-modified {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
 }
 
 /* Scrollbar */

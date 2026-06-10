@@ -31,7 +31,24 @@ pub struct AppSnapshot {
     pub ntsc: NtscSnapshot,
     pub layers: Vec<LayerSnapshot>,
     pub library: Vec<String>,
+    #[serde(default)]
+    pub patches: Vec<String>,
     pub paused: bool,
+    /// Master content framerate (frame-hold / stutter). 30 = smooth (default).
+    #[serde(default = "default_framerate")]
+    pub framerate: f32,
+    /// Master output aspect ratio label (16:9, 4:3, 1:1, 9:16, 21:9).
+    #[serde(default = "default_ratio")]
+    pub output_ratio: String,
+    /// Master output quality (length of the shorter side: 720, 1080, 1440).
+    #[serde(default = "default_quality")]
+    pub output_quality: u32,
+    /// Current output canvas width in pixels (derived from ratio + quality).
+    #[serde(default)]
+    pub output_width: u32,
+    /// Current output canvas height in pixels (derived from ratio + quality).
+    #[serde(default)]
+    pub output_height: u32,
     /// Export progress: 0.0 = idle, 0.0..1.0 = rendering, 1.0 = done
     #[serde(default)]
     pub export_progress: f32,
@@ -52,6 +69,18 @@ pub struct AppSnapshot {
     pub beat: f32,
 }
 
+fn default_framerate() -> f32 {
+    30.0
+}
+
+fn default_ratio() -> String {
+    "16:9".to_string()
+}
+
+fn default_quality() -> u32 {
+    1080
+}
+
 impl Default for AppSnapshot {
     fn default() -> Self {
         Self {
@@ -60,7 +89,13 @@ impl Default for AppSnapshot {
             ntsc: NtscSnapshot::default(),
             layers: Vec::new(),
             library: Vec::new(),
+            patches: Vec::new(),
             paused: false,
+            framerate: 30.0,
+            output_ratio: "16:9".to_string(),
+            output_quality: 1080,
+            output_width: 0,
+            output_height: 0,
             export_progress: 0.0,
             export_error: String::new(),
             automations: HashMap::new(),
@@ -196,11 +231,13 @@ impl NtscSnapshot {
 /// Per-layer info sent to the browser.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerSnapshot {
+    pub id: u64,
     pub filename: String,
     pub visible: bool,
     pub paused: bool,
     pub opacity: f32,
     pub speed: f32,
+    pub fps: f32,
     pub blend_mode: String,
     pub progress: f32,
     /// Per-layer param automations: param name → expression text.
@@ -209,6 +246,49 @@ pub struct LayerSnapshot {
     /// Per-layer automation parse errors: param name → error message.
     #[serde(default)]
     pub automation_errors: HashMap<String, String>,
+    // Per-layer effects (color)
+    pub hue_shift: f32,
+    pub saturation: f32,
+    pub brightness: f32,
+    pub contrast: f32,
+    // Per-layer effects (digital)
+    pub pixelate: f32,
+    pub rgb_split: f32,
+    pub posterize: f32,
+    pub invert: bool,
+    // Per-layer effects (warp)
+    pub wave_amp: f32,
+    pub wave_freq: f32,
+    pub wave_speed: f32,
+    pub wave_axis: f32,
+    pub swirl_angle: f32,
+    pub swirl_radius: f32,
+    pub bulge_strength: f32,
+    pub bulge_radius: f32,
+    // Per-layer effects (chroma key)
+    pub chroma_enable: bool,
+    pub chroma_threshold: f32,
+    pub chroma_smoothness: f32,
+    pub chroma_spill: f32,
+    pub chroma_color: String,
+    // Per-layer effects (pixel shift / glitch)
+    pub slice_intensity: f32,
+    pub slice_height: f32,
+    pub slice_prob: f32,
+    pub slice_speed: f32,
+    pub block_size: f32,
+    pub block_intensity: f32,
+    pub block_prob: f32,
+    pub block_speed: f32,
+    pub shift_chroma: f32,
+    pub slice_axis: f32,
+    pub jitter_amount: f32,
+    pub jitter_speed: f32,
+    pub datamosh: f32,
+    // Per-layer transform (position / size)
+    pub layer_x: f32,
+    pub layer_y: f32,
+    pub layer_scale: f32,
 }
 
 /// Actions the browser can request (processed by the render loop).
@@ -224,6 +304,9 @@ pub enum WebAction {
     /// Remove a layer by index
     #[serde(rename = "remove_layer")]
     RemoveLayer { index: usize },
+    /// Move a layer from one index to another (drag-and-drop reorder)
+    #[serde(rename = "move_layer")]
+    MoveLayer { from: usize, to: usize },
     /// Toggle layer visibility
     #[serde(rename = "toggle_visibility")]
     ToggleVisibility { index: usize },
@@ -242,6 +325,12 @@ pub enum WebAction {
     /// Set a per-layer parameter (opacity, speed, blend_mode)
     #[serde(rename = "set_layer_param")]
     SetLayerParam { index: usize, param: String, value: serde_json::Value },
+    /// Set the master content framerate (frame-hold / stutter look)
+    #[serde(rename = "set_master_framerate")]
+    SetMasterFramerate { value: f32 },
+    /// Set the master output size / aspect ratio (rebuilds the composite canvas)
+    #[serde(rename = "set_output_size")]
+    SetOutputSize { ratio: String, quality: u32 },
     /// Set an NTSC/VHS effect parameter
     #[serde(rename = "set_ntsc_param")]
     SetNtscParam { param: String, value: serde_json::Value },
@@ -269,6 +358,15 @@ pub enum WebAction {
     /// Set the tempo directly (manual BPM entry)
     #[serde(rename = "set_bpm")]
     SetBpm { value: f32 },
+    /// Save the current state as a named patch in the patches folder
+    #[serde(rename = "save_patch")]
+    SavePatch { name: String },
+    /// Load a named patch from the patches folder
+    #[serde(rename = "load_patch")]
+    LoadPatch { name: String },
+    /// Delete a named patch from the patches folder
+    #[serde(rename = "delete_patch")]
+    DeletePatch { name: String },
 }
 
 impl EffectsSnapshot {

@@ -9,12 +9,24 @@
 <body>
   <div class="app">
     <main class="columns">
-      <!-- LEFT: Library -->
+      <!-- LEFT: Patches + Media Library -->
       <aside class="col-left">
-        <h3 class="panel-title">Library</h3>
-        <div class="library-grid" id="library-grid">
-          <!-- Library items rendered by JS -->
-        </div>
+        <section class="patches-section">
+          <div class="patches-header">
+            <h3 class="panel-title">patches</h3>
+            <input type="text" id="patch-name" class="patch-name-input" placeholder="name…" maxlength="48">
+            <button id="patch-save" class="patch-save-btn" title="Save current patch"><i data-lucide="save"></i></button>
+          </div>
+          <div class="patches-list" id="patches-list">
+            <!-- Patch rows rendered by JS -->
+          </div>
+        </section>
+        <section class="library-section">
+          <h3 class="panel-title">media library</h3>
+          <div class="library-grid" id="library-grid">
+            <!-- Library items rendered by JS -->
+          </div>
+        </section>
       </aside>
 
       <!-- CENTER: Layers -->
@@ -32,6 +44,7 @@
 
       <!-- RIGHT: Transport + Master Effects -->
       <aside class="col-right">
+        <h3 class="panel-title">Master Effects</h3>
         <div class="transport-row">
           <button class="transport-btn" id="btn-play-all" title="Play All">&#x25B6;</button>
           <button class="transport-btn" id="btn-stop" title="Reset FX">&#x21BA;</button>
@@ -40,12 +53,39 @@
           <span class="beat-dot" id="beat-dot" title="beat"></span>
           <span class="ws-dot" id="ws-status" title="connecting..."></span>
         </div>
-        <h3 class="panel-title">Master Effects</h3>
         <div class="fx-scroll" id="master-fx">
+          <div class="fx-group" data-group="output">
+            <div class="fx-group-header">
+              <span class="chevron">&#x25BC;</span>
+              <span class="group-label">OUTPUT</span>
+            </div>
+            <div class="fx-group-body">
+              <div class="param-row select-row" data-master-param="output_ratio">
+                <label>Ratio</label>
+                <select>
+                  <option value="16:9">16:9</option>
+                  <option value="4:3">4:3</option>
+                  <option value="1:1">1:1</option>
+                  <option value="9:16">9:16</option>
+                  <option value="21:9">21:9</option>
+                </select>
+              </div>
+              <div class="param-row select-row" data-master-param="output_quality">
+                <label>Quality</label>
+                <select>
+                  <option value="720">720p</option>
+                  <option value="1080" selected>1080p</option>
+                  <option value="1440">1440p</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           <div class="fx-group" data-group="digital">
             <div class="fx-group-header">
               <span class="chevron">&#x25BC;</span>
               <span class="group-label">DIGITAL</span>
+              <button class="group-rand" data-group="digital" title="Randomize"><i data-lucide="dices"></i></button>
               <button class="group-reset" data-group="digital">reset</button>
             </div>
             <div class="fx-group-body">
@@ -81,6 +121,7 @@
             <div class="fx-group-header">
               <span class="chevron">&#x25BC;</span>
               <span class="group-label">ANALOG</span>
+              <button class="group-rand" data-group="analog" title="Randomize"><i data-lucide="dices"></i></button>
               <button class="group-reset" data-group="analog">reset</button>
             </div>
             <div class="fx-group-body">
@@ -116,9 +157,13 @@
             <div class="fx-group-header">
               <span class="chevron">&#x25BC;</span>
               <span class="group-label">MOTION</span>
+              <button class="group-rand" data-group="motion" title="Randomize"><i data-lucide="dices"></i></button>
               <button class="group-reset" data-group="motion">reset</button>
             </div>
             <div class="fx-group-body">
+              <div class="param-row" data-master-param="framerate" data-min="1" data-max="30" data-step="1">
+                <label>Framerate</label><input type="range"><span class="value">30</span>
+              </div>
               <div class="param-row" data-param="breathe_scale" data-min="0" data-max="0.05" data-step="0.001">
                 <label>Bth Scale</label><input type="range"><span class="value">0</span>
               </div>
@@ -135,6 +180,15 @@
             <div class="fx-group-header">
               <span class="chevron">&#x25BC;</span>
               <span class="group-label">VHS</span>
+              <select class="vhs-preset" title="Preset">
+                <option value="" disabled selected>&mdash; preset &mdash;</option>
+                <option value="Clean">Clean</option>
+                <option value="Worn Tape">Worn Tape</option>
+                <option value="Heavy Damage">Heavy Damage</option>
+                <option value="Tracking Trouble">Tracking Trouble</option>
+              </select>
+              <span class="preset-modified" title="Preset modified" style="display:none">--</span>
+              <button class="group-rand" data-group="vhs" title="Randomize"><i data-lucide="dices"></i></button>
               <button class="group-reset" data-group="vhs">reset</button>
             </div>
             <div class="fx-group-body">
@@ -213,14 +267,9 @@
               <span class="group-label">Render</span>
             </div>
             <div class="group-params">
-              <div class="param-row select-row">
+              <div class="param-row">
                 <label>Resolution</label>
-                <select id="export-resolution">
-                  <option value="1280x720">720p</option>
-                  <option value="1920x1080" selected>1080p</option>
-                  <option value="2560x1440">1440p</option>
-                  <option value="3840x2160">4K</option>
-                </select>
+                <span id="export-resolution-display">1920×1080</span>
               </div>
               <div class="param-row">
                 <label>Duration (s)</label>
@@ -315,6 +364,7 @@
     </div>
   </div>
 
+  <script src="https://unpkg.com/lucide@latest"></script>
   <script src="app.js"></script>
   <script src="https://queral.studio/dom-tools.js"></script>
 </body>

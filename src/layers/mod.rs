@@ -38,9 +38,22 @@ impl BlendMode {
             BlendMode::Difference => "Difference",
         }
     }
+
+    /// Lowercase id used on the wire (matches the web UI <option> values).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BlendMode::Normal => "normal",
+            BlendMode::Screen => "screen",
+            BlendMode::Multiply => "multiply",
+            BlendMode::Difference => "difference",
+        }
+    }
 }
 
 pub struct Layer {
+    /// Stable identifier assigned by `App::add_layer`, used by the web UI to
+    /// track cards across reorders. Survives MoveLayer/RemoveLayer.
+    pub id: u64,
     pub filename: String,
     pub decoder: VideoDecoder,
     pub texture: wgpu::Texture,
@@ -96,6 +109,7 @@ impl Layer {
         effects.resolution = [width as f32, height as f32];
 
         Ok(Self {
+            id: 0,
             filename,
             decoder,
             texture,
@@ -145,12 +159,15 @@ impl Layer {
     }
 }
 
-/// Valid video file extensions for drag-and-drop.
-pub fn is_video_file(path: &std::path::Path) -> bool {
+/// Valid media file extensions accepted by the library + drag-and-drop.
+pub fn is_supported_media(path: &std::path::Path) -> bool {
     match path.extension().and_then(|e| e.to_str()) {
         Some(ext) => matches!(
             ext.to_lowercase().as_str(),
+            // video
             "mp4" | "webm" | "mov" | "avi" | "mkv"
+            // images (held single frame) + animated gif (loops)
+            | "gif" | "png" | "jpg" | "jpeg" | "bmp" | "webp" | "tiff" | "tif"
         ),
         None => false,
     }
