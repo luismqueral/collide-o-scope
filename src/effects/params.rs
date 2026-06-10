@@ -1,5 +1,5 @@
 /// GPU-side effect parameters, uploaded as a uniform buffer each frame.
-/// Must be 16-byte aligned (176 bytes total = 11 × vec4).
+/// Must be 16-byte aligned (192 bytes total = 12 × vec4).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct EffectUniforms {
@@ -52,11 +52,16 @@ pub struct EffectUniforms {
     pub slice_height: f32,    // 1..128 band thickness in pixels
     pub slice_prob: f32,      // 0..1 fraction of bands that shift each step
     pub slice_speed: f32,     // 0..30 reseed rate (steps/sec)
-    // vec4 #11 — Shift: block (rectangular block displacement) + pad
+    // vec4 #11 — Shift: block (rectangular block displacement)
     pub block_size: f32,      // 4..128 block edge in pixels
     pub block_intensity: f32, // 0..1 max offset (fraction of frame)
     pub block_prob: f32,      // 0..1 fraction of blocks displaced
-    pub _pad: f32,            // keep 16-byte alignment (11 × vec4)
+    pub block_speed: f32,     // 0..30 reseed rate (steps/sec)
+    // vec4 #12 — Shift: chroma fringing + slice axis + continuous jitter
+    pub shift_chroma: f32,    // 0..1 R/B channel offset on displaced regions
+    pub slice_axis: f32,      // 0 = horizontal bands (shift X), 1 = vertical (shift Y), 2 = both
+    pub jitter_amount: f32,   // 0..1 continuous per-line wobble amplitude
+    pub jitter_speed: f32,    // 0..30 wobble evolution rate
 }
 
 impl Default for EffectUniforms {
@@ -104,7 +109,11 @@ impl Default for EffectUniforms {
             block_size: 32.0,
             block_intensity: 0.0,
             block_prob: 0.2,
-            _pad: 0.0,
+            block_speed: 6.0,
+            shift_chroma: 0.0,
+            slice_axis: 0.0,
+            jitter_amount: 0.0,
+            jitter_speed: 8.0,
         }
     }
 }

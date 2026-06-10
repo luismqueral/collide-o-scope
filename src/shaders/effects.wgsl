@@ -47,11 +47,16 @@ struct Uniforms {
     slice_height: f32,
     slice_prob: f32,
     slice_speed: f32,
-    // Shift: block (rectangular block displacement) + pad
+    // Shift: block (rectangular block displacement)
     block_size: f32,
     block_intensity: f32,
     block_prob: f32,
-    _pad: f32,
+    block_speed: f32,
+    // Shift: chroma fringing + slice axis + continuous jitter
+    shift_chroma: f32,
+    slice_axis: f32,
+    jitter_amount: f32,
+    jitter_speed: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -282,25 +287,42 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
     }
 
     // --- Pixel shifting / glitch (UV displacement reseeded in discrete steps) ---
-    // Slice shift: horizontal scanline-bands jump sideways (VHS tracking-tear look).
+    var glitch_dx = 0.0; // horizontal displacement so far, fed into chroma fringing
+    // Slice shift: scanline-bands jump (axis 0 = horizontal bands shift X,
+    // 1 = vertical bands shift Y, 2 = both). VHS tracking-tear look.
     if uniforms.slice_intensity > 0.0 {
         let seed = floor(uniforms.time * uniforms.slice_speed);
-        let band = floor(uv.y * uniforms.resolution.y / max(uniforms.slice_height, 1.0));
-        if hash(vec2f(band, seed)) > 1.0 - uniforms.slice_prob {
-            sample_uv.x += (hash(vec2f(band, seed + 7.0)) - 0.5) * uniforms.slice_intensity;
+        if uniforms.slice_axis != 1.0 {
+            let band = floor(uv.y * uniforms.resolution.y / max(uniforms.slice_height, 1.0));
+            if hash(vec2f(band, seed)) > 1.0 - uniforms.slice_prob {
+                let dx = (hash(vec2f(band, seed + 7.0)) - 0.5) * uniforms.slice_intensity;
+                sample_uv.x += dx;
+                glitch_dx += dx;
+            }
+        }
+        if uniforms.slice_axis != 0.0 {
+            let band = floor(uv.x * uniforms.resolution.x / max(uniforms.slice_height, 1.0));
+            if hash(vec2f(band, seed + 19.0)) > 1.0 - uniforms.slice_prob {
+                sample_uv.y += (hash(vec2f(band, seed + 23.0)) - 0.5) * uniforms.slice_intensity;
+            }
         }
     }
-    // Block mosh: rectangular blocks jump in 2D (datamosh look). No own speed knob —
-    // reseeds at a fixed ~10 steps/sec.
+    // Block mosh: rectangular blocks jump in 2D (datamosh look).
     if uniforms.block_intensity > 0.0 {
         let grid = uniforms.resolution / max(uniforms.block_size, 4.0);
         let cell = floor(uv * grid);
-        let seed = floor(uniforms.time * 10.0);
+        let seed = floor(uniforms.time * uniforms.block_speed);
         if hash(vec2f(cell.x + cell.y * 57.0, seed)) > 1.0 - uniforms.block_prob {
             let ox = (hash(vec2f(cell.x, seed + 3.0)) - 0.5) * uniforms.block_intensity;
             let oy = (hash(vec2f(cell.y, seed + 9.0)) - 0.5) * uniforms.block_intensity;
             sample_uv += vec2f(ox, oy);
+            glitch_dx += ox;
         }
+    }
+    // Continuous jitter: smooth per-scanline horizontal wobble (analog instability).
+    if uniforms.jitter_amount > 0.0 {
+        let w = value_noise(vec2f(uv.y * uniforms.resolution.y * 0.25, uniforms.time * uniforms.jitter_speed));
+        sample_uv.x += (w - 0.5) * uniforms.jitter_amount;
     }
 
     // --- Downsample (lossy video look) ---
@@ -316,9 +338,17 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
         sample_uv = floor(sample_uv * res / block) * block / res;
     }
 
-    // --- Color drift (per-frame random chromatic aberration) ---
+    // --- Chroma fringing on displaced (glitched) regions ---
     var color: vec4f;
-    if uniforms.color_drift > 0.0 {
+    if uniforms.shift_chroma > 0.0 && abs(glitch_dx) > 0.0001 {
+        let cshift = glitch_dx * uniforms.shift_chroma;
+        let r = textureSample(tex, samp, vec2f(sample_uv.x + cshift, sample_uv.y)).r;
+        let g = textureSample(tex, samp, sample_uv).g;
+        let b = textureSample(tex, samp, vec2f(sample_uv.x - cshift, sample_uv.y)).b;
+        let a = textureSample(tex, samp, sample_uv).a;
+        color = vec4f(r, g, b, a);
+    } else if uniforms.color_drift > 0.0 {
+        // --- Color drift (per-frame random chromatic aberration) ---
         let seed = floor(uniforms.time * 30.0);
         let r_shift = (hash(vec2f(seed, 10.0)) - 0.5) * uniforms.color_drift;
         let b_shift = (hash(vec2f(seed, 11.0)) - 0.5) * uniforms.color_drift;

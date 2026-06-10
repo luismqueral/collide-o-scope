@@ -63,6 +63,11 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
         "block_size" => Some(ParamMeta { step: 4.0, min: 4.0, max: 128.0, desc: "block edge px" }),
         "block_intensity" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "block offset amount" }),
         "block_prob" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "blocks displaced" }),
+        "block_speed" => Some(ParamMeta { step: 1.0, min: 0.0, max: 30.0, desc: "block reseed rate" }),
+        "shift_chroma" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "glitch chroma fringe" }),
+        "slice_axis" => Some(ParamMeta { step: 1.0, min: 0.0, max: 2.0, desc: "0=horiz 1=vert 2=both" }),
+        "jitter_amount" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "continuous wobble" }),
+        "jitter_speed" => Some(ParamMeta { step: 1.0, min: 0.0, max: 30.0, desc: "wobble rate" }),
         _ => None,
     }
 }
@@ -283,6 +288,16 @@ pub struct EffectsConfig {
     pub block_intensity: f32,
     #[serde(default = "default_block_prob")]
     pub block_prob: f32,
+    #[serde(default = "default_block_speed")]
+    pub block_speed: f32,
+    #[serde(default)]
+    pub shift_chroma: f32,
+    #[serde(default)]
+    pub slice_axis: f32,
+    #[serde(default)]
+    pub jitter_amount: f32,
+    #[serde(default = "default_jitter_speed")]
+    pub jitter_speed: f32,
 }
 
 fn default_wave_freq() -> f32 { 8.0 }
@@ -294,6 +309,8 @@ fn default_slice_prob() -> f32 { 0.3 }
 fn default_slice_speed() -> f32 { 8.0 }
 fn default_block_size() -> f32 { 32.0 }
 fn default_block_prob() -> f32 { 0.2 }
+fn default_block_speed() -> f32 { 6.0 }
+fn default_jitter_speed() -> f32 { 8.0 }
 
 impl Default for EffectsConfig {
     fn default() -> Self {
@@ -337,6 +354,11 @@ impl Default for EffectsConfig {
             block_size: 32.0,
             block_intensity: 0.0,
             block_prob: 0.2,
+            block_speed: 6.0,
+            shift_chroma: 0.0,
+            slice_axis: 0.0,
+            jitter_amount: 0.0,
+            jitter_speed: 8.0,
         }
     }
 }
@@ -385,6 +407,11 @@ impl EffectsConfig {
             block_size: u.block_size,
             block_intensity: u.block_intensity,
             block_prob: u.block_prob,
+            block_speed: u.block_speed,
+            shift_chroma: u.shift_chroma,
+            slice_axis: u.slice_axis,
+            jitter_amount: u.jitter_amount,
+            jitter_speed: u.jitter_speed,
         }
     }
 
@@ -428,6 +455,11 @@ impl EffectsConfig {
         u.block_size = self.block_size.clamp(4.0, 128.0);
         u.block_intensity = self.block_intensity.clamp(0.0, 1.0);
         u.block_prob = self.block_prob.clamp(0.0, 1.0);
+        u.block_speed = self.block_speed.clamp(0.0, 30.0);
+        u.shift_chroma = self.shift_chroma.clamp(0.0, 1.0);
+        u.slice_axis = self.slice_axis.clamp(0.0, 2.0);
+        u.jitter_amount = self.jitter_amount.clamp(0.0, 1.0);
+        u.jitter_speed = self.jitter_speed.clamp(0.0, 30.0);
     }
 
     /// Get fields organized into groups for display.
@@ -483,6 +515,11 @@ impl EffectsConfig {
                 ("block_size", format!("{:.1}", self.block_size)),
                 ("block_intensity", format!("{:.2}", self.block_intensity)),
                 ("block_prob", format!("{:.2}", self.block_prob)),
+                ("block_speed", format!("{:.1}", self.block_speed)),
+                ("shift_chroma", format!("{:.2}", self.shift_chroma)),
+                ("slice_axis", format!("{:.1}", self.slice_axis)),
+                ("jitter_amount", format!("{:.2}", self.jitter_amount)),
+                ("jitter_speed", format!("{:.1}", self.jitter_speed)),
             ]),
         ]
     }
@@ -529,6 +566,11 @@ impl EffectsConfig {
             "block_size" => { if let Ok(v) = value.parse() { self.block_size = v; return true; } }
             "block_intensity" => { if let Ok(v) = value.parse() { self.block_intensity = v; return true; } }
             "block_prob" => { if let Ok(v) = value.parse() { self.block_prob = v; return true; } }
+            "block_speed" => { if let Ok(v) = value.parse() { self.block_speed = v; return true; } }
+            "shift_chroma" => { if let Ok(v) = value.parse() { self.shift_chroma = v; return true; } }
+            "slice_axis" => { if let Ok(v) = value.parse() { self.slice_axis = v; return true; } }
+            "jitter_amount" => { if let Ok(v) = value.parse() { self.jitter_amount = v; return true; } }
+            "jitter_speed" => { if let Ok(v) = value.parse() { self.jitter_speed = v; return true; } }
             _ => {}
         }
         false

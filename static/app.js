@@ -790,6 +790,11 @@ function createLayerCard(layer, index) {
             <input type="range" min="0" max="30" step="1" value="${layer.slice_speed}">
             <span class="value">${formatValue(layer.slice_speed, 0, 30, 1)}</span>
           </div>
+          <div class="param-row" data-param="slice_axis" title="0 = horizontal, 1 = vertical, 2 = both">
+            <label>Slice Axis</label>
+            <input type="range" min="0" max="2" step="1" value="${layer.slice_axis}">
+            <span class="value">${formatValue(layer.slice_axis, 0, 2, 1)}</span>
+          </div>
           <div class="param-row" data-param="block_size">
             <label>Block Size</label>
             <input type="range" min="4" max="128" step="1" value="${layer.block_size}">
@@ -804,6 +809,26 @@ function createLayerCard(layer, index) {
             <label>Block Prob</label>
             <input type="range" min="0" max="1" step="0.01" value="${layer.block_prob}">
             <span class="value">${formatValue(layer.block_prob, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="block_speed">
+            <label>Block Spd</label>
+            <input type="range" min="0" max="30" step="1" value="${layer.block_speed}">
+            <span class="value">${formatValue(layer.block_speed, 0, 30, 1)}</span>
+          </div>
+          <div class="param-row" data-param="shift_chroma">
+            <label>Chroma</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.shift_chroma}">
+            <span class="value">${formatValue(layer.shift_chroma, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="jitter_amount">
+            <label>Jitter</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.jitter_amount}">
+            <span class="value">${formatValue(layer.jitter_amount, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="jitter_speed">
+            <label>Jitter Spd</label>
+            <input type="range" min="0" max="30" step="1" value="${layer.jitter_speed}">
+            <span class="value">${formatValue(layer.jitter_speed, 0, 30, 1)}</span>
           </div>
         </div>
       </div>

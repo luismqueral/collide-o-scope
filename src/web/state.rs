@@ -233,6 +233,11 @@ pub struct LayerSnapshot {
     pub block_size: f32,
     pub block_intensity: f32,
     pub block_prob: f32,
+    pub block_speed: f32,
+    pub shift_chroma: f32,
+    pub slice_axis: f32,
+    pub jitter_amount: f32,
+    pub jitter_speed: f32,
 }
 
 /// Actions the browser can request (processed by the render loop).

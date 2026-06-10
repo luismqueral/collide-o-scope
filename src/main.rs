@@ -406,6 +406,31 @@ impl App {
                                 layer.effects.block_prob = (v as f32).clamp(0.0, 1.0);
                             }
                         }
+                        "block_speed" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.block_speed = (v as f32).clamp(0.0, 30.0);
+                            }
+                        }
+                        "shift_chroma" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.shift_chroma = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "slice_axis" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.slice_axis = (v as f32).clamp(0.0, 2.0);
+                            }
+                        }
+                        "jitter_amount" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.jitter_amount = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "jitter_speed" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.jitter_speed = (v as f32).clamp(0.0, 30.0);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -597,6 +622,11 @@ impl App {
                 block_size: l.effects.block_size,
                 block_intensity: l.effects.block_intensity,
                 block_prob: l.effects.block_prob,
+                block_speed: l.effects.block_speed,
+                shift_chroma: l.effects.shift_chroma,
+                slice_axis: l.effects.slice_axis,
+                jitter_amount: l.effects.jitter_amount,
+                jitter_speed: l.effects.jitter_speed,
             }).collect(),
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())
