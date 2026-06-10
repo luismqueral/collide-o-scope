@@ -181,7 +181,7 @@ document.querySelectorAll('.param-row[data-param]').forEach((row) => {
 
     // …and via the guided modulator builder (the ƒ launcher).
     addLauncher(row, {
-      scope: 'master', param, lo: min, hi: max,
+      scope: 'master', param, lo: min, hi: max, step,
       label: (row.querySelector('label')?.textContent || param).trim(),
     });
   }
@@ -455,19 +455,24 @@ function tapTempo() {
   sendAction({ action: 'tap_tempo' });
 }
 
-document.getElementById('btn-tap').addEventListener('click', tapTempo);
+// Tap tempo is a helper *inside* the automation editor (for building beat-synced
+// formulas), not a global transport control. The button + readout live in the
+// modal; the bpm/beat STATE stays global because every formula references
+// `beat`/`bpm` in the render loop.
+document.getElementById('ae-tap').addEventListener('click', tapTempo);
 
-// `T` taps tempo too — but ignore it while typing in a field.
+// `T` taps tempo only while the editor is open — ignore it elsewhere / typing.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 't' && e.key !== 'T') return;
+  if (!isEditorOpen()) return;
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
   tapTempo();
 });
 
-// Click the BPM readout to type an exact tempo. Reuses the value-cell editor;
-// BPM can't be automated, so the automation hooks are no-ops.
-makeValueEditable(document.getElementById('bpm-readout'), {
+// Click the editor's BPM readout to type an exact tempo. Reuses the value-cell
+// editor; BPM can't be automated, so the automation hooks are no-ops.
+makeValueEditable(document.getElementById('ae-bpm'), {
   setValue: (v) => sendAction({ action: 'set_bpm', value: v }),
   setAutomation: () => {},
   clearAutomation: () => {},
@@ -481,13 +486,14 @@ function syncTempo(bpm, beat) {
   // Feed the editor preview so beat-synced plots ride the live tempo.
   liveBpm = bpm > 0 ? bpm : 120;
   if (typeof beat === 'number') liveBeat = beat;
-  const readout = document.getElementById('bpm-readout');
+  const readout = document.getElementById('ae-bpm');
   // Don't clobber the field while the user is typing a tempo.
   if (readout && !readout.querySelector('input')) {
     readout.textContent = String(Math.round(bpm));
   }
-  const dot = document.getElementById('beat-dot');
-  if (dot && typeof beat === 'number') {
+  // The dot only shows inside the editor, so skip the pulse work when closed.
+  const dot = document.getElementById('ae-beat-dot');
+  if (dot && isEditorOpen() && typeof beat === 'number') {
     const idx = Math.floor(beat);
     if (idx !== lastBeatIndex) {
       lastBeatIndex = idx;
@@ -1104,6 +1110,7 @@ function createLayerCard(layer, index) {
       get index() { return parseInt(card.dataset.index); },
       param,
       lo: parseFloat(slider.min), hi: parseFloat(slider.max),
+      step: parseFloat(slider.step) || 0.01,
       label: (row.querySelector('label')?.textContent || param).trim(),
     });
   });
@@ -1633,6 +1640,7 @@ function openEditor(target, valueEl) {
   document.getElementById('ae-context').textContent =
     `Automate \u00B7 ${scopeName(target)} \u203A ${target.label}`;
 
+  setupGhost();
   syncControlsUI();
   const existing = valueEl && valueEl.dataset.expr;
   if (existing) {
@@ -1684,6 +1692,11 @@ function syncControlsUI() {
   document.getElementById('ae-center-val').textContent = `${Math.round(aeControls.center * 100)}%`;
 
   document.getElementById('ae-invert').checked = !!aeControls.invert;
+
+  // Tap/tempo only matters for beat-synced formulas — grey it out in Free mode.
+  const tempoRow = document.getElementById('ae-tempo-row');
+  if (tempoRow) tempoRow.classList.toggle('ae-dim', aeControls.sync !== 'beat');
+
   morphControls();                       // Phase vs Seed, shape-dependent
 }
 
@@ -1816,12 +1829,40 @@ function drawPreview() {
   if (!isEditorOpen()) { aeRaf = null; return; }
   // Keep the axis/playhead matched to the current sync mode.
   aePreviewCard.xUnit = aeControls.sync === 'beat' ? 'beat' : 'sec';
-  drawCurve(aePreviewCard, performance.now() / 1000);
+  const nowSec = performance.now() / 1000;
+  drawCurve(aePreviewCard, nowSec);
+  updateGhost(nowSec);
   aeRaf = requestAnimationFrame(drawPreview);
 }
 
 function stopPreview() {
   if (aeRaf) { cancelAnimationFrame(aeRaf); aeRaf = null; }
+}
+
+// Point the ghost slider at the target param's real range + step, and label
+// its ends. Called when the editor opens (the range is per-param).
+function setupGhost() {
+  const g = document.getElementById('ae-ghost');
+  if (!g || !aeTarget) return;
+  g.min = aeTarget.lo;
+  g.max = aeTarget.hi;
+  g.step = aeTarget.step || 0.01;
+  document.getElementById('ae-ghost-lo').textContent = num(aeTarget.lo);
+  document.getElementById('ae-ghost-hi').textContent = num(aeTarget.hi);
+}
+
+// Drive the ghost slider with the *actual* value the formula outputs right now
+// (true live time/beat — not the windowed playhead), mapped into the param's
+// real range. This is exactly what will be sent to the param, so it previews
+// "what the slider will do" once applied.
+function updateGhost(nowSec) {
+  const g = document.getElementById('ae-ghost');
+  if (!g || !aeTarget) return;
+  const norm = clamp(evalControls(aeControls, nowSec, liveBeat), 0, 1);
+  const real = aeTarget.lo + norm * (aeTarget.hi - aeTarget.lo);
+  g.value = real;
+  document.getElementById('ae-ghost-val').textContent =
+    formatValue(real, aeTarget.lo, aeTarget.hi, parseFloat(g.step) || 0.01);
 }
 
 // --- Install / remove ---

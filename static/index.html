@@ -48,9 +48,6 @@
         <div class="transport-row">
           <button class="transport-btn" id="btn-play-all" title="Play All">&#x25B6;</button>
           <button class="transport-btn" id="btn-stop" title="Reset FX">&#x21BA;</button>
-          <button class="transport-btn" id="btn-tap" title="Tap tempo (or press T)">TAP</button>
-          <span class="bpm-readout" id="bpm-readout" title="Click to set BPM">120</span>
-          <span class="beat-dot" id="beat-dot" title="beat"></span>
           <span class="ws-dot" id="ws-status" title="connecting..."></span>
         </div>
         <div class="fx-scroll" id="master-fx">
@@ -327,6 +324,14 @@
             <select id="ae-rate" class="ae-select"></select>
           </div>
 
+          <div class="ae-ctl ae-ctl-tempo" id="ae-tempo-row">
+            <span class="ae-lbl">Tempo</span>
+            <button class="ae-btn ae-tap" id="ae-tap" type="button" title="Tap tempo (or press T while open)">TAP</button>
+            <span class="bpm-readout" id="ae-bpm" title="Click to set BPM">120</span>
+            <span class="ae-lbl">bpm</span>
+            <span class="beat-dot" id="ae-beat-dot" title="beat"></span>
+          </div>
+
           <div class="ae-ctl">
             <span class="ae-lbl">Depth</span>
             <input type="range" id="ae-depth" min="0" max="100" step="1" value="100">
@@ -346,6 +351,16 @@
 
         <div class="ae-preview-wrap">
           <canvas id="ae-preview" class="ae-preview" width="560" height="120"></canvas>
+        </div>
+
+        <!-- Live-value ghost slider: animates through the param's real range so
+             you can see exactly what the parameter will do once applied. -->
+        <div class="ae-ghost-row">
+          <span class="ae-ghost-lbl">live value</span>
+          <span class="ae-ghost-end" id="ae-ghost-lo">0</span>
+          <input type="range" id="ae-ghost" class="ae-ghost" tabindex="-1" disabled>
+          <span class="ae-ghost-end" id="ae-ghost-hi">1</span>
+          <span class="ae-ghost-val" id="ae-ghost-val">&mdash;</span>
         </div>
 
         <div class="ae-formula-row">

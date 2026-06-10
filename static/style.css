@@ -1241,3 +1241,46 @@ input[type="range"]::-webkit-slider-thumb:hover {
   opacity: 0.4;
   pointer-events: none;
 }
+
+/* Tempo helper (tap to set the global beat clock that beat-synced formulas
+   ride). Greyed out when the formula isn't beat-synced. */
+.ae-tap { padding: 3px 10px; }
+.ae-dim { opacity: 0.4; pointer-events: none; }
+
+/* Live-value ghost slider — animates through the param's real range to show
+   exactly what the parameter will do once the formula is applied. */
+.ae-ghost-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+
+.ae-ghost-lbl {
+  width: 48px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.ae-ghost-end {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.ae-ghost {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: default;
+}
+
+.ae-ghost-val {
+  flex-shrink: 0;
+  min-width: 52px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
