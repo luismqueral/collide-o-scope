@@ -238,6 +238,7 @@ pub struct LayerSnapshot {
     pub slice_axis: f32,
     pub jitter_amount: f32,
     pub jitter_speed: f32,
+    pub datamosh: f32,
 }
 
 /// Actions the browser can request (processed by the render loop).

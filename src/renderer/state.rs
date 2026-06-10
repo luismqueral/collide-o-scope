@@ -43,6 +43,11 @@ pub struct Renderer {
     // The view egui displays (always points at the final accumulated result)
     pub output_view: wgpu::TextureView,
 
+    // Previous frame's final output, fed back into the effects shader for
+    // datamosh trails. Captured from composite_textures[0] each frame start.
+    feedback_texture: wgpu::Texture,
+    feedback_view: wgpu::TextureView,
+
     pub output_width: u32,
     pub output_height: u32,
 
@@ -119,6 +124,17 @@ impl Renderer {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // Previous output frame (datamosh feedback)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
                         count: None,
                     },
                 ],
@@ -311,6 +327,23 @@ impl Renderer {
         let output_view =
             composite_textures[0].create_view(&wgpu::TextureViewDescriptor::default());
 
+        // Feedback texture: holds the previous frame's final output for datamosh.
+        let feedback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Feedback (prev frame)"),
+            size: wgpu::Extent3d {
+                width: output_width,
+                height: output_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: tex_usage,
+            view_formats: &[],
+        });
+        let feedback_view = feedback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         Self {
             surface,
             device,
@@ -326,6 +359,8 @@ impl Renderer {
             composite_textures,
             composite_views,
             output_view,
+            feedback_texture,
+            feedback_view,
             output_width,
             output_height,
             readback_buffer: None,
@@ -353,6 +388,28 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         layers: &[Layer],
     ) {
+        // Capture last frame's final output (still in [0]) for datamosh feedback,
+        // before this frame's passes overwrite it.
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.composite_textures[0],
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.feedback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: self.output_width,
+                height: self.output_height,
+                depth_or_array_layers: 1,
+            },
+        );
+
         if layers.is_empty() {
             // Clear to black
             encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -398,6 +455,10 @@ impl Renderer {
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&self.feedback_view),
                     },
                 ],
             });
@@ -571,6 +632,10 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&self.feedback_view),
                 },
             ],
         });

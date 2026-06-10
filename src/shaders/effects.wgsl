@@ -57,10 +57,17 @@ struct Uniforms {
     slice_axis: f32,
     jitter_amount: f32,
     jitter_speed: f32,
+    // Shift: datamosh (displaced blocks bleed the previous frame)
+    datamosh: f32,
+    _pad_mosh0: f32,
+    _pad_mosh1: f32,
+    _pad_mosh2: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
+// Previous output frame (for datamosh feedback trails).
+@group(0) @binding(2) var prev_tex: texture_2d<f32>;
 @group(1) @binding(0) var<uniform> uniforms: Uniforms;
 
 // --- Hash / noise functions (ported from legacy GLSL) ---
@@ -288,6 +295,7 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
 
     // --- Pixel shifting / glitch (UV displacement reseeded in discrete steps) ---
     var glitch_dx = 0.0; // horizontal displacement so far, fed into chroma fringing
+    var mosh_amt = 0.0;  // 1.0 inside a displaced block, fed into datamosh feedback
     // Slice shift: scanline-bands jump (axis 0 = horizontal bands shift X,
     // 1 = vertical bands shift Y, 2 = both). VHS tracking-tear look.
     if uniforms.slice_intensity > 0.0 {
@@ -317,6 +325,7 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
             let oy = (hash(vec2f(cell.y, seed + 9.0)) - 0.5) * uniforms.block_intensity;
             sample_uv += vec2f(ox, oy);
             glitch_dx += ox;
+            mosh_amt = 1.0;
         }
     }
     // Continuous jitter: smooth per-scanline horizontal wobble (analog instability).
@@ -367,6 +376,15 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
         color = vec4f(r, g, b, a);
     } else {
         color = textureSample(tex, samp, sample_uv);
+    }
+
+    // --- Datamosh: displaced blocks bleed the previous output frame ---
+    // Sampling the held previous frame at the displaced UV makes blocks drag
+    // last frame's pixels; because that frame already held the smear, trails
+    // accumulate (bounded by mix, so they fade rather than blow out).
+    if uniforms.datamosh > 0.0 && mosh_amt > 0.0 {
+        let prev = textureSample(prev_tex, samp, sample_uv);
+        color = mix(color, prev, uniforms.datamosh);
     }
 
     var rgb = color.rgb;

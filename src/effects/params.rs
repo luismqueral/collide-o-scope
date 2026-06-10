@@ -1,5 +1,5 @@
 /// GPU-side effect parameters, uploaded as a uniform buffer each frame.
-/// Must be 16-byte aligned (192 bytes total = 12 × vec4).
+/// Must be 16-byte aligned (208 bytes total = 13 × vec4).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct EffectUniforms {
@@ -62,6 +62,9 @@ pub struct EffectUniforms {
     pub slice_axis: f32,      // 0 = horizontal bands (shift X), 1 = vertical (shift Y), 2 = both
     pub jitter_amount: f32,   // 0..1 continuous per-line wobble amplitude
     pub jitter_speed: f32,    // 0..30 wobble evolution rate
+    // vec4 #13 — Shift: datamosh (displaced blocks bleed the previous frame)
+    pub datamosh: f32,        // 0..1 how much displaced blocks sample the previous frame
+    pub _pad_mosh: [f32; 3],  // padding to keep the buffer 16-byte aligned
 }
 
 impl Default for EffectUniforms {
@@ -114,6 +117,8 @@ impl Default for EffectUniforms {
             slice_axis: 0.0,
             jitter_amount: 0.0,
             jitter_speed: 8.0,
+            datamosh: 0.0,
+            _pad_mosh: [0.0; 3],
         }
     }
 }

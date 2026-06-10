@@ -431,6 +431,11 @@ impl App {
                                 layer.effects.jitter_speed = (v as f32).clamp(0.0, 30.0);
                             }
                         }
+                        "datamosh" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.datamosh = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -627,6 +632,7 @@ impl App {
                 slice_axis: l.effects.slice_axis,
                 jitter_amount: l.effects.jitter_amount,
                 jitter_speed: l.effects.jitter_speed,
+                datamosh: l.effects.datamosh,
             }).collect(),
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())

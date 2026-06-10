@@ -830,6 +830,11 @@ function createLayerCard(layer, index) {
             <input type="range" min="0" max="30" step="1" value="${layer.jitter_speed}">
             <span class="value">${formatValue(layer.jitter_speed, 0, 30, 1)}</span>
           </div>
+          <div class="param-row" data-param="datamosh" title="displaced blocks bleed the previous frame (smear trails)">
+            <label>Datamosh</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.datamosh}">
+            <span class="value">${formatValue(layer.datamosh, 0, 1, 0.01)}</span>
+          </div>
         </div>
       </div>
     </div>

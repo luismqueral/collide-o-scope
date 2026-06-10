@@ -68,6 +68,7 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
         "slice_axis" => Some(ParamMeta { step: 1.0, min: 0.0, max: 2.0, desc: "0=horiz 1=vert 2=both" }),
         "jitter_amount" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "continuous wobble" }),
         "jitter_speed" => Some(ParamMeta { step: 1.0, min: 0.0, max: 30.0, desc: "wobble rate" }),
+        "datamosh" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "prev-frame bleed" }),
         _ => None,
     }
 }
@@ -298,6 +299,8 @@ pub struct EffectsConfig {
     pub jitter_amount: f32,
     #[serde(default = "default_jitter_speed")]
     pub jitter_speed: f32,
+    #[serde(default)]
+    pub datamosh: f32,
 }
 
 fn default_wave_freq() -> f32 { 8.0 }
@@ -359,6 +362,7 @@ impl Default for EffectsConfig {
             slice_axis: 0.0,
             jitter_amount: 0.0,
             jitter_speed: 8.0,
+            datamosh: 0.0,
         }
     }
 }
@@ -412,6 +416,7 @@ impl EffectsConfig {
             slice_axis: u.slice_axis,
             jitter_amount: u.jitter_amount,
             jitter_speed: u.jitter_speed,
+            datamosh: u.datamosh,
         }
     }
 
@@ -460,6 +465,7 @@ impl EffectsConfig {
         u.slice_axis = self.slice_axis.clamp(0.0, 2.0);
         u.jitter_amount = self.jitter_amount.clamp(0.0, 1.0);
         u.jitter_speed = self.jitter_speed.clamp(0.0, 30.0);
+        u.datamosh = self.datamosh.clamp(0.0, 1.0);
     }
 
     /// Get fields organized into groups for display.
@@ -520,6 +526,7 @@ impl EffectsConfig {
                 ("slice_axis", format!("{:.1}", self.slice_axis)),
                 ("jitter_amount", format!("{:.2}", self.jitter_amount)),
                 ("jitter_speed", format!("{:.1}", self.jitter_speed)),
+                ("datamosh", format!("{:.2}", self.datamosh)),
             ]),
         ]
     }
@@ -571,6 +578,7 @@ impl EffectsConfig {
             "slice_axis" => { if let Ok(v) = value.parse() { self.slice_axis = v; return true; } }
             "jitter_amount" => { if let Ok(v) = value.parse() { self.jitter_amount = v; return true; } }
             "jitter_speed" => { if let Ok(v) = value.parse() { self.jitter_speed = v; return true; } }
+            "datamosh" => { if let Ok(v) = value.parse() { self.datamosh = v; return true; } }
             _ => {}
         }
         false
