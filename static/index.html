@@ -51,6 +51,33 @@
           <span class="ws-dot" id="ws-status" title="connecting..."></span>
         </div>
         <div class="fx-scroll" id="master-fx">
+          <div class="fx-group" data-group="output">
+            <div class="fx-group-header">
+              <span class="chevron">&#x25BC;</span>
+              <span class="group-label">OUTPUT</span>
+            </div>
+            <div class="fx-group-body">
+              <div class="param-row select-row" data-master-param="output_ratio">
+                <label>Ratio</label>
+                <select>
+                  <option value="16:9">16:9</option>
+                  <option value="4:3">4:3</option>
+                  <option value="1:1">1:1</option>
+                  <option value="9:16">9:16</option>
+                  <option value="21:9">21:9</option>
+                </select>
+              </div>
+              <div class="param-row select-row" data-master-param="output_quality">
+                <label>Quality</label>
+                <select>
+                  <option value="720">720p</option>
+                  <option value="1080" selected>1080p</option>
+                  <option value="1440">1440p</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           <div class="fx-group" data-group="digital">
             <div class="fx-group-header">
               <span class="chevron">&#x25BC;</span>
@@ -237,14 +264,9 @@
               <span class="group-label">Render</span>
             </div>
             <div class="group-params">
-              <div class="param-row select-row">
+              <div class="param-row">
                 <label>Resolution</label>
-                <select id="export-resolution">
-                  <option value="1280x720">720p</option>
-                  <option value="1920x1080" selected>1080p</option>
-                  <option value="2560x1440">1440p</option>
-                  <option value="3840x2160">4K</option>
-                </select>
+                <span id="export-resolution-display">1920×1080</span>
               </div>
               <div class="param-row">
                 <label>Duration (s)</label>

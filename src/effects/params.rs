@@ -62,9 +62,11 @@ pub struct EffectUniforms {
     pub slice_axis: f32,      // 0 = horizontal bands (shift X), 1 = vertical (shift Y), 2 = both
     pub jitter_amount: f32,   // 0..1 continuous per-line wobble amplitude
     pub jitter_speed: f32,    // 0..30 wobble evolution rate
-    // vec4 #13 — Shift: datamosh (displaced blocks bleed the previous frame)
+    // vec4 #13 — Shift: datamosh + Layer transform: position/size
     pub datamosh: f32,        // 0..1 how much displaced blocks sample the previous frame
-    pub _pad_mosh: [f32; 3],  // padding to keep the buffer 16-byte aligned
+    pub layer_x: f32,         // -1..1 horizontal offset (+ = right), 0 = centered
+    pub layer_y: f32,         // -1..1 vertical offset (+ = up), 0 = centered
+    pub layer_scale: f32,     // 0.1..4 zoom (1.0 = unchanged)
 }
 
 impl Default for EffectUniforms {
@@ -118,7 +120,9 @@ impl Default for EffectUniforms {
             jitter_amount: 0.0,
             jitter_speed: 8.0,
             datamosh: 0.0,
-            _pad_mosh: [0.0; 3],
+            layer_x: 0.0,
+            layer_y: 0.0,
+            layer_scale: 1.0,
         }
     }
 }

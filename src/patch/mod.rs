@@ -69,6 +69,9 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
         "jitter_amount" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "continuous wobble" }),
         "jitter_speed" => Some(ParamMeta { step: 1.0, min: 0.0, max: 30.0, desc: "wobble rate" }),
         "datamosh" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "prev-frame bleed" }),
+        "layer_x" => Some(ParamMeta { step: 0.01, min: -1.0, max: 1.0, desc: "horizontal offset" }),
+        "layer_y" => Some(ParamMeta { step: 0.01, min: -1.0, max: 1.0, desc: "vertical offset" }),
+        "layer_scale" => Some(ParamMeta { step: 0.01, min: 0.1, max: 4.0, desc: "zoom (1=unchanged)" }),
         _ => None,
     }
 }
@@ -301,6 +304,15 @@ pub struct EffectsConfig {
     pub jitter_speed: f32,
     #[serde(default)]
     pub datamosh: f32,
+    // Layer transform (position / size)
+    #[serde(default)]
+    pub layer_x: f32,
+    #[serde(default)]
+    pub layer_y: f32,
+    // Must default to 1.0: a plain default would load old patches as 0.0 and
+    // collapse the layer to a point.
+    #[serde(default = "one")]
+    pub layer_scale: f32,
 }
 
 fn default_wave_freq() -> f32 { 8.0 }
@@ -363,6 +375,9 @@ impl Default for EffectsConfig {
             jitter_amount: 0.0,
             jitter_speed: 8.0,
             datamosh: 0.0,
+            layer_x: 0.0,
+            layer_y: 0.0,
+            layer_scale: 1.0,
         }
     }
 }
@@ -417,6 +432,9 @@ impl EffectsConfig {
             jitter_amount: u.jitter_amount,
             jitter_speed: u.jitter_speed,
             datamosh: u.datamosh,
+            layer_x: u.layer_x,
+            layer_y: u.layer_y,
+            layer_scale: u.layer_scale,
         }
     }
 
@@ -466,6 +484,9 @@ impl EffectsConfig {
         u.jitter_amount = self.jitter_amount.clamp(0.0, 1.0);
         u.jitter_speed = self.jitter_speed.clamp(0.0, 30.0);
         u.datamosh = self.datamosh.clamp(0.0, 1.0);
+        u.layer_x = self.layer_x.clamp(-1.0, 1.0);
+        u.layer_y = self.layer_y.clamp(-1.0, 1.0);
+        u.layer_scale = self.layer_scale.clamp(0.1, 4.0);
     }
 
     /// Get fields organized into groups for display.
@@ -528,6 +549,11 @@ impl EffectsConfig {
                 ("jitter_speed", format!("{:.1}", self.jitter_speed)),
                 ("datamosh", format!("{:.2}", self.datamosh)),
             ]),
+            ("transform", vec![
+                ("layer_x", format!("{:.2}", self.layer_x)),
+                ("layer_y", format!("{:.2}", self.layer_y)),
+                ("layer_scale", format!("{:.2}", self.layer_scale)),
+            ]),
         ]
     }
 
@@ -579,6 +605,9 @@ impl EffectsConfig {
             "jitter_amount" => { if let Ok(v) = value.parse() { self.jitter_amount = v; return true; } }
             "jitter_speed" => { if let Ok(v) = value.parse() { self.jitter_speed = v; return true; } }
             "datamosh" => { if let Ok(v) = value.parse() { self.datamosh = v; return true; } }
+            "layer_x" => { if let Ok(v) = value.parse() { self.layer_x = v; return true; } }
+            "layer_y" => { if let Ok(v) = value.parse() { self.layer_y = v; return true; } }
+            "layer_scale" => { if let Ok(v) = value.parse() { self.layer_scale = v; return true; } }
             _ => {}
         }
         false

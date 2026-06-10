@@ -34,6 +34,7 @@ function connect() {
         syncEffects(msg.effects);
         syncNtsc(msg.ntsc);
         syncFramerate(msg.framerate);
+        syncOutput(msg);
         syncLayers(msg.layers);
         syncLibrary(msg.library);
         syncPatches(msg.patches || []);
@@ -115,6 +116,38 @@ if (fpsRow) {
     valueEl.textContent = formatValue(v, min, max, step);
     sendAction({ action: 'set_master_framerate', value: v });
   });
+}
+
+// --- Master output size / aspect ratio ---
+// Two selects routed via their own action (set_output_size), not the generic
+// data-param loop. Latest synced dims feed the export modal (one source of truth).
+let lastOutputW = 1920, lastOutputH = 1080;
+const ratioSel = document.querySelector('[data-master-param="output_ratio"] select');
+const qualSel = document.querySelector('[data-master-param="output_quality"] select');
+const sendOutput = () => sendAction({
+  action: 'set_output_size',
+  ratio: ratioSel.value,
+  quality: parseInt(qualSel.value, 10),
+});
+ratioSel?.addEventListener('change', sendOutput);
+qualSel?.addEventListener('change', sendOutput);
+
+// Idempotent sync from server. Skip a control while it's focused so we don't
+// fight the user mid-selection. Stores dims for the export modal.
+function syncOutput(msg) {
+  if (!msg) return;
+  if (ratioSel && document.activeElement !== ratioSel && msg.output_ratio != null) {
+    ratioSel.value = msg.output_ratio;
+  }
+  if (qualSel && document.activeElement !== qualSel && msg.output_quality != null) {
+    qualSel.value = String(msg.output_quality);
+  }
+  if (msg.output_width) lastOutputW = msg.output_width;
+  if (msg.output_height) lastOutputH = msg.output_height;
+  const d = document.getElementById('export-resolution-display');
+  if (d && msg.output_width && msg.output_height) {
+    d.textContent = `${msg.output_width}×${msg.output_height}`;
+  }
 }
 
 // --- Initialize NTSC/VHS sliders ---
@@ -837,6 +870,31 @@ function createLayerCard(layer, index) {
           </div>
         </div>
       </div>
+
+      <div class="fx-group collapsed" data-layer-group="transform">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">POSITION &amp; SIZE</span>
+          <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+        </div>
+        <div class="fx-group-body">
+          <div class="param-row" data-param="layer_x">
+            <label>X</label>
+            <input type="range" min="-1" max="1" step="0.01" value="${layer.layer_x}">
+            <span class="value">${formatValue(layer.layer_x, -1, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="layer_y">
+            <label>Y</label>
+            <input type="range" min="-1" max="1" step="0.01" value="${layer.layer_y}">
+            <span class="value">${formatValue(layer.layer_y, -1, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="layer_scale">
+            <label>Scale</label>
+            <input type="range" min="0.1" max="4" step="0.01" value="${layer.layer_scale}">
+            <span class="value">${formatValue(layer.layer_scale, 0.1, 4, 0.01)}</span>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -916,7 +974,7 @@ function syncLibrary(files) {
   libraryGrid.innerHTML = '';
 
   if (files.length === 0) {
-    libraryGrid.innerHTML = '<p class="dim" style="grid-column:1/-1;text-align:center;padding:12px;">No video files</p>';
+    libraryGrid.innerHTML = '<p class="dim" style="grid-column:1/-1;text-align:center;padding:12px;">No media files</p>';
     return;
   }
 
@@ -945,21 +1003,30 @@ function syncLibrary(files) {
     };
     item.appendChild(img);
 
-    // Hover preview animation
+    // Hover preview animation. Stills (PNG/JPG) have no /preview frames, so
+    // probe frame 0 first and only cycle if it actually loads — otherwise the
+    // 404s would trip the thumbnail's onerror retry chain and hide it.
     let hoverInterval = null;
     let hoverFrame = 0;
+    let hovering = false;
 
     item.addEventListener('mouseenter', () => {
+      hovering = true;
       const enc = encodeURIComponent(filename);
-      // Start cycling through preview frames
-      hoverFrame = 0;
-      hoverInterval = setInterval(() => {
-        hoverFrame = (hoverFrame + 1) % 8;
-        img.src = `/preview/${enc}/${hoverFrame}`;
-      }, 250);
+      const probe = new Image();
+      probe.onload = () => {
+        if (!hovering) return; // left before the probe resolved
+        hoverFrame = 0;
+        hoverInterval = setInterval(() => {
+          hoverFrame = (hoverFrame + 1) % 8;
+          img.src = `/preview/${enc}/${hoverFrame}`;
+        }, 250);
+      };
+      probe.src = `/preview/${enc}/0`; // 404 for stills → never cycles, thumb stays
     });
 
     item.addEventListener('mouseleave', () => {
+      hovering = false;
       if (hoverInterval) {
         clearInterval(hoverInterval);
         hoverInterval = null;
@@ -1062,10 +1129,10 @@ function syncTransport(paused) {
 let exportActive = false;
 
 document.getElementById('export-start').addEventListener('click', () => {
-  const [w, h] = document.getElementById('export-resolution').value.split('x').map(Number);
+  // Export resolution follows the master output size (one source of truth).
   const duration = parseFloat(document.getElementById('export-duration').value) || 10;
   const fps = parseInt(document.getElementById('export-fps').value) || 30;
-  sendAction({ action: 'start_export', width: w, height: h, fps, duration_secs: duration });
+  sendAction({ action: 'start_export', width: lastOutputW, height: lastOutputH, fps, duration_secs: duration });
 });
 
 document.getElementById('export-cancel').addEventListener('click', () => {

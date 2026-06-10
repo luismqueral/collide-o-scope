@@ -37,6 +37,18 @@ pub struct AppSnapshot {
     /// Master content framerate (frame-hold / stutter). 30 = smooth (default).
     #[serde(default = "default_framerate")]
     pub framerate: f32,
+    /// Master output aspect ratio label (16:9, 4:3, 1:1, 9:16, 21:9).
+    #[serde(default = "default_ratio")]
+    pub output_ratio: String,
+    /// Master output quality (length of the shorter side: 720, 1080, 1440).
+    #[serde(default = "default_quality")]
+    pub output_quality: u32,
+    /// Current output canvas width in pixels (derived from ratio + quality).
+    #[serde(default)]
+    pub output_width: u32,
+    /// Current output canvas height in pixels (derived from ratio + quality).
+    #[serde(default)]
+    pub output_height: u32,
     /// Export progress: 0.0 = idle, 0.0..1.0 = rendering, 1.0 = done
     #[serde(default)]
     pub export_progress: f32,
@@ -47,6 +59,14 @@ pub struct AppSnapshot {
 
 fn default_framerate() -> f32 {
     30.0
+}
+
+fn default_ratio() -> String {
+    "16:9".to_string()
+}
+
+fn default_quality() -> u32 {
+    1080
 }
 
 impl Default for AppSnapshot {
@@ -60,6 +80,10 @@ impl Default for AppSnapshot {
             patches: Vec::new(),
             paused: false,
             framerate: 30.0,
+            output_ratio: "16:9".to_string(),
+            output_quality: 1080,
+            output_width: 0,
+            output_height: 0,
             export_progress: 0.0,
             export_error: String::new(),
         }
@@ -239,6 +263,10 @@ pub struct LayerSnapshot {
     pub jitter_amount: f32,
     pub jitter_speed: f32,
     pub datamosh: f32,
+    // Per-layer transform (position / size)
+    pub layer_x: f32,
+    pub layer_y: f32,
+    pub layer_scale: f32,
 }
 
 /// Actions the browser can request (processed by the render loop).
@@ -278,6 +306,9 @@ pub enum WebAction {
     /// Set the master content framerate (frame-hold / stutter look)
     #[serde(rename = "set_master_framerate")]
     SetMasterFramerate { value: f32 },
+    /// Set the master output size / aspect ratio (rebuilds the composite canvas)
+    #[serde(rename = "set_output_size")]
+    SetOutputSize { ratio: String, quality: u32 },
     /// Set an NTSC/VHS effect parameter
     #[serde(rename = "set_ntsc_param")]
     SetNtscParam { param: String, value: serde_json::Value },

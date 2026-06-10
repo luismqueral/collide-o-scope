@@ -152,12 +152,15 @@ impl Layer {
     }
 }
 
-/// Valid video file extensions for drag-and-drop.
-pub fn is_video_file(path: &std::path::Path) -> bool {
+/// Valid media file extensions accepted by the library + drag-and-drop.
+pub fn is_supported_media(path: &std::path::Path) -> bool {
     match path.extension().and_then(|e| e.to_str()) {
         Some(ext) => matches!(
             ext.to_lowercase().as_str(),
+            // video
             "mp4" | "webm" | "mov" | "avi" | "mkv"
+            // images (held single frame) + animated gif (loops)
+            | "gif" | "png" | "jpg" | "jpeg" | "bmp" | "webp" | "tiff" | "tif"
         ),
         None => false,
     }

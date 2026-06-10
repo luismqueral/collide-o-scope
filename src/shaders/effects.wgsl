@@ -57,11 +57,11 @@ struct Uniforms {
     slice_axis: f32,
     jitter_amount: f32,
     jitter_speed: f32,
-    // Shift: datamosh (displaced blocks bleed the previous frame)
+    // Shift: datamosh + Layer transform: position/size
     datamosh: f32,
-    _pad_mosh0: f32,
-    _pad_mosh1: f32,
-    _pad_mosh2: f32,
+    layer_x: f32,
+    layer_y: f32,
+    layer_scale: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -267,6 +267,18 @@ fn linear_to_srgb(c: vec3f) -> vec3f {
 fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
     var sample_uv = uv;
 
+    // --- Layer transform: scale + position. Areas outside the moved/scaled
+    // frame become transparent (out_alpha = 0 at the end) so the layers below
+    // show through. Defaults (scale 1, x/y 0) skip this entirely. ---
+    var layer_oob = false;
+    if uniforms.layer_scale != 1.0 || uniforms.layer_x != 0.0 || uniforms.layer_y != 0.0 {
+        sample_uv = (sample_uv - 0.5) / max(uniforms.layer_scale, 0.01) + 0.5;
+        sample_uv += vec2f(-uniforms.layer_x, uniforms.layer_y); // +x = right, +y = up
+        if sample_uv.x < 0.0 || sample_uv.x > 1.0 || sample_uv.y < 0.0 || sample_uv.y > 1.0 {
+            layer_oob = true;
+        }
+    }
+
     // --- Breathing (UV distortion before sampling) ---
     if uniforms.breathe_scale > 0.0 || uniforms.breathe_rotation > 0.0 || uniforms.breathe_position > 0.0 {
         sample_uv = apply_breathing(sample_uv);
@@ -449,6 +461,10 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
         let luma = dot(rgb, vec3f(0.299, 0.587, 0.114));
         rgb = mix(vec3f(luma), rgb, mix(1.0, k, uniforms.chroma_spill));
     }
+
+    // Layer transform pushed this fragment outside the source frame: make it
+    // fully transparent so the layers below show through (no edge smearing).
+    if layer_oob { out_alpha = 0.0; }
 
     return vec4f(clamp(rgb, vec3f(0.0), vec3f(1.0)), out_alpha);
 }

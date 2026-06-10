@@ -376,6 +376,70 @@ impl Renderer {
         }
     }
 
+    /// Resize the offscreen composite canvas (live output + export source).
+    /// Recreates the 3 composite textures + feedback texture at w×h. Pipelines,
+    /// layouts, and the sampler are size-independent; per-frame bind groups are
+    /// rebuilt in render_layers/render_master_effects, so nothing else changes.
+    /// Caller must rebind the egui preview texture afterwards (output_view moves).
+    pub fn set_output_size(&mut self, w: u32, h: u32) {
+        if w == 0 || h == 0 || (w == self.output_width && h == self.output_height) {
+            return;
+        }
+        let tex_usage = wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::COPY_DST;
+
+        // Build into locals first (the from_fn closures borrow &self.device,
+        // so we can't assign into self fields inside them).
+        let composite_textures: [wgpu::Texture; 3] = std::array::from_fn(|i| {
+            self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(&format!("Composite {i}")),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: tex_usage,
+                view_formats: &[],
+            })
+        });
+        let composite_views: [wgpu::TextureView; 3] = std::array::from_fn(|i| {
+            composite_textures[i].create_view(&wgpu::TextureViewDescriptor::default())
+        });
+        let output_view =
+            composite_textures[0].create_view(&wgpu::TextureViewDescriptor::default());
+
+        let feedback_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Feedback (prev frame)"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: tex_usage,
+            view_formats: &[],
+        });
+        let feedback_view = feedback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.composite_textures = composite_textures;
+        self.composite_views = composite_views;
+        self.output_view = output_view;
+        self.feedback_texture = feedback_texture;
+        self.feedback_view = feedback_view;
+        self.output_width = w;
+        self.output_height = h;
+        // readback_buffer auto-grows in readback_composite(); no reset needed.
+    }
+
     /// Force reconfigure the surface (e.g. after Lost/Outdated during fullscreen transition).
     pub fn reconfigure_surface(&self) {
         self.surface.configure(&self.device, &self.config);

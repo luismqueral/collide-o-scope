@@ -14,6 +14,9 @@ pub struct VideoDecoder {
     pub height: u32,
     frame_count: u64,
     total_frames: u64,
+    /// True for still images (png/jpg/etc): decode one frame then hold it,
+    /// instead of re-opening the file every frame at EOF.
+    still: bool,
 }
 
 impl VideoDecoder {
@@ -63,6 +66,17 @@ impl VideoDecoder {
         )
         .map_err(|e| format!("Scaler: {e}"))?;
 
+        // Still images are 1-frame streams: decode once then hold. GIFs stay
+        // animated/looping (not flagged here).
+        let still = matches!(
+            std::path::Path::new(path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase())
+                .as_deref(),
+            Some("png" | "jpg" | "jpeg" | "bmp" | "webp" | "tiff" | "tif")
+        );
+
         Ok(Self {
             path: path.to_string(),
             input_ctx,
@@ -73,12 +87,18 @@ impl VideoDecoder {
             height,
             frame_count: 0,
             total_frames,
+            still,
         })
     }
 
     /// Get the next decoded RGBA frame. Returns None only on unrecoverable error.
     /// Loops back to the start when the file ends.
     pub fn next_frame(&mut self) -> Option<Vec<u8>> {
+        // A still image only has one frame — yield it once, then hold (the
+        // caller keeps the last uploaded texture when we return None).
+        if self.still && self.frame_count >= 1 {
+            return None;
+        }
         loop {
             // Try to receive already-decoded frames first
             let mut decoded = VideoFrame::empty();

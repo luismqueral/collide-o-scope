@@ -23,12 +23,32 @@ use winit::keyboard::ModifiersState;
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 
 use input::{apply_action, map_key, ControlFlow};
-use layers::{is_video_file, BlendMode, Layer};
+use layers::{is_supported_media, BlendMode, Layer};
 use renderer::Renderer;
 use web::state::WebState;
 
 const TARGET_FPS: u64 = 30;
 const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
+
+/// Output pixel dims for a ratio label + quality (= length of the SHORTER side).
+/// 16:9/1080 → 1920×1080, 9:16/1080 → 1080×1920, 1:1/1080 → 1080×1080.
+/// Result dims are forced even (h264/encoder-friendly for export).
+fn output_dims(ratio: &str, quality: u32) -> (u32, u32) {
+    let short = quality.max(2);
+    let (rw, rh): (f32, f32) = match ratio {
+        "4:3" => (4.0, 3.0),
+        "1:1" => (1.0, 1.0),
+        "9:16" => (9.0, 16.0),
+        "21:9" => (21.0, 9.0),
+        _ => (16.0, 9.0), // default + "16:9"
+    };
+    let (w, h) = if rw >= rh {
+        (((short as f32) * rw / rh).round() as u32, short) // landscape/square: height = short
+    } else {
+        (short, ((short as f32) * rh / rw).round() as u32) // portrait: width = short
+    };
+    (w & !1, h & !1) // even dims
+}
 
 struct App {
     initial_video: Option<String>,
@@ -45,6 +65,9 @@ struct App {
     master_fps: f32,
     last_content_advance: Instant,
     content_time: f32,
+    // Master output size: aspect ratio label + quality (shorter-side px).
+    output_ratio: String,
+    output_quality: u32,
     modifiers: ModifiersState,
     // Library
     library_folder: Option<PathBuf>,
@@ -92,6 +115,8 @@ impl App {
             master_fps: 30.0,
             last_content_advance: Instant::now(),
             content_time: 0.0,
+            output_ratio: "16:9".to_string(),
+            output_quality: 1080,
             modifiers: ModifiersState::empty(),
             library_folder,
             library_files,
@@ -138,6 +163,26 @@ impl App {
             }
             WebAction::SetMasterFramerate { value } => {
                 self.master_fps = value.clamp(1.0, TARGET_FPS as f32);
+            }
+            WebAction::SetOutputSize { ratio, quality } => {
+                self.output_ratio = ratio;
+                self.output_quality = quality.clamp(120, 4320);
+                let (w, h) = output_dims(&self.output_ratio, self.output_quality);
+                if let Some(r) = self.renderer.as_mut() {
+                    r.set_output_size(w, h);
+                    self.master_effects.resolution = [w as f32, h as f32];
+                    // output_view moved — rebind the egui preview texture.
+                    if let (Some(egui_r), Some(id)) =
+                        (self.egui_renderer.as_mut(), self.video_egui_texture_id)
+                    {
+                        egui_r.update_egui_texture_from_wgpu_texture(
+                            &r.device,
+                            &r.output_view,
+                            wgpu::FilterMode::Linear,
+                            id,
+                        );
+                    }
+                }
             }
             WebAction::AddLayer { filename } => {
                 // Find the full path from the library
@@ -436,6 +481,21 @@ impl App {
                                 layer.effects.datamosh = (v as f32).clamp(0.0, 1.0);
                             }
                         }
+                        "layer_x" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.layer_x = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "layer_y" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.layer_y = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "layer_scale" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.layer_scale = (v as f32).clamp(0.1, 4.0);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -633,6 +693,9 @@ impl App {
                 jitter_amount: l.effects.jitter_amount,
                 jitter_speed: l.effects.jitter_speed,
                 datamosh: l.effects.datamosh,
+                layer_x: l.effects.layer_x,
+                layer_y: l.effects.layer_y,
+                layer_scale: l.effects.layer_scale,
             }).collect(),
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())
@@ -640,6 +703,10 @@ impl App {
             patches: self.patch_files.clone(),
             paused: self.master_paused,
             framerate: self.master_fps,
+            output_ratio: self.output_ratio.clone(),
+            output_quality: self.output_quality,
+            output_width: self.renderer.as_ref().map(|r| r.output_width).unwrap_or(0),
+            output_height: self.renderer.as_ref().map(|r| r.output_height).unwrap_or(0),
             export_progress: self.export_job.as_ref()
                 .map(|j| if j.is_done() { 1.0 } else { j.progress.progress_f32() })
                 .unwrap_or(0.0),
@@ -693,7 +760,7 @@ fn scan_folder(folder: &PathBuf) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.is_file() && is_video_file(p))
+        .filter(|p| p.is_file() && is_supported_media(p))
         .collect();
     files.sort();
     files
@@ -884,15 +951,10 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let mut output_width = 1280u32;
-        let mut output_height = 720u32;
-
-        if let Some(ref path) = self.initial_video {
-            if let Ok(decoder) = video::VideoDecoder::open(path) {
-                output_width = decoder.width;
-                output_height = decoder.height;
-            }
-        }
+        // Output canvas starts at the master output size (deliberate control).
+        // Source clips stretch into it (user accepted stretching).
+        let (output_width, output_height) = output_dims(&self.output_ratio, self.output_quality);
+        self.master_effects.resolution = [output_width as f32, output_height as f32];
 
         log::info!("Output: {}x{}", output_width, output_height);
 
@@ -980,7 +1042,7 @@ impl ApplicationHandler for App {
             WindowEvent::DroppedFile(path) => {
                 if path.is_dir() {
                     self.set_library_folder(path);
-                } else if is_video_file(&path) {
+                } else if is_supported_media(&path) {
                     if let Some(path_str) = path.to_str() {
                         let path_owned = path_str.to_string();
                         self.add_layer(&path_owned);
