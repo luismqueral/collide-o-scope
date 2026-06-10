@@ -408,6 +408,59 @@ body {
   border-radius: 2px;
   padding: 1px 4px;
   font-variant-numeric: tabular-nums;
+  cursor: text;
+}
+
+.param-row .value:hover {
+  background: var(--accent);
+  color: #000;
+}
+
+/* Automated param: ƒ marker before the (frozen) live value. */
+.param-row .value.automated::before {
+  content: 'ƒ ';
+  color: var(--accent);
+  font-style: italic;
+}
+
+.param-row .value.automated:hover::before {
+  color: #000;
+}
+
+/* Bad formula: surface the parse error in red. */
+.param-row .value.error {
+  color: #e55;
+}
+
+.param-row .value.error::before {
+  color: #e55;
+}
+
+/* The value cell becomes a positioning anchor while editing so the wider
+   text input can grow leftward over the slider without shifting layout. */
+.param-row .value {
+  position: relative;
+}
+
+/* The inline editor that replaces the value text on click. It spills left over
+   the slider column so there's room to type a formula. */
+.param-row .value-input {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 120px;
+  box-sizing: border-box;
+  font-size: 10px;
+  font-family: inherit;
+  text-align: right;
+  color: var(--accent);
+  background: var(--bg, #111);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  padding: 1px 3px;
+  outline: none;
+  z-index: 10;
 }
 
 /* Range slider */

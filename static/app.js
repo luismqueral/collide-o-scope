@@ -30,7 +30,7 @@ function connect() {
     try {
       const msg = JSON.parse(e.data);
       if (msg.type === 'state') {
-        syncEffects(msg.effects);
+        syncEffects(msg.effects, msg.automations, msg.automation_errors);
         syncNtsc(msg.ntsc);
         syncLayers(msg.layers);
         syncLibrary(msg.library);
@@ -50,6 +50,90 @@ function sendAction(action) {
     ws.send(JSON.stringify(action));
   } else {
     console.warn('[ws] not connected, dropping:', action);
+  }
+}
+
+// --- Parameter automation: click-to-edit value cells ---
+//
+// Clicking a numeric param's value turns it into a text field. Typing a plain
+// number sends a normal set (and clears any existing automation); typing a
+// formula like `sin(t)*10` installs an automation that the Rust render loop
+// evaluates every frame. The `ƒ` marker and error styling are driven by the
+// `automations` / `automation_errors` maps in the server snapshot.
+
+// A value matching this is treated as a plain number, not a formula.
+const NUMERIC_RE = /^-?\d*\.?\d+$/;
+
+// Wire a `.value` span so it becomes editable on click. `ctx` provides the
+// actions to send: setValue(num), setAutomation(expr), clearAutomation().
+function makeValueEditable(valueEl, ctx) {
+  if (!valueEl || valueEl.dataset.editable === '1') return;
+  valueEl.dataset.editable = '1';
+
+  valueEl.addEventListener('click', () => {
+    if (valueEl.querySelector('input')) return; // already editing
+    const current = valueEl.dataset.expr || valueEl.textContent.trim();
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'value-input';
+    input.value = current;
+    valueEl.textContent = '';
+    valueEl.appendChild(input);
+    input.focus();
+    input.select();
+
+    let committed = false;
+    const commit = () => {
+      if (committed) return;
+      committed = true;
+      const text = input.value.trim();
+      if (text === '') {
+        // Empty = leave as-is; the next sync repaints the cell.
+      } else if (NUMERIC_RE.test(text)) {
+        ctx.clearAutomation();
+        ctx.setValue(parseFloat(text));
+      } else {
+        ctx.setAutomation(text);
+      }
+      input.blur();
+    };
+    const cancel = () => {
+      committed = true;
+      input.blur();
+    };
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', () => {
+      if (!committed) commit();
+      // Repaint from the latest known state until the next server sync arrives.
+      input.remove();
+    });
+  });
+}
+
+// Apply automation state from a snapshot map onto a value cell: toggle the
+// `automated` class + remember the source (shown when editing), and the
+// `error` class + tooltip when the formula failed to parse.
+function applyAutomationState(valueEl, param, autos, errors) {
+  if (!valueEl) return;
+  const expr = autos && autos[param];
+  const err = errors && errors[param];
+  if (expr) {
+    valueEl.classList.add('automated');
+    valueEl.dataset.expr = expr;
+  } else {
+    valueEl.classList.remove('automated');
+    delete valueEl.dataset.expr;
+  }
+  if (err) {
+    valueEl.classList.add('error');
+    valueEl.title = err;
+  } else {
+    valueEl.classList.remove('error');
+    valueEl.removeAttribute('title');
   }
 }
 
@@ -76,6 +160,13 @@ document.querySelectorAll('.param-row[data-param]').forEach((row) => {
       const v = parseFloat(slider.value);
       valueEl.textContent = formatValue(v, min, max, step);
       sendAction({ action: 'set_param', param, value: v });
+    });
+
+    // Numeric master params can also be automated by clicking the value.
+    makeValueEditable(valueEl, {
+      setValue: (v) => sendAction({ action: 'set_param', param, value: v }),
+      setAutomation: (expr) => sendAction({ action: 'set_automation', param, expr }),
+      clearAutomation: () => sendAction({ action: 'clear_automation', param }),
     });
   }
 
@@ -162,7 +253,7 @@ document.getElementById('btn-stop').addEventListener('click', () => {
 
 // --- Sync effects UI from server ---
 
-function syncEffects(effects) {
+function syncEffects(effects, automations, automationErrors) {
   if (!effects) return;
   for (const [param, value] of Object.entries(effects)) {
     const row = document.querySelector(`.param-row[data-param="${param}"]`);
@@ -175,10 +266,14 @@ function syncEffects(effects) {
 
     if (slider && valueEl && document.activeElement !== slider) {
       slider.value = value;
-      const min = parseFloat(row.dataset.min);
-      const max = parseFloat(row.dataset.max);
-      const step = parseFloat(row.dataset.step);
-      valueEl.textContent = formatValue(value, min, max, step);
+      // While editing the value cell, don't overwrite the user's text.
+      if (!valueEl.querySelector('input')) {
+        const min = parseFloat(row.dataset.min);
+        const max = parseFloat(row.dataset.max);
+        const step = parseFloat(row.dataset.step);
+        valueEl.textContent = formatValue(value, min, max, step);
+      }
+      applyAutomationState(valueEl, param, automations, automationErrors);
     }
 
     if (checkbox) {
@@ -318,6 +413,13 @@ function createLayerCard(layer, index) {
         if (valueEl) valueEl.textContent = v.toFixed(2);
         sendAction({ action: 'set_layer_param', index, param, value: v });
       });
+
+      // Numeric layer params can be automated by clicking the value.
+      makeValueEditable(valueEl, {
+        setValue: (v) => sendAction({ action: 'set_layer_param', index, param, value: v }),
+        setAutomation: (expr) => sendAction({ action: 'set_layer_automation', index, param, expr }),
+        clearAutomation: () => sendAction({ action: 'clear_layer_automation', index, param }),
+      });
     }
 
     if (select) {
@@ -347,6 +449,9 @@ function updateLayerCard(card, layer, index) {
     progressFill.style.width = `${(layer.progress * 100).toFixed(1)}%`;
   }
 
+  const autos = layer.automations;
+  const errors = layer.automation_errors;
+
   // Sync layer param sliders (skip if user is actively dragging)
   const opacityRow = card.querySelector('.param-row[data-param="opacity"]');
   if (opacityRow) {
@@ -354,7 +459,8 @@ function updateLayerCard(card, layer, index) {
     const valEl = opacityRow.querySelector('.value');
     if (slider && document.activeElement !== slider) {
       slider.value = layer.opacity;
-      if (valEl) valEl.textContent = layer.opacity.toFixed(2);
+      if (valEl && !valEl.querySelector('input')) valEl.textContent = layer.opacity.toFixed(2);
+      applyAutomationState(valEl, 'opacity', autos, errors);
     }
   }
 
@@ -364,7 +470,8 @@ function updateLayerCard(card, layer, index) {
     const valEl = speedRow.querySelector('.value');
     if (slider && document.activeElement !== slider) {
       slider.value = layer.speed;
-      if (valEl) valEl.textContent = layer.speed.toFixed(2);
+      if (valEl && !valEl.querySelector('input')) valEl.textContent = layer.speed.toFixed(2);
+      applyAutomationState(valEl, 'speed', autos, errors);
     }
   }
 
