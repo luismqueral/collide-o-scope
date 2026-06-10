@@ -402,6 +402,10 @@ fn run_export(
         let mut effects = EffectUniforms::default();
         effects.resolution = [lw as f32, lh as f32];
         layer_cfg.effects.apply_to_uniforms(&mut effects);
+        // Compute fit scale once at setup (headless has no per-frame loop).
+        let (fx, fy) = crate::fit_scale(effects.fit_mode, lw as f32, lh as f32, w as f32, h as f32);
+        effects.fit_scale_x = fx;
+        effects.fit_scale_y = fy;
 
         let blend_mode = match layer_cfg.blend_mode.as_str() {
             "screen" => BlendMode::Screen,

@@ -50,6 +50,21 @@ fn output_dims(ratio: &str, quality: u32) -> (u32, u32) {
     (w & !1, h & !1) // even dims
 }
 
+/// UV scale for a layer's fit mode given source (sw×sh) + canvas (dw×dh) dims.
+/// mode: 0=stretch (1,1), 1=fit/contain (letterbox), 2=fill/cover (crop).
+/// Multiplied about-center in the shader; >1 = transparent bars, <1 = crop.
+pub fn fit_scale(mode: f32, sw: f32, sh: f32, dw: f32, dh: f32) -> (f32, f32) {
+    if sw <= 0.0 || sh <= 0.0 || dw <= 0.0 || dh <= 0.0 {
+        return (1.0, 1.0);
+    }
+    let r = (sw / sh) / (dw / dh); // source aspect / canvas aspect
+    match mode.round() as i32 {
+        1 => if r > 1.0 { (1.0, r) } else { (1.0 / r, 1.0) }, // contain
+        2 => if r > 1.0 { (1.0 / r, 1.0) } else { (1.0, r) }, // cover
+        _ => (1.0, 1.0),                                      // stretch
+    }
+}
+
 struct App {
     initial_video: Option<String>,
     window: Option<Arc<Window>>,
@@ -496,6 +511,77 @@ impl App {
                                 layer.effects.layer_scale = (v as f32).clamp(0.1, 4.0);
                             }
                         }
+                        "fit_mode" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.fit_mode = (v as f32).clamp(0.0, 2.0).round();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            WebAction::ResetLayerGroup { index, group } => {
+                if let Some(layer) = self.layers.get_mut(index) {
+                    let d = crate::effects::EffectUniforms::default();
+                    match group.as_str() {
+                        "blend" => {
+                            layer.opacity = 1.0;
+                            layer.speed = 1.0;
+                            layer.fps = 30.0;
+                            layer.blend_mode = crate::layers::BlendMode::Normal;
+                        }
+                        "color" => {
+                            layer.effects.hue_shift = d.hue_shift;
+                            layer.effects.saturation = d.saturation;
+                            layer.effects.brightness = d.brightness;
+                            layer.effects.contrast = d.contrast;
+                        }
+                        "digital" => {
+                            layer.effects.pixelate_size = d.pixelate_size;
+                            layer.effects.rgb_split = d.rgb_split;
+                            layer.effects.posterize = d.posterize;
+                            layer.effects.invert = d.invert;
+                        }
+                        "warp" => {
+                            layer.effects.wave_amp = d.wave_amp;
+                            layer.effects.wave_freq = d.wave_freq;
+                            layer.effects.wave_speed = d.wave_speed;
+                            layer.effects.wave_axis = d.wave_axis;
+                            layer.effects.swirl_angle = d.swirl_angle;
+                            layer.effects.swirl_radius = d.swirl_radius;
+                            layer.effects.bulge_strength = d.bulge_strength;
+                            layer.effects.bulge_radius = d.bulge_radius;
+                        }
+                        "key" => {
+                            layer.effects.chroma_enable = d.chroma_enable;
+                            layer.effects.chroma_threshold = d.chroma_threshold;
+                            layer.effects.chroma_smoothness = d.chroma_smoothness;
+                            layer.effects.chroma_spill = d.chroma_spill;
+                            layer.effects.chroma_color_r = d.chroma_color_r;
+                            layer.effects.chroma_color_g = d.chroma_color_g;
+                            layer.effects.chroma_color_b = d.chroma_color_b;
+                        }
+                        "shift" => {
+                            layer.effects.slice_intensity = d.slice_intensity;
+                            layer.effects.slice_height = d.slice_height;
+                            layer.effects.slice_prob = d.slice_prob;
+                            layer.effects.slice_speed = d.slice_speed;
+                            layer.effects.block_size = d.block_size;
+                            layer.effects.block_intensity = d.block_intensity;
+                            layer.effects.block_prob = d.block_prob;
+                            layer.effects.block_speed = d.block_speed;
+                            layer.effects.shift_chroma = d.shift_chroma;
+                            layer.effects.slice_axis = d.slice_axis;
+                            layer.effects.jitter_amount = d.jitter_amount;
+                            layer.effects.jitter_speed = d.jitter_speed;
+                            layer.effects.datamosh = d.datamosh;
+                        }
+                        "transform" => {
+                            layer.effects.layer_x = d.layer_x;
+                            layer.effects.layer_y = d.layer_y;
+                            layer.effects.layer_scale = d.layer_scale;
+                            layer.effects.fit_mode = d.fit_mode;
+                        }
                         _ => {}
                     }
                 }
@@ -696,6 +782,7 @@ impl App {
                 layer_x: l.effects.layer_x,
                 layer_y: l.effects.layer_y,
                 layer_scale: l.effects.layer_scale,
+                fit_mode: l.effects.fit_mode as u32,
             }).collect(),
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())
@@ -1222,6 +1309,16 @@ impl ApplicationHandler for App {
                     let elapsed = self.content_time;
                     for layer in &mut self.layers {
                         layer.effects.time = elapsed;
+                        // Recompute fit scale each frame so it tracks canvas resize.
+                        let (fx, fy) = fit_scale(
+                            layer.effects.fit_mode,
+                            layer.effects.resolution[0],
+                            layer.effects.resolution[1],
+                            output_width as f32,
+                            output_height as f32,
+                        );
+                        layer.effects.fit_scale_x = fx;
+                        layer.effects.fit_scale_y = fy;
                     }
                     self.master_effects.time = elapsed;
 

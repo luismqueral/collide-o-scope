@@ -72,6 +72,7 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
         "layer_x" => Some(ParamMeta { step: 0.01, min: -1.0, max: 1.0, desc: "horizontal offset" }),
         "layer_y" => Some(ParamMeta { step: 0.01, min: -1.0, max: 1.0, desc: "vertical offset" }),
         "layer_scale" => Some(ParamMeta { step: 0.01, min: 0.1, max: 4.0, desc: "zoom (1=unchanged)" }),
+        "fit_mode" => Some(ParamMeta { step: 1.0, min: 0.0, max: 2.0, desc: "0=stretch 1=fit 2=fill" }),
         _ => None,
     }
 }
@@ -313,6 +314,9 @@ pub struct EffectsConfig {
     // collapse the layer to a point.
     #[serde(default = "one")]
     pub layer_scale: f32,
+    // Fit mode: 0=stretch (default, = old behavior), 1=fit/contain, 2=fill/cover
+    #[serde(default)]
+    pub fit_mode: f32,
 }
 
 fn default_wave_freq() -> f32 { 8.0 }
@@ -378,6 +382,7 @@ impl Default for EffectsConfig {
             layer_x: 0.0,
             layer_y: 0.0,
             layer_scale: 1.0,
+            fit_mode: 0.0,
         }
     }
 }
@@ -435,6 +440,7 @@ impl EffectsConfig {
             layer_x: u.layer_x,
             layer_y: u.layer_y,
             layer_scale: u.layer_scale,
+            fit_mode: u.fit_mode,
         }
     }
 
@@ -487,6 +493,8 @@ impl EffectsConfig {
         u.layer_x = self.layer_x.clamp(-1.0, 1.0);
         u.layer_y = self.layer_y.clamp(-1.0, 1.0);
         u.layer_scale = self.layer_scale.clamp(0.1, 4.0);
+        // fit_scale_x/y are computed per-frame, not persisted; only fit_mode here.
+        u.fit_mode = self.fit_mode.clamp(0.0, 2.0).round();
     }
 
     /// Get fields organized into groups for display.
@@ -553,6 +561,7 @@ impl EffectsConfig {
                 ("layer_x", format!("{:.2}", self.layer_x)),
                 ("layer_y", format!("{:.2}", self.layer_y)),
                 ("layer_scale", format!("{:.2}", self.layer_scale)),
+                ("fit_mode", format!("{:.0}", self.fit_mode)),
             ]),
         ]
     }
@@ -608,6 +617,7 @@ impl EffectsConfig {
             "layer_x" => { if let Ok(v) = value.parse() { self.layer_x = v; return true; } }
             "layer_y" => { if let Ok(v) = value.parse() { self.layer_y = v; return true; } }
             "layer_scale" => { if let Ok(v) = value.parse() { self.layer_scale = v; return true; } }
+            "fit_mode" => { if let Ok(v) = value.parse() { self.fit_mode = v; return true; } }
             _ => {}
         }
         false
