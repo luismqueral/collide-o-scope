@@ -210,6 +210,21 @@ pub struct LayerSnapshot {
     pub rgb_split: f32,
     pub posterize: f32,
     pub invert: bool,
+    // Per-layer effects (warp)
+    pub wave_amp: f32,
+    pub wave_freq: f32,
+    pub wave_speed: f32,
+    pub wave_axis: f32,
+    pub swirl_angle: f32,
+    pub swirl_radius: f32,
+    pub bulge_strength: f32,
+    pub bulge_radius: f32,
+    // Per-layer effects (chroma key)
+    pub chroma_enable: bool,
+    pub chroma_threshold: f32,
+    pub chroma_smoothness: f32,
+    pub chroma_spill: f32,
+    pub chroma_color: String,
 }
 
 /// Actions the browser can request (processed by the render loop).

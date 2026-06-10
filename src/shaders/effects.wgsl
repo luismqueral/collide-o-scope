@@ -22,11 +22,26 @@ struct Uniforms {
     breathe_rotation: f32,
     breathe_position: f32,
     vignette: f32,
-    // Analog: color drift
+    // Analog: color drift + Warp: wave
     color_drift: f32,
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    wave_amp: f32,
+    wave_freq: f32,
+    wave_speed: f32,
+    // Warp: wave axis + swirl + bulge strength
+    wave_axis: f32,
+    swirl_angle: f32,
+    swirl_radius: f32,
+    bulge_strength: f32,
+    // Warp: bulge radius + Chroma: enable/threshold/smoothness
+    bulge_radius: f32,
+    chroma_enable: f32,
+    chroma_threshold: f32,
+    chroma_smoothness: f32,
+    // Chroma: spill + key color (sRGB 0..1)
+    chroma_spill: f32,
+    chroma_color_r: f32,
+    chroma_color_g: f32,
+    chroma_color_b: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -217,6 +232,15 @@ fn hsl_to_rgb(hsl: vec3f) -> vec3f {
     );
 }
 
+// Linear -> sRGB (textures are Rgba8UnormSrgb, so samples arrive linear;
+// convert to sRGB so chroma key compares in the same space the UI picks in).
+fn linear_to_srgb(c: vec3f) -> vec3f {
+    let cutoff = c < vec3f(0.0031308);
+    let low = c * 12.92;
+    let high = 1.055 * pow(max(c, vec3f(0.0)), vec3f(1.0 / 2.4)) - 0.055;
+    return select(high, low, cutoff);
+}
+
 @fragment
 fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
     var sample_uv = uv;
@@ -224,6 +248,27 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
     // --- Breathing (UV distortion before sampling) ---
     if uniforms.breathe_scale > 0.0 || uniforms.breathe_rotation > 0.0 || uniforms.breathe_position > 0.0 {
         sample_uv = apply_breathing(sample_uv);
+    }
+
+    // --- Warps (UV displacement) ---
+    if uniforms.wave_amp > 0.0 {
+        let t = uniforms.time * uniforms.wave_speed;
+        if uniforms.wave_axis != 1.0 { sample_uv.x += sin(uv.y * uniforms.wave_freq + t) * uniforms.wave_amp; }
+        if uniforms.wave_axis != 0.0 { sample_uv.y += sin(uv.x * uniforms.wave_freq + t) * uniforms.wave_amp; }
+    }
+    if abs(uniforms.swirl_angle) > 0.1 {
+        let c = sample_uv - 0.5;
+        let d = length(c);
+        let falloff = smoothstep(uniforms.swirl_radius, 0.0, d);
+        let a = uniforms.swirl_angle * 0.01745329 * falloff;
+        let cs = cos(a); let sn = sin(a);
+        sample_uv = vec2f(c.x * cs - c.y * sn, c.x * sn + c.y * cs) + 0.5;
+    }
+    if abs(uniforms.bulge_strength) > 0.001 {
+        let c = sample_uv - 0.5;
+        let d = length(c) / max(uniforms.bulge_radius, 0.05);
+        let scale = 1.0 + uniforms.bulge_strength * (1.0 - clamp(d, 0.0, 1.0));
+        sample_uv = c / scale + 0.5;
     }
 
     // --- Downsample (lossy video look) ---
@@ -308,5 +353,22 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
         rgb += grain;
     }
 
-    return vec4f(clamp(rgb, vec3f(0.0), vec3f(1.0)), color.a);
+    // --- Chroma key (write alpha so lower layers show through) ---
+    var out_alpha = color.a;
+    if uniforms.chroma_enable > 0.5 {
+        let key = vec3f(uniforms.chroma_color_r, uniforms.chroma_color_g, uniforms.chroma_color_b); // sRGB 0..1
+        let px = linear_to_srgb(clamp(color.rgb, vec3f(0.0), vec3f(1.0))); // raw sample -> sRGB
+        let key_hsl = rgb_to_hsl(key);
+        let px_hsl = rgb_to_hsl(px);
+        var dh = abs(px_hsl.x - key_hsl.x);
+        dh = min(dh, 1.0 - dh); // hue wraps
+        let dist = length(vec2f(dh * 2.0, px_hsl.y - key_hsl.y));
+        let k = smoothstep(uniforms.chroma_threshold, uniforms.chroma_threshold + uniforms.chroma_smoothness + 0.001, dist);
+        out_alpha = out_alpha * k;
+        // spill: pull toward grey where we're near the key hue
+        let luma = dot(rgb, vec3f(0.299, 0.587, 0.114));
+        rgb = mix(vec3f(luma), rgb, mix(1.0, k, uniforms.chroma_spill));
+    }
+
+    return vec4f(clamp(rgb, vec3f(0.0), vec3f(1.0)), out_alpha);
 }

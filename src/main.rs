@@ -301,6 +301,76 @@ impl App {
                                 layer.effects.invert = if b { 1.0 } else { 0.0 };
                             }
                         }
+                        "wave_amp" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.wave_amp = (v as f32).clamp(0.0, 0.1);
+                            }
+                        }
+                        "wave_freq" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.wave_freq = (v as f32).clamp(0.0, 50.0);
+                            }
+                        }
+                        "wave_speed" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.wave_speed = (v as f32).clamp(0.0, 10.0);
+                            }
+                        }
+                        "wave_axis" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.wave_axis = (v as f32).clamp(0.0, 2.0);
+                            } else if let Some(s) = value.as_str() {
+                                layer.effects.wave_axis = s.parse::<f32>().unwrap_or(0.0).clamp(0.0, 2.0);
+                            }
+                        }
+                        "swirl_angle" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.swirl_angle = (v as f32).clamp(-720.0, 720.0);
+                            }
+                        }
+                        "swirl_radius" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.swirl_radius = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "bulge_strength" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.bulge_strength = (v as f32).clamp(-1.0, 1.0);
+                            }
+                        }
+                        "bulge_radius" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.bulge_radius = (v as f32).clamp(0.05, 1.0);
+                            }
+                        }
+                        "chroma_enable" => {
+                            if let Some(b) = value.as_bool() {
+                                layer.effects.chroma_enable = if b { 1.0 } else { 0.0 };
+                            }
+                        }
+                        "chroma_threshold" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.chroma_threshold = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "chroma_smoothness" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.chroma_smoothness = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "chroma_spill" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.chroma_spill = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "chroma_color" => {
+                            if let Some(s) = value.as_str() {
+                                let (r, g, b) = hex_to_rgb01(s);
+                                layer.effects.chroma_color_r = r;
+                                layer.effects.chroma_color_g = g;
+                                layer.effects.chroma_color_b = b;
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -468,6 +538,23 @@ impl App {
                 rgb_split: l.effects.rgb_split,
                 posterize: l.effects.posterize,
                 invert: l.effects.invert > 0.5,
+                wave_amp: l.effects.wave_amp,
+                wave_freq: l.effects.wave_freq,
+                wave_speed: l.effects.wave_speed,
+                wave_axis: l.effects.wave_axis,
+                swirl_angle: l.effects.swirl_angle,
+                swirl_radius: l.effects.swirl_radius,
+                bulge_strength: l.effects.bulge_strength,
+                bulge_radius: l.effects.bulge_radius,
+                chroma_enable: l.effects.chroma_enable > 0.5,
+                chroma_threshold: l.effects.chroma_threshold,
+                chroma_smoothness: l.effects.chroma_smoothness,
+                chroma_spill: l.effects.chroma_spill,
+                chroma_color: rgb01_to_hex(
+                    l.effects.chroma_color_r,
+                    l.effects.chroma_color_g,
+                    l.effects.chroma_color_b,
+                ),
             }).collect(),
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())
@@ -496,6 +583,26 @@ impl App {
         }
         let _ = self.web_state.tx.send(serde_json::to_string(&snapshot).unwrap_or_default());
     }
+}
+
+/// Parse a `#rrggbb` hex color into sRGB 0..1 components.
+fn hex_to_rgb01(hex: &str) -> (f32, f32, f32) {
+    let h = hex.trim_start_matches('#');
+    if h.len() == 6 {
+        if let Ok(n) = u32::from_str_radix(h, 16) {
+            let r = ((n >> 16) & 0xff) as f32 / 255.0;
+            let g = ((n >> 8) & 0xff) as f32 / 255.0;
+            let b = (n & 0xff) as f32 / 255.0;
+            return (r, g, b);
+        }
+    }
+    (0.0, 1.0, 0.0) // default green
+}
+
+/// Format sRGB 0..1 components into a `#rrggbb` hex string.
+fn rgb01_to_hex(r: f32, g: f32, b: f32) -> String {
+    let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", to_u8(r), to_u8(g), to_u8(b))
 }
 
 /// Scan a directory for video files, returning sorted list of paths.

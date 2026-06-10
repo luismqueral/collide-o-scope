@@ -1,5 +1,5 @@
 /// GPU-side effect parameters, uploaded as a uniform buffer each frame.
-/// Must be 16-byte aligned (96 bytes total = 6 × vec4).
+/// Must be 16-byte aligned (144 bytes total = 9 × vec4).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct EffectUniforms {
@@ -27,9 +27,26 @@ pub struct EffectUniforms {
     pub breathe_rotation: f32, // 0.0 = off, 0.0..2.0 (degrees)
     pub breathe_position: f32, // 0.0 = off, 0.0..0.02 (drift)
     pub vignette: f32,         // 0.0 = off, 0.0..1.5
-    // vec4 #6 — Analog: color drift
+    // vec4 #6 — Analog: color drift + Warp: wave
     pub color_drift: f32,     // 0.0 = off, 0.0..0.02 (per-frame random aberration)
-    pub _pad: [f32; 3],
+    pub wave_amp: f32,        // 0.0 = off, 0.0..0.10 (UV displacement amplitude)
+    pub wave_freq: f32,       // wave cycles across the frame
+    pub wave_speed: f32,      // scroll speed (multiplies time)
+    // vec4 #7 — Warp: wave axis + swirl + bulge strength
+    pub wave_axis: f32,       // 0 = horizontal, 1 = vertical, 2 = both
+    pub swirl_angle: f32,     // -720..720 degrees at center (0 = off)
+    pub swirl_radius: f32,    // 0..1 radius of influence (UV)
+    pub bulge_strength: f32,  // -1..1 (+ bulge / - pinch, 0 = off)
+    // vec4 #8 — Warp: bulge radius + Chroma: enable/threshold/smoothness
+    pub bulge_radius: f32,    // 0..1 extent of the lens
+    pub chroma_enable: f32,   // 0.0 = off, 1.0 = key on
+    pub chroma_threshold: f32,// 0..1 how close to key color counts as keyed
+    pub chroma_smoothness: f32,// 0..1 soft edge / feather past threshold
+    // vec4 #9 — Chroma: spill + key color (sRGB 0..1)
+    pub chroma_spill: f32,    // 0..1 suppress residual key tint
+    pub chroma_color_r: f32,  // key color red (sRGB 0..1)
+    pub chroma_color_g: f32,  // key color green (sRGB 0..1)
+    pub chroma_color_b: f32,  // key color blue (sRGB 0..1)
 }
 
 impl Default for EffectUniforms {
@@ -55,7 +72,21 @@ impl Default for EffectUniforms {
             breathe_position: 0.0,
             vignette: 0.0,
             color_drift: 0.0,
-            _pad: [0.0; 3],
+            wave_amp: 0.0,
+            wave_freq: 8.0,
+            wave_speed: 1.0,
+            wave_axis: 0.0,
+            swirl_angle: 0.0,
+            swirl_radius: 0.5,
+            bulge_strength: 0.0,
+            bulge_radius: 0.5,
+            chroma_enable: 0.0,
+            chroma_threshold: 0.4,
+            chroma_smoothness: 0.1,
+            chroma_spill: 0.0,
+            chroma_color_r: 0.0,
+            chroma_color_g: 1.0,
+            chroma_color_b: 0.0,
         }
     }
 }

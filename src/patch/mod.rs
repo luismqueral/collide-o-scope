@@ -45,6 +45,17 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
         "opacity" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "layer transparency" }),
         "speed" => Some(ParamMeta { step: 0.25, min: 0.25, max: 4.0, desc: "playback multiplier" }),
         "fps" => Some(ParamMeta { step: 1.0, min: 1.0, max: 60.0, desc: "decode frame rate" }),
+        "wave_amp" => Some(ParamMeta { step: 0.005, min: 0.0, max: 0.1, desc: "wave displacement" }),
+        "wave_freq" => Some(ParamMeta { step: 1.0, min: 0.0, max: 50.0, desc: "wave cycles" }),
+        "wave_speed" => Some(ParamMeta { step: 0.5, min: 0.0, max: 10.0, desc: "wave scroll speed" }),
+        "wave_axis" => Some(ParamMeta { step: 1.0, min: 0.0, max: 2.0, desc: "0=horiz 1=vert 2=both" }),
+        "swirl_angle" => Some(ParamMeta { step: 10.0, min: -720.0, max: 720.0, desc: "vortex degrees" }),
+        "swirl_radius" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "vortex extent" }),
+        "bulge_strength" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "+bulge / -pinch" }),
+        "bulge_radius" => Some(ParamMeta { step: 0.05, min: 0.05, max: 1.0, desc: "lens extent" }),
+        "chroma_threshold" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "key tolerance" }),
+        "chroma_smoothness" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "key feather" }),
+        "chroma_spill" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "key spill suppress" }),
         _ => None,
     }
 }
@@ -218,7 +229,44 @@ pub struct EffectsConfig {
     pub vignette: f32,
     #[serde(default)]
     pub color_drift: f32,
+    // Warp
+    #[serde(default)]
+    pub wave_amp: f32,
+    #[serde(default = "default_wave_freq")]
+    pub wave_freq: f32,
+    #[serde(default = "one")]
+    pub wave_speed: f32,
+    #[serde(default)]
+    pub wave_axis: f32,
+    #[serde(default)]
+    pub swirl_angle: f32,
+    #[serde(default = "default_half")]
+    pub swirl_radius: f32,
+    #[serde(default)]
+    pub bulge_strength: f32,
+    #[serde(default = "default_half")]
+    pub bulge_radius: f32,
+    // Chroma key (color stored as sRGB 0..1)
+    #[serde(default)]
+    pub chroma_enable: bool,
+    #[serde(default = "default_chroma_threshold")]
+    pub chroma_threshold: f32,
+    #[serde(default = "default_chroma_smoothness")]
+    pub chroma_smoothness: f32,
+    #[serde(default)]
+    pub chroma_spill: f32,
+    #[serde(default)]
+    pub chroma_r: f32,
+    #[serde(default = "one")]
+    pub chroma_g: f32,
+    #[serde(default)]
+    pub chroma_b: f32,
 }
+
+fn default_wave_freq() -> f32 { 8.0 }
+fn default_half() -> f32 { 0.5 }
+fn default_chroma_threshold() -> f32 { 0.4 }
+fn default_chroma_smoothness() -> f32 { 0.1 }
 
 impl Default for EffectsConfig {
     fn default() -> Self {
@@ -240,6 +288,21 @@ impl Default for EffectsConfig {
             breathe_position: 0.0,
             vignette: 0.0,
             color_drift: 0.0,
+            wave_amp: 0.0,
+            wave_freq: 8.0,
+            wave_speed: 1.0,
+            wave_axis: 0.0,
+            swirl_angle: 0.0,
+            swirl_radius: 0.5,
+            bulge_strength: 0.0,
+            bulge_radius: 0.5,
+            chroma_enable: false,
+            chroma_threshold: 0.4,
+            chroma_smoothness: 0.1,
+            chroma_spill: 0.0,
+            chroma_r: 0.0,
+            chroma_g: 1.0,
+            chroma_b: 0.0,
         }
     }
 }
@@ -266,6 +329,21 @@ impl EffectsConfig {
             breathe_position: u.breathe_position,
             vignette: u.vignette,
             color_drift: u.color_drift,
+            wave_amp: u.wave_amp,
+            wave_freq: u.wave_freq,
+            wave_speed: u.wave_speed,
+            wave_axis: u.wave_axis,
+            swirl_angle: u.swirl_angle,
+            swirl_radius: u.swirl_radius,
+            bulge_strength: u.bulge_strength,
+            bulge_radius: u.bulge_radius,
+            chroma_enable: u.chroma_enable > 0.5,
+            chroma_threshold: u.chroma_threshold,
+            chroma_smoothness: u.chroma_smoothness,
+            chroma_spill: u.chroma_spill,
+            chroma_r: u.chroma_color_r,
+            chroma_g: u.chroma_color_g,
+            chroma_b: u.chroma_color_b,
         }
     }
 
@@ -287,6 +365,21 @@ impl EffectsConfig {
         u.breathe_position = self.breathe_position.clamp(0.0, 0.02);
         u.vignette = self.vignette.clamp(0.0, 1.5);
         u.color_drift = self.color_drift.clamp(0.0, 0.02);
+        u.wave_amp = self.wave_amp.clamp(0.0, 0.1);
+        u.wave_freq = self.wave_freq.clamp(0.0, 50.0);
+        u.wave_speed = self.wave_speed.clamp(0.0, 10.0);
+        u.wave_axis = self.wave_axis.clamp(0.0, 2.0);
+        u.swirl_angle = self.swirl_angle.clamp(-720.0, 720.0);
+        u.swirl_radius = self.swirl_radius.clamp(0.0, 1.0);
+        u.bulge_strength = self.bulge_strength.clamp(-1.0, 1.0);
+        u.bulge_radius = self.bulge_radius.clamp(0.05, 1.0);
+        u.chroma_enable = if self.chroma_enable { 1.0 } else { 0.0 };
+        u.chroma_threshold = self.chroma_threshold.clamp(0.0, 1.0);
+        u.chroma_smoothness = self.chroma_smoothness.clamp(0.0, 1.0);
+        u.chroma_spill = self.chroma_spill.clamp(0.0, 1.0);
+        u.chroma_color_r = self.chroma_r.clamp(0.0, 1.0);
+        u.chroma_color_g = self.chroma_g.clamp(0.0, 1.0);
+        u.chroma_color_b = self.chroma_b.clamp(0.0, 1.0);
     }
 
     /// Get fields organized into groups for display.
@@ -315,6 +408,25 @@ impl EffectsConfig {
                 ("breathe_rotation", format!("{:.2}", self.breathe_rotation)),
                 ("breathe_position", format!("{:.3}", self.breathe_position)),
             ]),
+            ("warp", vec![
+                ("wave_amp", format!("{:.3}", self.wave_amp)),
+                ("wave_freq", format!("{:.1}", self.wave_freq)),
+                ("wave_speed", format!("{:.2}", self.wave_speed)),
+                ("wave_axis", format!("{:.0}", self.wave_axis)),
+                ("swirl_angle", format!("{:.1}", self.swirl_angle)),
+                ("swirl_radius", format!("{:.2}", self.swirl_radius)),
+                ("bulge_strength", format!("{:.2}", self.bulge_strength)),
+                ("bulge_radius", format!("{:.2}", self.bulge_radius)),
+            ]),
+            ("key", vec![
+                ("chroma_enable", format!("{}", self.chroma_enable)),
+                ("chroma_threshold", format!("{:.2}", self.chroma_threshold)),
+                ("chroma_smoothness", format!("{:.2}", self.chroma_smoothness)),
+                ("chroma_spill", format!("{:.2}", self.chroma_spill)),
+                ("chroma_r", format!("{:.2}", self.chroma_r)),
+                ("chroma_g", format!("{:.2}", self.chroma_g)),
+                ("chroma_b", format!("{:.2}", self.chroma_b)),
+            ]),
         ]
     }
 
@@ -338,6 +450,21 @@ impl EffectsConfig {
             "breathe_position" => { if let Ok(v) = value.parse() { self.breathe_position = v; return true; } }
             "vignette" => { if let Ok(v) = value.parse() { self.vignette = v; return true; } }
             "color_drift" => { if let Ok(v) = value.parse() { self.color_drift = v; return true; } }
+            "wave_amp" => { if let Ok(v) = value.parse() { self.wave_amp = v; return true; } }
+            "wave_freq" => { if let Ok(v) = value.parse() { self.wave_freq = v; return true; } }
+            "wave_speed" => { if let Ok(v) = value.parse() { self.wave_speed = v; return true; } }
+            "wave_axis" => { if let Ok(v) = value.parse() { self.wave_axis = v; return true; } }
+            "swirl_angle" => { if let Ok(v) = value.parse() { self.swirl_angle = v; return true; } }
+            "swirl_radius" => { if let Ok(v) = value.parse() { self.swirl_radius = v; return true; } }
+            "bulge_strength" => { if let Ok(v) = value.parse() { self.bulge_strength = v; return true; } }
+            "bulge_radius" => { if let Ok(v) = value.parse() { self.bulge_radius = v; return true; } }
+            "chroma_enable" => { if let Ok(v) = value.parse() { self.chroma_enable = v; return true; } }
+            "chroma_threshold" => { if let Ok(v) = value.parse() { self.chroma_threshold = v; return true; } }
+            "chroma_smoothness" => { if let Ok(v) = value.parse() { self.chroma_smoothness = v; return true; } }
+            "chroma_spill" => { if let Ok(v) = value.parse() { self.chroma_spill = v; return true; } }
+            "chroma_r" => { if let Ok(v) = value.parse() { self.chroma_r = v; return true; } }
+            "chroma_g" => { if let Ok(v) = value.parse() { self.chroma_g = v; return true; } }
+            "chroma_b" => { if let Ok(v) = value.parse() { self.chroma_b = v; return true; } }
             _ => {}
         }
         false

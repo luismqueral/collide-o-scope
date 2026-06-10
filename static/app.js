@@ -438,6 +438,8 @@ layersList.addEventListener('change', (e) => {
     sendAction({ action: 'set_layer_param', index, param, value: el.value });
   } else if (el.type === 'checkbox') {
     sendAction({ action: 'set_layer_param', index, param, value: el.checked });
+  } else if (el.type === 'color') {
+    sendAction({ action: 'set_layer_param', index, param, value: el.value });
   }
 });
 
@@ -674,6 +676,92 @@ function createLayerCard(layer, index) {
           </div>
         </div>
       </div>
+
+      <div class="fx-group collapsed" data-layer-group="warp">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">WARP</span>
+          <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+        </div>
+        <div class="fx-group-body">
+          <div class="param-row" data-param="wave_amp">
+            <label>Wave Amt</label>
+            <input type="range" min="0" max="0.1" step="0.001" value="${layer.wave_amp}">
+            <span class="value">${formatValue(layer.wave_amp, 0, 0.1, 0.001)}</span>
+          </div>
+          <div class="param-row" data-param="wave_freq">
+            <label>Wave Freq</label>
+            <input type="range" min="0" max="50" step="1" value="${layer.wave_freq}">
+            <span class="value">${formatValue(layer.wave_freq, 0, 50, 1)}</span>
+          </div>
+          <div class="param-row" data-param="wave_speed">
+            <label>Wave Speed</label>
+            <input type="range" min="0" max="10" step="0.1" value="${layer.wave_speed}">
+            <span class="value">${formatValue(layer.wave_speed, 0, 10, 0.1)}</span>
+          </div>
+          <div class="param-row select-row" data-param="wave_axis">
+            <label>Wave Axis</label>
+            <select>
+              <option value="0" ${layer.wave_axis === 0 ? 'selected' : ''}>Horizontal</option>
+              <option value="1" ${layer.wave_axis === 1 ? 'selected' : ''}>Vertical</option>
+              <option value="2" ${layer.wave_axis === 2 ? 'selected' : ''}>Both</option>
+            </select>
+          </div>
+          <div class="param-row" data-param="swirl_angle">
+            <label>Swirl</label>
+            <input type="range" min="-720" max="720" step="5" value="${layer.swirl_angle}">
+            <span class="value">${formatValue(layer.swirl_angle, -720, 720, 5)}</span>
+          </div>
+          <div class="param-row" data-param="swirl_radius">
+            <label>Swirl Rad</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.swirl_radius}">
+            <span class="value">${formatValue(layer.swirl_radius, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="bulge_strength">
+            <label>Bulge</label>
+            <input type="range" min="-1" max="1" step="0.01" value="${layer.bulge_strength}">
+            <span class="value">${formatValue(layer.bulge_strength, -1, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="bulge_radius">
+            <label>Bulge Rad</label>
+            <input type="range" min="0.05" max="1" step="0.01" value="${layer.bulge_radius}">
+            <span class="value">${formatValue(layer.bulge_radius, 0.05, 1, 0.01)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="fx-group collapsed" data-layer-group="key">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">KEY</span>
+        </div>
+        <div class="fx-group-body">
+          <div class="param-row toggle-row" data-param="chroma_enable">
+            <label>Enable</label>
+            <label class="toggle"><input type="checkbox" ${layer.chroma_enable ? 'checked' : ''}><span class="toggle-slider"></span></label>
+          </div>
+          <div class="param-row color-row" data-param="chroma_color">
+            <label>Key Color</label>
+            <input type="color" value="${layer.chroma_color || '#00ff00'}">
+          </div>
+          <div class="param-row" data-param="chroma_threshold">
+            <label>Threshold</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.chroma_threshold}">
+            <span class="value">${formatValue(layer.chroma_threshold, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="chroma_smoothness">
+            <label>Smoothness</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.chroma_smoothness}">
+            <span class="value">${formatValue(layer.chroma_smoothness, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="chroma_spill">
+            <label>Spill</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.chroma_spill}">
+            <span class="value">${formatValue(layer.chroma_spill, 0, 1, 0.01)}</span>
+          </div>
+          <p class="layer-hint">Reveals layers below — use on upper layers.</p>
+        </div>
+      </div>
     </div>
   `;
 
@@ -720,6 +808,7 @@ function updateLayerCard(card, layer, index) {
     const valEl = row.querySelector('.value');
     const checkbox = row.querySelector('input[type="checkbox"]');
     const select = row.querySelector('select');
+    const color = row.querySelector('input[type="color"]');
 
     if (slider && document.activeElement !== slider) {
       slider.value = value;
@@ -730,6 +819,9 @@ function updateLayerCard(card, layer, index) {
     }
     if (select && document.activeElement !== select) {
       select.value = (typeof value === 'string') ? value.toLowerCase() : value;
+    }
+    if (color && document.activeElement !== color && typeof value === 'string') {
+      color.value = value;
     }
   });
 }
