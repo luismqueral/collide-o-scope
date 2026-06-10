@@ -9,8 +9,11 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
+use std::collections::HashMap;
+
 use wgpu::util::DeviceExt;
 
+use crate::automation::Expr;
 use crate::effects::EffectUniforms;
 use crate::layers::BlendMode;
 use crate::ntsc::NtscState;
@@ -106,6 +109,8 @@ struct ExportLayer {
     texture: wgpu::Texture,
     texture_view: wgpu::TextureView,
     effects: EffectUniforms,
+    /// Compiled per-layer automations (param name → expression).
+    automations: HashMap<String, Expr>,
     opacity: f32,
     blend_mode: BlendMode,
     speed: f32,
@@ -390,6 +395,18 @@ fn run_export(
         effects.resolution = [lw as f32, lh as f32];
         layer_cfg.effects.apply_to_uniforms(&mut effects);
 
+        // Compile this layer's automation expressions. A bad formula is skipped
+        // rather than aborting the export.
+        let mut automations = HashMap::new();
+        for (param, src) in &layer_cfg.automations {
+            match Expr::new(src) {
+                Ok(expr) => {
+                    automations.insert(param.clone(), expr);
+                }
+                Err(e) => log::warn!("Export: bad automation '{param}' on layer '{}': {e}", layer_cfg.filename),
+            }
+        }
+
         let blend_mode = match layer_cfg.blend_mode.as_str() {
             "screen" => BlendMode::Screen,
             "multiply" => BlendMode::Multiply,
@@ -402,6 +419,7 @@ fn run_export(
             texture,
             texture_view,
             effects,
+            automations,
             opacity: layer_cfg.opacity,
             blend_mode,
             speed: layer_cfg.speed,
@@ -420,6 +438,12 @@ fn run_export(
     let mut master_effects = EffectUniforms::default();
     master_effects.resolution = [w as f32, h as f32];
     patch.master.apply_to_uniforms(&mut master_effects);
+
+    // Compile master automations (bad formulas are reported and dropped).
+    let (master_automations, master_automation_errors) = patch.compile_master_automations();
+    for (param, e) in &master_automation_errors {
+        log::warn!("Export: bad master automation '{param}': {e}");
+    }
 
     // --- NTSC state ---
     let mut ntsc_state = NtscState::new();
@@ -481,6 +505,12 @@ fn run_export(
         let time = frame_num as f32 * frame_interval;
         master_effects.time = time;
 
+        // Apply master automations for this frame. Uses the same `time` as the
+        // live render loop, so exported video matches the live preview.
+        for (param, expr) in &master_automations {
+            master_effects.set_by_name(param, expr.eval(time));
+        }
+
         // Advance decoders based on each layer's speed/fps
         for (i, layer) in layers.iter_mut().enumerate() {
             if layer.paused || !layer.visible {
@@ -514,6 +544,11 @@ fn run_export(
             }
             // Update layer effects time
             layer.effects.time = time;
+
+            // Apply this layer's automations for the frame.
+            for (param, expr) in &layer.automations {
+                layer.effects.set_by_name(param, expr.eval(time));
+            }
         }
 
         // --- GPU render ---
