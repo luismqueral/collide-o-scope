@@ -79,6 +79,7 @@ struct App {
     // Master content framerate (frame-hold / stutter). 30 = smooth (default).
     master_fps: f32,
     last_content_advance: Instant,
+    content_tick: u64,
     content_time: f32,
     // Master output size: aspect ratio label + quality (shorter-side px).
     output_ratio: String,
@@ -129,6 +130,7 @@ impl App {
             start_time: Instant::now(),
             master_fps: 30.0,
             last_content_advance: Instant::now(),
+            content_tick: 0,
             content_time: 0.0,
             output_ratio: "16:9".to_string(),
             output_quality: 1080,
@@ -1229,27 +1231,30 @@ impl ApplicationHandler for App {
                 let now = Instant::now();
                 if now - self.last_frame_time >= FRAME_DURATION {
                     self.last_frame_time = now;
+                    self.content_tick = self.content_tick.wrapping_add(1);
 
-                    // Master content clock: gate content advancement (decode + the
-                    // animated `time` uniform) at master_fps so the look stutters
-                    // without making the web UI laggy (drain/push/present stay below).
-                    // At the default 30 this short-circuits to advance every frame.
-                    let content_interval = Duration::from_secs_f32(1.0 / self.master_fps);
-                    let advance_content = self.master_fps >= TARGET_FPS as f32
-                        || now - self.last_content_advance >= content_interval;
+                    // Frame-hold / stutter: content (decode + the animated `time`
+                    // uniform) advances every `stride` render ticks. Only 30/k rates
+                    // land evenly on the fixed 30fps tick grid, so the UI exposes
+                    // those presets; stride = round(30 / master_fps). At 30 this is 1
+                    // (advance every tick); web drain/push/present stay below the gate.
+                    let stride = (TARGET_FPS as f32 / self.master_fps).round().max(1.0) as u64;
+                    let advance_content = self.content_tick % stride == 0;
                     if advance_content {
+                        // Real wall-clock time since the last content advance — drives
+                        // catch-up decode so footage tracks the same clock as
+                        // content_time / the animated `time` uniform (stays in sync
+                        // even when a tick runs long, e.g. the blocking VHS readback).
+                        let dt = (now - self.last_content_advance).as_secs_f32();
                         self.last_content_advance = now;
                         self.content_time = self.start_time.elapsed().as_secs_f32();
 
-                        // Decode next frame for each layer (per-layer timing, speed, pause)
+                        // Advance each layer's footage by the real elapsed time.
                         if !self.master_paused {
                             for layer in &mut self.layers {
-                                if !layer.paused && layer.ready_for_frame() {
-                                    if let Some(frame_data) = layer.decoder.next_frame() {
-                                        let renderer = self.renderer.as_ref().unwrap();
-                                        layer.upload_frame(&renderer.queue, &frame_data);
-                                    }
-                                    layer.last_decode = Instant::now();
+                                if !layer.paused {
+                                    let queue = &self.renderer.as_ref().unwrap().queue;
+                                    layer.advance(dt, queue);
                                 }
                             }
                         }

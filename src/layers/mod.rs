@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use crate::effects::EffectUniforms;
 use crate::video::VideoDecoder;
 
@@ -48,6 +46,10 @@ impl BlendMode {
     }
 }
 
+/// Maximum frames to decode in one catch-up burst. Prevents a long stall (e.g. a
+/// slow VHS tick) from fast-forwarding the footage on the next tick.
+const MAX_CATCHUP_FRAMES: u32 = 4;
+
 pub struct Layer {
     /// Stable identifier assigned by `App::add_layer`, used by the web UI to
     /// track cards across reorders. Survives MoveLayer/RemoveLayer.
@@ -64,9 +66,9 @@ pub struct Layer {
     pub width: u32,
     pub height: u32,
     // Transport
-    pub speed: f32,           // 0.25..4.0 playback multiplier (1.0 = normal)
-    pub fps: f32,             // target decode FPS (e.g. 30.0)
-    pub last_decode: Instant, // tracks per-layer frame timing
+    pub speed: f32,             // 0.25..4.0 playback multiplier (1.0 = normal)
+    pub fps: f32,               // target decode FPS (e.g. 30.0)
+    pub frame_accumulator: f32, // seconds of footage owed, drained by advance()
 }
 
 impl Layer {
@@ -118,15 +120,40 @@ impl Layer {
             height,
             speed: 1.0,
             fps: 30.0,
-            last_decode: Instant::now(),
+            frame_accumulator: 0.0,
         })
     }
 
-    /// Returns true if enough time has elapsed for this layer to decode its next frame,
-    /// accounting for speed and fps settings.
-    pub fn ready_for_frame(&self) -> bool {
-        let interval = std::time::Duration::from_secs_f32(1.0 / (self.fps * self.speed));
-        self.last_decode.elapsed() >= interval
+    /// Advance this layer's footage by `dt` real seconds (scaled by `speed`).
+    /// Decodes/skips as many frames as elapsed time dictates, uploading only the
+    /// last one (intermediate frames are skipped on screen). This keeps footage on
+    /// the same wall-clock as the animated `time` uniform, so they stay in sync even
+    /// when a tick runs long (e.g. the blocking VHS readback). Mirrors the export
+    /// accumulator in render_export.rs, but capped for live use.
+    pub fn advance(&mut self, dt: f32, queue: &wgpu::Queue) {
+        self.frame_accumulator += dt * self.speed;
+        let interval = 1.0 / self.fps; // seconds per source frame
+        let mut n = (self.frame_accumulator / interval).floor() as u32;
+        if n == 0 {
+            return;
+        }
+        if n > MAX_CATCHUP_FRAMES {
+            // Discard the backlog so a long stall doesn't fast-forward next tick.
+            n = MAX_CATCHUP_FRAMES;
+            self.frame_accumulator = 0.0;
+        } else {
+            self.frame_accumulator -= n as f32 * interval;
+        }
+        // Decode n frames; only the last is shown (skips intermediate frames).
+        let mut last: Option<Vec<u8>> = None;
+        for _ in 0..n {
+            if let Some(frame) = self.decoder.next_frame() {
+                last = Some(frame);
+            }
+        }
+        if let Some(frame) = last {
+            self.upload_frame(queue, &frame);
+        }
     }
 
     pub fn upload_frame(&self, queue: &wgpu::Queue, rgba_data: &[u8]) {

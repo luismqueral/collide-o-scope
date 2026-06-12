@@ -97,24 +97,14 @@ document.querySelectorAll('.param-row[data-param]').forEach((row) => {
 });
 
 // --- Master content framerate (frame-hold / stutter) ---
-// Distinct from set_param effects: routed via its own action so the generic
-// loop above (which sends set_param) doesn't pick it up.
+// Discrete presets, not a slider: only 30/k rates land evenly on the fixed 30fps
+// render tick grid, so a continuous value would lie (e.g. 29 actually plays at 15).
+// Routed via its own action so the generic set_param loop above ignores it.
 const fpsRow = document.querySelector('.param-row[data-master-param="framerate"]');
 if (fpsRow) {
-  const min = parseFloat(fpsRow.dataset.min);
-  const max = parseFloat(fpsRow.dataset.max);
-  const step = parseFloat(fpsRow.dataset.step);
-  const slider = fpsRow.querySelector('input[type="range"]');
-  const valueEl = fpsRow.querySelector('.value');
-  slider.min = min;
-  slider.max = max;
-  slider.step = step;
-  slider.value = max; // default 30 = smooth
-  valueEl.textContent = formatValue(max, min, max, step);
-  slider.addEventListener('input', () => {
-    const v = parseFloat(slider.value);
-    valueEl.textContent = formatValue(v, min, max, step);
-    sendAction({ action: 'set_master_framerate', value: v });
+  const select = fpsRow.querySelector('select');
+  select.addEventListener('change', () => {
+    sendAction({ action: 'set_master_framerate', value: parseFloat(select.value) });
   });
 }
 
@@ -361,14 +351,9 @@ function syncFramerate(framerate) {
   if (framerate == null) return;
   const row = document.querySelector('.param-row[data-master-param="framerate"]');
   if (!row) return;
-  const slider = row.querySelector('input[type="range"]');
-  const valueEl = row.querySelector('.value');
-  if (slider && valueEl && document.activeElement !== slider) {
-    slider.value = framerate;
-    const min = parseFloat(row.dataset.min);
-    const max = parseFloat(row.dataset.max);
-    const step = parseFloat(row.dataset.step);
-    valueEl.textContent = formatValue(framerate, min, max, step);
+  const select = row.querySelector('select');
+  if (select && document.activeElement !== select) {
+    select.value = String(framerate);
   }
 }
 
