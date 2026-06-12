@@ -1331,26 +1331,30 @@ impl ApplicationHandler for App {
                     renderer.render_layers(&mut encoder, &self.layers);
                     renderer.render_master_effects(&mut encoder, &self.master_effects);
 
-                    // NTSC/VHS post-process (CPU-based, requires GPU sync)
+                    // NTSC/VHS post-process at half resolution. The GPU does the
+                    // down/upscale (bilinear); ntsc-rs runs on the half-res pixels,
+                    // so only ~1/4 the data crosses the bus and there are no CPU
+                    // resampling loops. Keeps the live path off slow-motion.
                     if self.ntsc_state.params.enabled {
-                        // Submit current GPU work so composite_textures[0] is ready
+                        // GPU: downscale composite[0] → half texture, then submit so it's ready.
+                        renderer.downscale_to_half(&mut encoder);
                         renderer.queue.submit(std::iter::once(encoder.finish()));
 
-                        // Read back, process, write back
-                        let mut pixels = renderer.readback_composite();
-                        self.ntsc_state.apply(
-                            &mut pixels,
-                            renderer.output_width,
-                            renderer.output_height,
-                        );
-                        renderer.write_composite(&pixels);
+                        let half_w = (renderer.output_width / 2).max(1);
+                        let half_h = (renderer.output_height / 2).max(1);
 
-                        // Create fresh encoder for the egui pass
+                        // CPU: read half-res, run ntsc-rs at half-res, write back.
+                        let mut pixels = renderer.readback_half();
+                        self.ntsc_state.apply_full_res(&mut pixels, half_w, half_h);
+                        renderer.write_half(&pixels);
+
+                        // Fresh encoder: GPU upscale half → composite[0]; egui pass appends after.
                         encoder = renderer.device.create_command_encoder(
                             &wgpu::CommandEncoderDescriptor {
                                 label: Some("Post-NTSC Encoder"),
                             },
                         );
+                        renderer.upscale_half_to_composite(&mut encoder);
                     }
 
                     let egui_renderer = self.egui_renderer.as_mut().unwrap();
