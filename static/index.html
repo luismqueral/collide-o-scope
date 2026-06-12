@@ -158,8 +158,15 @@
               <button class="group-reset" data-group="motion">reset</button>
             </div>
             <div class="fx-group-body">
-              <div class="param-row" data-master-param="framerate" data-min="1" data-max="30" data-step="1">
-                <label>Framerate</label><input type="range"><span class="value">30</span>
+              <div class="param-row select-row" data-master-param="framerate">
+                <label>Framerate</label>
+                <select>
+                  <option value="30" selected>30 &middot; smooth</option>
+                  <option value="15">15</option>
+                  <option value="10">10</option>
+                  <option value="7.5">7.5</option>
+                  <option value="6">6</option>
+                </select>
               </div>
               <div class="param-row" data-param="breathe_scale" data-min="0" data-max="0.05" data-step="0.001">
                 <label>Bth Scale</label><input type="range"><span class="value">0</span>

@@ -1,5 +1,5 @@
 /// GPU-side effect parameters, uploaded as a uniform buffer each frame.
-/// Must be 16-byte aligned (208 bytes total = 13 × vec4).
+/// Must be 16-byte aligned (224 bytes total = 14 × vec4).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct EffectUniforms {
@@ -67,6 +67,11 @@ pub struct EffectUniforms {
     pub layer_x: f32,         // -1..1 horizontal offset (+ = right), 0 = centered
     pub layer_y: f32,         // -1..1 vertical offset (+ = up), 0 = centered
     pub layer_scale: f32,     // 0.1..4 zoom (1.0 = unchanged)
+    // vec4 #14 — Fit mode (computed scale on CPU) + pad
+    pub fit_mode: f32,        // 0=stretch (default), 1=fit/contain, 2=fill/cover
+    pub fit_scale_x: f32,     // computed per-frame from fit_mode + source/canvas aspects
+    pub fit_scale_y: f32,
+    pub _pad_fit: f32,
 }
 
 impl Default for EffectUniforms {
@@ -123,6 +128,10 @@ impl Default for EffectUniforms {
             layer_x: 0.0,
             layer_y: 0.0,
             layer_scale: 1.0,
+            fit_mode: 0.0,
+            fit_scale_x: 1.0,
+            fit_scale_y: 1.0,
+            _pad_fit: 0.0,
         }
     }
 }

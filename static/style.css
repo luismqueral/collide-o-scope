@@ -424,6 +424,21 @@ body {
 
 .layer-fx-rand:hover { color: var(--accent); }
 
+/* Per-group reset link. The header's .group-label has flex:1, so it pushes
+   the reset (and randomize, when present) to the right edge — same as the
+   master FX groups. Mirrors .group-reset's text-link look. */
+.layer-fx-reset {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.layer-fx-reset:hover { color: var(--accent); }
+
 /* === RIGHT: TRANSPORT + MASTER FX === */
 .col-right {
   display: flex;
@@ -490,6 +505,27 @@ body {
   border-radius: 4px;
   overflow: hidden;
 }
+
+/* Master FX panel: render its groups flat inside one bordered container with
+   thin dividers between them — same treatment as the per-layer fx-groups,
+   instead of each group being its own box. #master-fx is the scroll container
+   (.fx-scroll), so keep it scrollable (no overflow:hidden) and drop its
+   horizontal padding so the dividers span edge-to-edge. */
+#master-fx {
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+#master-fx .fx-group {
+  background: none;
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+#master-fx .fx-group:last-child { border-bottom: none; }
+#master-fx .fx-group-body { border-top: none; }
 
 .fx-group-header {
   display: flex;

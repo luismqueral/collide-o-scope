@@ -267,6 +267,8 @@ pub struct LayerSnapshot {
     pub layer_x: f32,
     pub layer_y: f32,
     pub layer_scale: f32,
+    /// Fit mode: 0=stretch, 1=fit/contain, 2=fill/cover
+    pub fit_mode: u32,
 }
 
 /// Actions the browser can request (processed by the render loop).
@@ -300,6 +302,9 @@ pub enum WebAction {
     /// Reset a specific effect group (digital, analog, motion)
     #[serde(rename = "reset_group")]
     ResetGroup { group: String },
+    /// Reset a specific per-layer effect group (blend, color, digital, warp, key, shift, transform)
+    #[serde(rename = "reset_layer_group")]
+    ResetLayerGroup { index: usize, group: String },
     /// Set a per-layer parameter (opacity, speed, blend_mode)
     #[serde(rename = "set_layer_param")]
     SetLayerParam { index: usize, param: String, value: serde_json::Value },

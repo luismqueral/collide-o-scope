@@ -62,6 +62,11 @@ struct Uniforms {
     layer_x: f32,
     layer_y: f32,
     layer_scale: f32,
+    // Fit mode (computed scale on CPU) + pad
+    fit_mode: f32,
+    fit_scale_x: f32,
+    fit_scale_y: f32,
+    _pad_fit: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -267,12 +272,16 @@ fn linear_to_srgb(c: vec3f) -> vec3f {
 fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
     var sample_uv = uv;
 
-    // --- Layer transform: scale + position. Areas outside the moved/scaled
+    // --- Layer transform: fit + scale + position. Areas outside the moved/scaled
     // frame become transparent (out_alpha = 0 at the end) so the layers below
-    // show through. Defaults (scale 1, x/y 0) skip this entirely. ---
+    // show through. Defaults (scale 1, x/y 0, fit_scale 1) skip this entirely.
+    // fit_scale > 1 (Fit/contain) pushes UVs out of bounds -> transparent bars;
+    // fit_scale < 1 (Fill/cover) samples a sub-region -> crop. ---
     var layer_oob = false;
-    if uniforms.layer_scale != 1.0 || uniforms.layer_x != 0.0 || uniforms.layer_y != 0.0 {
+    if uniforms.layer_scale != 1.0 || uniforms.layer_x != 0.0 || uniforms.layer_y != 0.0
+       || uniforms.fit_scale_x != 1.0 || uniforms.fit_scale_y != 1.0 {
         sample_uv = (sample_uv - 0.5) / max(uniforms.layer_scale, 0.01) + 0.5;
+        sample_uv = (sample_uv - 0.5) * vec2f(uniforms.fit_scale_x, uniforms.fit_scale_y) + 0.5;
         sample_uv += vec2f(-uniforms.layer_x, uniforms.layer_y); // +x = right, +y = up
         if sample_uv.x < 0.0 || sample_uv.x > 1.0 || sample_uv.y < 0.0 || sample_uv.y > 1.0 {
             layer_oob = true;

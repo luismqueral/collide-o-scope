@@ -54,6 +54,15 @@ pub struct Renderer {
     // Persistent staging buffer for NTSC readback (avoids per-frame allocation)
     readback_buffer: Option<wgpu::Buffer>,
     readback_buffer_size: u64,
+
+    // Half-res blit pipeline + intermediate texture for the live NTSC pass.
+    // The live VHS post-process runs on half-res pixels: composite[0] is
+    // downscaled into ntsc_half_texture (GPU bilinear), read back, processed by
+    // ntsc-rs, written back, then upscaled to composite[0] for display.
+    blit_pipeline: wgpu::RenderPipeline,
+    blit_bind_group_layout: wgpu::BindGroupLayout,
+    ntsc_half_texture: wgpu::Texture,
+    ntsc_half_view: wgpu::TextureView,
 }
 
 impl Renderer {
@@ -299,6 +308,71 @@ impl Renderer {
             cache: None,
         });
 
+        // --- Blit pipeline (passthrough; used as GPU bilinear down/upscale for NTSC) ---
+        let blit_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Blit BGL"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let blit_fragment = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Blit Fragment"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/blit.wgsl").into()),
+        });
+
+        let blit_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Blit Pipeline Layout"),
+                bind_group_layouts: &[Some(&blit_bind_group_layout)],
+                immediate_size: 0,
+            });
+
+        let blit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Blit Pipeline"),
+            layout: Some(&blit_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &vertex_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &blit_fragment,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         // --- Three composite textures ---
         let tex_usage =
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST;
@@ -344,6 +418,26 @@ impl Renderer {
         });
         let feedback_view = feedback_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        // Half-res intermediate for the live NTSC pass.
+        let half_w = (output_width / 2).max(1);
+        let half_h = (output_height / 2).max(1);
+        let ntsc_half_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("NTSC Half"),
+            size: wgpu::Extent3d {
+                width: half_w,
+                height: half_h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: tex_usage,
+            view_formats: &[],
+        });
+        let ntsc_half_view =
+            ntsc_half_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         Self {
             surface,
             device,
@@ -365,6 +459,10 @@ impl Renderer {
             output_height,
             readback_buffer: None,
             readback_buffer_size: 0,
+            blit_pipeline,
+            blit_bind_group_layout,
+            ntsc_half_texture,
+            ntsc_half_view,
         }
     }
 
@@ -430,11 +528,33 @@ impl Renderer {
         });
         let feedback_view = feedback_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        // Half-res NTSC intermediate tracks the new size.
+        let half_w = (w / 2).max(1);
+        let half_h = (h / 2).max(1);
+        let ntsc_half_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("NTSC Half"),
+            size: wgpu::Extent3d {
+                width: half_w,
+                height: half_h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: tex_usage,
+            view_formats: &[],
+        });
+        let ntsc_half_view =
+            ntsc_half_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         self.composite_textures = composite_textures;
         self.composite_views = composite_views;
         self.output_view = output_view;
         self.feedback_texture = feedback_texture;
         self.feedback_view = feedback_view;
+        self.ntsc_half_texture = ntsc_half_texture;
+        self.ntsc_half_view = ntsc_half_view;
         self.output_width = w;
         self.output_height = h;
         // readback_buffer auto-grows in readback_composite(); no reset needed.
@@ -757,12 +877,10 @@ impl Renderer {
         );
     }
 
-    /// Read composite_textures[0] back to CPU as RGBA bytes.
-    /// Submits current work to the GPU and blocks until readback completes.
-    /// Uses a persistent staging buffer to avoid per-frame allocation.
-    pub fn readback_composite(&mut self) -> Vec<u8> {
-        let w = self.output_width;
-        let h = self.output_height;
+    /// Read a texture back to CPU as tightly-packed RGBA bytes (w*4 per row).
+    /// Submits a copy to the GPU and blocks until it completes. Uses a persistent
+    /// staging buffer (auto-grows) to avoid per-frame allocation.
+    fn readback_texture(&mut self, tex: &wgpu::Texture, w: u32, h: u32) -> Vec<u8> {
         // Row must be aligned to 256 bytes for wgpu buffer copy
         let bytes_per_row = (w * 4 + 255) & !255;
         let buffer_size = (bytes_per_row * h) as u64;
@@ -785,7 +903,7 @@ impl Renderer {
 
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
-                texture: &self.composite_textures[0],
+                texture: tex,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -834,6 +952,22 @@ impl Renderer {
         pixels
     }
 
+    /// Read composite_textures[0] back to CPU as RGBA bytes (full output res).
+    pub fn readback_composite(&mut self) -> Vec<u8> {
+        let (w, h) = (self.output_width, self.output_height);
+        // Clone the Arc-backed texture handle so the &self borrow ends before &mut self.
+        let tex = self.composite_textures[0].clone();
+        self.readback_texture(&tex, w, h)
+    }
+
+    /// Read the half-res NTSC texture back to CPU as RGBA bytes.
+    pub fn readback_half(&mut self) -> Vec<u8> {
+        let w = (self.output_width / 2).max(1);
+        let h = (self.output_height / 2).max(1);
+        let tex = self.ntsc_half_texture.clone();
+        self.readback_texture(&tex, w, h)
+    }
+
     /// Write RGBA pixels back to composite_textures[0].
     pub fn write_composite(&self, pixels: &[u8]) {
         let w = self.output_width;
@@ -857,5 +991,83 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
+    }
+
+    /// Write RGBA pixels back into the half-res NTSC texture.
+    pub fn write_half(&self, pixels: &[u8]) {
+        let w = (self.output_width / 2).max(1);
+        let h = (self.output_height / 2).max(1);
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.ntsc_half_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 4),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    /// One-shot passthrough blit: render `src_view` into `dst_view`. The shared
+    /// sampler is Linear, so this acts as a GPU bilinear down/upscale when the
+    /// source and target differ in size.
+    fn blit(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        src_view: &wgpu::TextureView,
+        dst_view: &wgpu::TextureView,
+    ) {
+        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Blit BG"),
+            layout: &self.blit_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(src_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Blit Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: dst_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.blit_pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// Downscale composite_textures[0] into the half-res NTSC texture (GPU bilinear).
+    pub fn downscale_to_half(&self, encoder: &mut wgpu::CommandEncoder) {
+        let src = self.composite_textures[0].create_view(&wgpu::TextureViewDescriptor::default());
+        self.blit(encoder, &src, &self.ntsc_half_view);
+    }
+
+    /// Upscale the half-res NTSC texture back into composite_textures[0] (GPU bilinear).
+    pub fn upscale_half_to_composite(&self, encoder: &mut wgpu::CommandEncoder) {
+        self.blit(encoder, &self.ntsc_half_view, &self.output_view);
     }
 }

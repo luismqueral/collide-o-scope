@@ -97,24 +97,14 @@ document.querySelectorAll('.param-row[data-param]').forEach((row) => {
 });
 
 // --- Master content framerate (frame-hold / stutter) ---
-// Distinct from set_param effects: routed via its own action so the generic
-// loop above (which sends set_param) doesn't pick it up.
+// Discrete presets, not a slider: only 30/k rates land evenly on the fixed 30fps
+// render tick grid, so a continuous value would lie (e.g. 29 actually plays at 15).
+// Routed via its own action so the generic set_param loop above ignores it.
 const fpsRow = document.querySelector('.param-row[data-master-param="framerate"]');
 if (fpsRow) {
-  const min = parseFloat(fpsRow.dataset.min);
-  const max = parseFloat(fpsRow.dataset.max);
-  const step = parseFloat(fpsRow.dataset.step);
-  const slider = fpsRow.querySelector('input[type="range"]');
-  const valueEl = fpsRow.querySelector('.value');
-  slider.min = min;
-  slider.max = max;
-  slider.step = step;
-  slider.value = max; // default 30 = smooth
-  valueEl.textContent = formatValue(max, min, max, step);
-  slider.addEventListener('input', () => {
-    const v = parseFloat(slider.value);
-    valueEl.textContent = formatValue(v, min, max, step);
-    sendAction({ action: 'set_master_framerate', value: v });
+  const select = fpsRow.querySelector('select');
+  select.addEventListener('change', () => {
+    sendAction({ action: 'set_master_framerate', value: parseFloat(select.value) });
   });
 }
 
@@ -361,14 +351,9 @@ function syncFramerate(framerate) {
   if (framerate == null) return;
   const row = document.querySelector('.param-row[data-master-param="framerate"]');
   if (!row) return;
-  const slider = row.querySelector('input[type="range"]');
-  const valueEl = row.querySelector('.value');
-  if (slider && valueEl && document.activeElement !== slider) {
-    slider.value = framerate;
-    const min = parseFloat(row.dataset.min);
-    const max = parseFloat(row.dataset.max);
-    const step = parseFloat(row.dataset.step);
-    valueEl.textContent = formatValue(framerate, min, max, step);
+  const select = row.querySelector('select');
+  if (select && document.activeElement !== select) {
+    select.value = String(framerate);
   }
 }
 
@@ -412,7 +397,11 @@ layersList.addEventListener('click', (e) => {
   if (!card) return;
   const index = parseInt(card.dataset.index);
 
-  if (e.target.closest('.layer-fx-rand')) {
+  if (e.target.closest('.layer-fx-reset')) {
+    e.stopPropagation();
+    const fxGroup = e.target.closest('.fx-group');
+    sendAction({ action: 'reset_layer_group', index, group: fxGroup.dataset.layerGroup });
+  } else if (e.target.closest('.layer-fx-rand')) {
     e.stopPropagation();
     randomizeLayerGroup(e.target.closest('.fx-group'), index);
   } else if (e.target.closest('.layer-thumb-wrap')) {
@@ -468,7 +457,9 @@ layersList.addEventListener('change', (e) => {
   const index = parseInt(card.dataset.index);
   const param = row.dataset.param;
   if (el.tagName === 'SELECT') {
-    sendAction({ action: 'set_layer_param', index, param, value: el.value });
+    // fit_mode is numeric on the Rust side (reads as_f64); coerce the string.
+    const value = (param === 'fit_mode') ? parseInt(el.value, 10) : el.value;
+    sendAction({ action: 'set_layer_param', index, param, value });
   } else if (el.type === 'checkbox') {
     sendAction({ action: 'set_layer_param', index, param, value: el.checked });
   } else if (el.type === 'color') {
@@ -622,6 +613,7 @@ function createLayerCard(layer, index) {
         <div class="fx-group-header">
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">BLEND</span>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="opacity">
@@ -656,6 +648,7 @@ function createLayerCard(layer, index) {
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">COLOR</span>
           <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="hue_shift">
@@ -686,6 +679,7 @@ function createLayerCard(layer, index) {
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">DIGITAL</span>
           <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="pixelate">
@@ -715,6 +709,7 @@ function createLayerCard(layer, index) {
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">WARP</span>
           <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="wave_amp">
@@ -767,6 +762,7 @@ function createLayerCard(layer, index) {
         <div class="fx-group-header">
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">KEY</span>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row toggle-row" data-param="chroma_enable">
@@ -801,6 +797,7 @@ function createLayerCard(layer, index) {
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">SHIFT</span>
           <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="slice_intensity">
@@ -876,6 +873,7 @@ function createLayerCard(layer, index) {
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">POSITION &amp; SIZE</span>
           <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="layer_x">
@@ -892,6 +890,14 @@ function createLayerCard(layer, index) {
             <label>Scale</label>
             <input type="range" min="0.1" max="4" step="0.01" value="${layer.layer_scale}">
             <span class="value">${formatValue(layer.layer_scale, 0.1, 4, 0.01)}</span>
+          </div>
+          <div class="param-row select-row" data-param="fit_mode">
+            <label>Fit</label>
+            <select>
+              <option value="0" ${layer.fit_mode === 0 ? 'selected' : ''}>Stretch</option>
+              <option value="1" ${layer.fit_mode === 1 ? 'selected' : ''}>Fit</option>
+              <option value="2" ${layer.fit_mode === 2 ? 'selected' : ''}>Fill</option>
+            </select>
           </div>
         </div>
       </div>
