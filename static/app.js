@@ -788,7 +788,15 @@ function createLayerCard(layer, index) {
             <input type="range" min="0" max="1" step="0.01" value="${layer.chroma_spill}">
             <span class="value">${formatValue(layer.chroma_spill, 0, 1, 0.01)}</span>
           </div>
-          <p class="layer-hint">Reveals layers below — use on upper layers.</p>
+          <div class="param-row toggle-row" data-param="chroma_bg_enable">
+            <label>BG Fill</label>
+            <label class="toggle"><input type="checkbox" ${layer.chroma_bg_enable ? 'checked' : ''}><span class="toggle-slider"></span></label>
+          </div>
+          <div class="param-row color-row" data-param="chroma_bg_color">
+            <label>BG Color</label>
+            <input type="color" value="${layer.chroma_bg_color || '#000000'}">
+          </div>
+          <p class="layer-hint">Reveals layers below — or fill keyed-out areas with BG color for a standalone layer.</p>
         </div>
       </div>
 
@@ -864,6 +872,47 @@ function createLayerCard(layer, index) {
             <label>Datamosh</label>
             <input type="range" min="0" max="1" step="0.01" value="${layer.datamosh}">
             <span class="value">${formatValue(layer.datamosh, 0, 1, 0.01)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="fx-group collapsed" data-layer-group="feedback">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">FEEDBACK</span>
+          <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
+        </div>
+        <div class="fx-group-body">
+          <div class="param-row" data-param="feedback_persistence" title="whole-frame echo trails; at 1.0 the image freezes / blooms into motion">
+            <label>Persist</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.feedback_persistence}">
+            <span class="value">${formatValue(layer.feedback_persistence, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="feedback_zoom" title="droste infinite-zoom tunnel (1.0 = off)">
+            <label>Zoom</label>
+            <input type="range" min="0.8" max="1.2" step="0.005" value="${layer.feedback_zoom}">
+            <span class="value">${formatValue(layer.feedback_zoom, 0.8, 1.2, 0.005)}</span>
+          </div>
+          <div class="param-row" data-param="feedback_rotate" title="spiral smear (degrees per frame)">
+            <label>Rotate</label>
+            <input type="range" min="-30" max="30" step="0.5" value="${layer.feedback_rotate}">
+            <span class="value">${formatValue(layer.feedback_rotate, -30, 30, 0.5)}</span>
+          </div>
+          <div class="param-row" data-param="feedback_luma_key" title="bias trails toward bright regions; darks stay sharp">
+            <label>Luma Key</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.feedback_luma_key}">
+            <span class="value">${formatValue(layer.feedback_luma_key, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="feedback_chroma" title="R/G/B fed back at offset UVs for color ghost trails">
+            <label>Chroma</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.feedback_chroma}">
+            <span class="value">${formatValue(layer.feedback_chroma, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="feedback_additive" title="crossfade trails from fade (mix) to blooming light (additive)">
+            <label>Additive</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.feedback_additive}">
+            <span class="value">${formatValue(layer.feedback_additive, 0, 1, 0.01)}</span>
           </div>
         </div>
       </div>
@@ -1138,7 +1187,9 @@ document.getElementById('export-start').addEventListener('click', () => {
   // Export resolution follows the master output size (one source of truth).
   const duration = parseFloat(document.getElementById('export-duration').value) || 10;
   const fps = parseInt(document.getElementById('export-fps').value) || 30;
-  sendAction({ action: 'start_export', width: lastOutputW, height: lastOutputH, fps, duration_secs: duration });
+  // Match preview: render VHS at half-res so the export reproduces the gritty live look.
+  const matchPreview = document.getElementById('export-match-preview').checked;
+  sendAction({ action: 'start_export', width: lastOutputW, height: lastOutputH, fps, duration_secs: duration, match_preview: matchPreview });
 });
 
 document.getElementById('export-cancel').addEventListener('click', () => {

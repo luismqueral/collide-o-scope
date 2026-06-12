@@ -433,6 +433,19 @@ impl App {
                                 layer.effects.chroma_color_b = b;
                             }
                         }
+                        "chroma_bg_enable" => {
+                            if let Some(b) = value.as_bool() {
+                                layer.effects.chroma_bg_enable = if b { 1.0 } else { 0.0 };
+                            }
+                        }
+                        "chroma_bg_color" => {
+                            if let Some(s) = value.as_str() {
+                                let (r, g, b) = hex_to_rgb01(s);
+                                layer.effects.chroma_bg_r = r;
+                                layer.effects.chroma_bg_g = g;
+                                layer.effects.chroma_bg_b = b;
+                            }
+                        }
                         "slice_intensity" => {
                             if let Some(v) = value.as_f64() {
                                 layer.effects.slice_intensity = (v as f32).clamp(0.0, 1.0);
@@ -496,6 +509,36 @@ impl App {
                         "datamosh" => {
                             if let Some(v) = value.as_f64() {
                                 layer.effects.datamosh = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "feedback_persistence" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_persistence = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "feedback_zoom" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_zoom = (v as f32).clamp(0.8, 1.2);
+                            }
+                        }
+                        "feedback_rotate" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_rotate = (v as f32).clamp(-30.0, 30.0);
+                            }
+                        }
+                        "feedback_luma_key" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_luma_key = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "feedback_chroma" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_chroma = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "feedback_additive" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_additive = (v as f32).clamp(0.0, 1.0);
                             }
                         }
                         "layer_x" => {
@@ -562,6 +605,10 @@ impl App {
                             layer.effects.chroma_color_r = d.chroma_color_r;
                             layer.effects.chroma_color_g = d.chroma_color_g;
                             layer.effects.chroma_color_b = d.chroma_color_b;
+                            layer.effects.chroma_bg_enable = d.chroma_bg_enable;
+                            layer.effects.chroma_bg_r = d.chroma_bg_r;
+                            layer.effects.chroma_bg_g = d.chroma_bg_g;
+                            layer.effects.chroma_bg_b = d.chroma_bg_b;
                         }
                         "shift" => {
                             layer.effects.slice_intensity = d.slice_intensity;
@@ -578,6 +625,14 @@ impl App {
                             layer.effects.jitter_speed = d.jitter_speed;
                             layer.effects.datamosh = d.datamosh;
                         }
+                        "feedback" => {
+                            layer.effects.feedback_persistence = d.feedback_persistence;
+                            layer.effects.feedback_zoom = d.feedback_zoom;
+                            layer.effects.feedback_rotate = d.feedback_rotate;
+                            layer.effects.feedback_luma_key = d.feedback_luma_key;
+                            layer.effects.feedback_chroma = d.feedback_chroma;
+                            layer.effects.feedback_additive = d.feedback_additive;
+                        }
                         "transform" => {
                             layer.effects.layer_x = d.layer_x;
                             layer.effects.layer_y = d.layer_y;
@@ -591,7 +646,7 @@ impl App {
             WebAction::SetNtscParam { param, value } => {
                 self.ntsc_state.set_param(&param, &value);
             }
-            WebAction::StartExport { width, height, fps, duration_secs } => {
+            WebAction::StartExport { width, height, fps, duration_secs, match_preview } => {
                 if self.export_job.is_none() || self.export_job.as_ref().unwrap().is_done() {
                     let patch = patch::PatchState::capture(
                         &self.master_effects,
@@ -620,6 +675,7 @@ impl App {
                         fps,
                         duration_secs,
                         output_path,
+                        match_preview,
                     };
                     self.export_job = Some(render_export::ExportJob::start(patch, config, &lib_folder));
                     log::info!("Export started");
@@ -768,6 +824,12 @@ impl App {
                     l.effects.chroma_color_g,
                     l.effects.chroma_color_b,
                 ),
+                chroma_bg_enable: l.effects.chroma_bg_enable > 0.5,
+                chroma_bg_color: rgb01_to_hex(
+                    l.effects.chroma_bg_r,
+                    l.effects.chroma_bg_g,
+                    l.effects.chroma_bg_b,
+                ),
                 slice_intensity: l.effects.slice_intensity,
                 slice_height: l.effects.slice_height,
                 slice_prob: l.effects.slice_prob,
@@ -781,6 +843,12 @@ impl App {
                 jitter_amount: l.effects.jitter_amount,
                 jitter_speed: l.effects.jitter_speed,
                 datamosh: l.effects.datamosh,
+                feedback_persistence: l.effects.feedback_persistence,
+                feedback_zoom: l.effects.feedback_zoom,
+                feedback_rotate: l.effects.feedback_rotate,
+                feedback_luma_key: l.effects.feedback_luma_key,
+                feedback_chroma: l.effects.feedback_chroma,
+                feedback_additive: l.effects.feedback_additive,
                 layer_x: l.effects.layer_x,
                 layer_y: l.effects.layer_y,
                 layer_scale: l.effects.layer_scale,
@@ -2019,6 +2087,8 @@ fn run_cli_render(args: &[String]) -> Result<(), String> {
         fps,
         duration_secs: duration,
         output_path: out.clone(),
+        // CLI renders at full-res VHS (highest quality) by default.
+        match_preview: false,
     };
 
     println!(

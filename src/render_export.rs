@@ -25,6 +25,10 @@ pub struct ExportConfig {
     pub fps: u32,
     pub duration_secs: f32,
     pub output_path: String,
+    /// When true, render VHS at half resolution (matching the live preview's
+    /// gritty texture) instead of full-res. The rest of the pipeline already
+    /// mirrors the preview, so this is the only fidelity knob.
+    pub match_preview: bool,
 }
 
 /// Shared state for progress/cancellation between the render thread and the UI.
@@ -605,9 +609,15 @@ fn run_export(
         // Submit GPU work
         queue.submit(std::iter::once(encoder.finish()));
 
-        // --- NTSC at full resolution ---
+        // --- NTSC ---
+        // Match preview: half-res (gritty, identical to the live look).
+        // Otherwise full-res (sharper, finer artifacts).
         let mut pixels = readback_pixels(&device, &queue, &composite_textures[0], &staging, w, h, bytes_per_row);
-        ntsc_state.apply_full_res(&mut pixels, w, h);
+        if config.match_preview {
+            ntsc_state.apply(&mut pixels, w, h);
+        } else {
+            ntsc_state.apply_full_res(&mut pixels, w, h);
+        }
 
         // Write to ffmpeg
         if ffmpeg_stdin.write_all(&pixels).is_err() {

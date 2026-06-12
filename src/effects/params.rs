@@ -1,5 +1,5 @@
 /// GPU-side effect parameters, uploaded as a uniform buffer each frame.
-/// Must be 16-byte aligned (224 bytes total = 14 × vec4).
+/// Must be 16-byte aligned (272 bytes total = 17 × vec4).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct EffectUniforms {
@@ -72,6 +72,21 @@ pub struct EffectUniforms {
     pub fit_scale_x: f32,     // computed per-frame from fit_mode + source/canvas aspects
     pub fit_scale_y: f32,
     pub _pad_fit: f32,
+    // vec4 #15 — Feedback: persistence + transform + luma key
+    pub feedback_persistence: f32, // 0..1 ungated whole-frame trails (1.0 = freeze/bloom-out)
+    pub feedback_zoom: f32,        // 0.8..1.2 droste infinite-zoom (1.0 = off)
+    pub feedback_rotate: f32,      // -30..30 degrees spiral smear (0 = off)
+    pub feedback_luma_key: f32,    // 0..1 bias bleed toward bright regions
+    // vec4 #16 — Feedback: channel desync + additive blend + pad
+    pub feedback_chroma: f32,      // 0..1 R/G/B fed back at offset UVs (color ghosts)
+    pub feedback_additive: f32,    // 0..1 crossfade mix -> additive accumulation
+    pub _pad_fb0: f32,
+    pub _pad_fb1: f32,
+    // vec4 #17 — Chroma key background fill (replace keyed-out regions w/ solid color)
+    pub chroma_bg_enable: f32,     // 0.0 = transparent key (default), 1.0 = fill bg color
+    pub chroma_bg_r: f32,          // bg color red (sRGB 0..1)
+    pub chroma_bg_g: f32,          // bg color green (sRGB 0..1)
+    pub chroma_bg_b: f32,          // bg color blue (sRGB 0..1)
 }
 
 impl Default for EffectUniforms {
@@ -132,6 +147,18 @@ impl Default for EffectUniforms {
             fit_scale_x: 1.0,
             fit_scale_y: 1.0,
             _pad_fit: 0.0,
+            feedback_persistence: 0.0,
+            feedback_zoom: 1.0,
+            feedback_rotate: 0.0,
+            feedback_luma_key: 0.0,
+            feedback_chroma: 0.0,
+            feedback_additive: 0.0,
+            _pad_fb0: 0.0,
+            _pad_fb1: 0.0,
+            chroma_bg_enable: 0.0,
+            chroma_bg_r: 0.0,
+            chroma_bg_g: 0.0,
+            chroma_bg_b: 0.0,
         }
     }
 }
