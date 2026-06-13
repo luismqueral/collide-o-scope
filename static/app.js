@@ -201,24 +201,14 @@ document.querySelectorAll('.param-row[data-param]').forEach((row) => {
 });
 
 // --- Master content framerate (frame-hold / stutter) ---
-// Distinct from set_param effects: routed via its own action so the generic
-// loop above (which sends set_param) doesn't pick it up.
+// Discrete presets, not a slider: only 30/k rates land evenly on the fixed 30fps
+// render tick grid, so a continuous value would lie (e.g. 29 actually plays at 15).
+// Routed via its own action so the generic set_param loop above ignores it.
 const fpsRow = document.querySelector('.param-row[data-master-param="framerate"]');
 if (fpsRow) {
-  const min = parseFloat(fpsRow.dataset.min);
-  const max = parseFloat(fpsRow.dataset.max);
-  const step = parseFloat(fpsRow.dataset.step);
-  const slider = fpsRow.querySelector('input[type="range"]');
-  const valueEl = fpsRow.querySelector('.value');
-  slider.min = min;
-  slider.max = max;
-  slider.step = step;
-  slider.value = max; // default 30 = smooth
-  valueEl.textContent = formatValue(max, min, max, step);
-  slider.addEventListener('input', () => {
-    const v = parseFloat(slider.value);
-    valueEl.textContent = formatValue(v, min, max, step);
-    sendAction({ action: 'set_master_framerate', value: v });
+  const select = fpsRow.querySelector('select');
+  select.addEventListener('change', () => {
+    sendAction({ action: 'set_master_framerate', value: parseFloat(select.value) });
   });
 }
 
@@ -546,14 +536,9 @@ function syncFramerate(framerate) {
   if (framerate == null) return;
   const row = document.querySelector('.param-row[data-master-param="framerate"]');
   if (!row) return;
-  const slider = row.querySelector('input[type="range"]');
-  const valueEl = row.querySelector('.value');
-  if (slider && valueEl && document.activeElement !== slider) {
-    slider.value = framerate;
-    const min = parseFloat(row.dataset.min);
-    const max = parseFloat(row.dataset.max);
-    const step = parseFloat(row.dataset.step);
-    valueEl.textContent = formatValue(framerate, min, max, step);
+  const select = row.querySelector('select');
+  if (select && document.activeElement !== select) {
+    select.value = String(framerate);
   }
 }
 
@@ -597,7 +582,11 @@ layersList.addEventListener('click', (e) => {
   if (!card) return;
   const index = parseInt(card.dataset.index);
 
-  if (e.target.closest('.layer-fx-rand')) {
+  if (e.target.closest('.layer-fx-reset')) {
+    e.stopPropagation();
+    const fxGroup = e.target.closest('.fx-group');
+    sendAction({ action: 'reset_layer_group', index, group: fxGroup.dataset.layerGroup });
+  } else if (e.target.closest('.layer-fx-rand')) {
     e.stopPropagation();
     randomizeLayerGroup(e.target.closest('.fx-group'), index);
   } else if (e.target.closest('.layer-thumb-wrap')) {
@@ -653,7 +642,9 @@ layersList.addEventListener('change', (e) => {
   const index = parseInt(card.dataset.index);
   const param = row.dataset.param;
   if (el.tagName === 'SELECT') {
-    sendAction({ action: 'set_layer_param', index, param, value: el.value });
+    // fit_mode is numeric on the Rust side (reads as_f64); coerce the string.
+    const value = (param === 'fit_mode') ? parseInt(el.value, 10) : el.value;
+    sendAction({ action: 'set_layer_param', index, param, value });
   } else if (el.type === 'checkbox') {
     sendAction({ action: 'set_layer_param', index, param, value: el.checked });
   } else if (el.type === 'color') {
@@ -807,6 +798,7 @@ function createLayerCard(layer, index) {
         <div class="fx-group-header">
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">BLEND</span>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="opacity">
@@ -841,6 +833,7 @@ function createLayerCard(layer, index) {
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">COLOR</span>
           <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="hue_shift">
@@ -871,6 +864,7 @@ function createLayerCard(layer, index) {
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">DIGITAL</span>
           <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="pixelate">
@@ -900,6 +894,7 @@ function createLayerCard(layer, index) {
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">WARP</span>
           <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="wave_amp">
@@ -952,6 +947,7 @@ function createLayerCard(layer, index) {
         <div class="fx-group-header">
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">KEY</span>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row toggle-row" data-param="chroma_enable">
@@ -977,7 +973,15 @@ function createLayerCard(layer, index) {
             <input type="range" min="0" max="1" step="0.01" value="${layer.chroma_spill}">
             <span class="value">${formatValue(layer.chroma_spill, 0, 1, 0.01)}</span>
           </div>
-          <p class="layer-hint">Reveals layers below — use on upper layers.</p>
+          <div class="param-row toggle-row" data-param="chroma_bg_enable">
+            <label>BG Fill</label>
+            <label class="toggle"><input type="checkbox" ${layer.chroma_bg_enable ? 'checked' : ''}><span class="toggle-slider"></span></label>
+          </div>
+          <div class="param-row color-row" data-param="chroma_bg_color">
+            <label>BG Color</label>
+            <input type="color" value="${layer.chroma_bg_color || '#000000'}">
+          </div>
+          <p class="layer-hint">Reveals layers below — or fill keyed-out areas with BG color for a standalone layer.</p>
         </div>
       </div>
 
@@ -986,6 +990,7 @@ function createLayerCard(layer, index) {
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">SHIFT</span>
           <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="slice_intensity">
@@ -1056,11 +1061,53 @@ function createLayerCard(layer, index) {
         </div>
       </div>
 
+      <div class="fx-group collapsed" data-layer-group="feedback">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">FEEDBACK</span>
+          <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
+        </div>
+        <div class="fx-group-body">
+          <div class="param-row" data-param="feedback_persistence" title="whole-frame echo trails; at 1.0 the image freezes / blooms into motion">
+            <label>Persist</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.feedback_persistence}">
+            <span class="value">${formatValue(layer.feedback_persistence, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="feedback_zoom" title="droste infinite-zoom tunnel (1.0 = off)">
+            <label>Zoom</label>
+            <input type="range" min="0.8" max="1.2" step="0.005" value="${layer.feedback_zoom}">
+            <span class="value">${formatValue(layer.feedback_zoom, 0.8, 1.2, 0.005)}</span>
+          </div>
+          <div class="param-row" data-param="feedback_rotate" title="spiral smear (degrees per frame)">
+            <label>Rotate</label>
+            <input type="range" min="-30" max="30" step="0.5" value="${layer.feedback_rotate}">
+            <span class="value">${formatValue(layer.feedback_rotate, -30, 30, 0.5)}</span>
+          </div>
+          <div class="param-row" data-param="feedback_luma_key" title="bias trails toward bright regions; darks stay sharp">
+            <label>Luma Key</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.feedback_luma_key}">
+            <span class="value">${formatValue(layer.feedback_luma_key, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="feedback_chroma" title="R/G/B fed back at offset UVs for color ghost trails">
+            <label>Chroma</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.feedback_chroma}">
+            <span class="value">${formatValue(layer.feedback_chroma, 0, 1, 0.01)}</span>
+          </div>
+          <div class="param-row" data-param="feedback_additive" title="crossfade trails from fade (mix) to blooming light (additive)">
+            <label>Additive</label>
+            <input type="range" min="0" max="1" step="0.01" value="${layer.feedback_additive}">
+            <span class="value">${formatValue(layer.feedback_additive, 0, 1, 0.01)}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="fx-group collapsed" data-layer-group="transform">
         <div class="fx-group-header">
           <span class="chevron">&#x25BC;</span>
           <span class="group-label">POSITION &amp; SIZE</span>
           <button class="layer-fx-rand" title="Randomize"><i data-lucide="dices"></i></button>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
         </div>
         <div class="fx-group-body">
           <div class="param-row" data-param="layer_x">
@@ -1077,6 +1124,14 @@ function createLayerCard(layer, index) {
             <label>Scale</label>
             <input type="range" min="0.1" max="4" step="0.01" value="${layer.layer_scale}">
             <span class="value">${formatValue(layer.layer_scale, 0.1, 4, 0.01)}</span>
+          </div>
+          <div class="param-row select-row" data-param="fit_mode">
+            <label>Fit</label>
+            <select>
+              <option value="0" ${layer.fit_mode === 0 ? 'selected' : ''}>Stretch</option>
+              <option value="1" ${layer.fit_mode === 1 ? 'selected' : ''}>Fit</option>
+              <option value="2" ${layer.fit_mode === 2 ? 'selected' : ''}>Fill</option>
+            </select>
           </div>
         </div>
       </div>
@@ -1357,7 +1412,9 @@ document.getElementById('export-start').addEventListener('click', () => {
   // Export resolution follows the master output size (one source of truth).
   const duration = parseFloat(document.getElementById('export-duration').value) || 10;
   const fps = parseInt(document.getElementById('export-fps').value) || 30;
-  sendAction({ action: 'start_export', width: lastOutputW, height: lastOutputH, fps, duration_secs: duration });
+  // Match preview: render VHS at half-res so the export reproduces the gritty live look.
+  const matchPreview = document.getElementById('export-match-preview').checked;
+  sendAction({ action: 'start_export', width: lastOutputW, height: lastOutputH, fps, duration_secs: duration, match_preview: matchPreview });
 });
 
 document.getElementById('export-cancel').addEventListener('click', () => {

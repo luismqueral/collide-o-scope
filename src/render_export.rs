@@ -31,6 +31,10 @@ pub struct ExportConfig {
     /// Tempo for beat-synced automations. Export uses downbeat 0 (deterministic),
     /// so beat-synced formulas match the live preview's frequency.
     pub bpm: f32,
+    /// When true, render VHS at half resolution (matching the live preview's
+    /// gritty texture) instead of full-res. The rest of the pipeline already
+    /// mirrors the preview, so this is the only fidelity knob.
+    pub match_preview: bool,
 }
 
 /// Shared state for progress/cancellation between the render thread and the UI.
@@ -189,6 +193,17 @@ fn run_export(
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // Previous output frame (datamosh feedback)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
             ],
@@ -376,6 +391,23 @@ fn run_export(
     let composite_views: [wgpu::TextureView; 3] =
         std::array::from_fn(|i| composite_textures[i].create_view(&wgpu::TextureViewDescriptor::default()));
 
+    // Previous-frame feedback texture (datamosh) — bound to effects binding 2.
+    let feedback_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Export Feedback"),
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: tex_usage,
+        view_formats: &[],
+    });
+    let feedback_view = feedback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
     // --- Open video decoders for each layer ---
     let mut layers: Vec<ExportLayer> = Vec::new();
     for layer_cfg in &patch.layers {
@@ -410,6 +442,10 @@ fn run_export(
         let mut effects = EffectUniforms::default();
         effects.resolution = [lw as f32, lh as f32];
         layer_cfg.effects.apply_to_uniforms(&mut effects);
+        // Compute fit scale once at setup (headless has no per-frame loop).
+        let (fx, fy) = crate::fit_scale(effects.fit_mode, lw as f32, lh as f32, w as f32, h as f32);
+        effects.fit_scale_x = fx;
+        effects.fit_scale_y = fy;
 
         // Compile this layer's automation expressions. A bad formula is skipped
         // rather than aborting the export.
@@ -582,6 +618,8 @@ fn run_export(
             &layers,
             &composite_textures,
             &composite_views,
+            &feedback_texture,
+            &feedback_view,
             &effects_pipeline,
             &effects_bind_group_layout,
             &effects_uniform_layout,
@@ -600,6 +638,7 @@ fn run_export(
             &master_effects,
             &composite_textures,
             &composite_views,
+            &feedback_view,
             &effects_pipeline,
             &effects_bind_group_layout,
             &effects_uniform_layout,
@@ -611,9 +650,15 @@ fn run_export(
         // Submit GPU work
         queue.submit(std::iter::once(encoder.finish()));
 
-        // --- NTSC at full resolution ---
+        // --- NTSC ---
+        // Match preview: half-res (gritty, identical to the live look).
+        // Otherwise full-res (sharper, finer artifacts).
         let mut pixels = readback_pixels(&device, &queue, &composite_textures[0], &staging, w, h, bytes_per_row);
-        ntsc_state.apply_full_res(&mut pixels, w, h);
+        if config.match_preview {
+            ntsc_state.apply(&mut pixels, w, h);
+        } else {
+            ntsc_state.apply_full_res(&mut pixels, w, h);
+        }
 
         // Write to ffmpeg
         if ffmpeg_stdin.write_all(&pixels).is_err() {
@@ -708,6 +753,8 @@ fn render_layers_export(
     layers: &[ExportLayer],
     composite_textures: &[wgpu::Texture; 3],
     composite_views: &[wgpu::TextureView; 3],
+    feedback_texture: &wgpu::Texture,
+    feedback_view: &wgpu::TextureView,
     effects_pipeline: &wgpu::RenderPipeline,
     effects_bind_group_layout: &wgpu::BindGroupLayout,
     effects_uniform_layout: &wgpu::BindGroupLayout,
@@ -718,6 +765,28 @@ fn render_layers_export(
     output_width: u32,
     output_height: u32,
 ) {
+    // Capture last frame's final output (still in [0]) for datamosh feedback,
+    // before this frame's passes overwrite it.
+    encoder.copy_texture_to_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &composite_textures[0],
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyTextureInfo {
+            texture: feedback_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::Extent3d {
+            width: output_width,
+            height: output_height,
+            depth_or_array_layers: 1,
+        },
+    );
+
     let visible_layers: Vec<&ExportLayer> = layers.iter().filter(|l| l.visible).rev().collect();
 
     if visible_layers.is_empty() {
@@ -756,6 +825,10 @@ fn render_layers_export(
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(feedback_view),
                 },
             ],
         });
@@ -900,6 +973,7 @@ fn render_master_effects_export(
     master_uniforms: &EffectUniforms,
     composite_textures: &[wgpu::Texture; 3],
     composite_views: &[wgpu::TextureView; 3],
+    feedback_view: &wgpu::TextureView,
     effects_pipeline: &wgpu::RenderPipeline,
     effects_bind_group_layout: &wgpu::BindGroupLayout,
     effects_uniform_layout: &wgpu::BindGroupLayout,
@@ -924,6 +998,10 @@ fn render_master_effects_export(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(feedback_view),
             },
         ],
     });

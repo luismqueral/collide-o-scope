@@ -51,6 +51,21 @@ fn output_dims(ratio: &str, quality: u32) -> (u32, u32) {
     (w & !1, h & !1) // even dims
 }
 
+/// UV scale for a layer's fit mode given source (sw×sh) + canvas (dw×dh) dims.
+/// mode: 0=stretch (1,1), 1=fit/contain (letterbox), 2=fill/cover (crop).
+/// Multiplied about-center in the shader; >1 = transparent bars, <1 = crop.
+pub fn fit_scale(mode: f32, sw: f32, sh: f32, dw: f32, dh: f32) -> (f32, f32) {
+    if sw <= 0.0 || sh <= 0.0 || dw <= 0.0 || dh <= 0.0 {
+        return (1.0, 1.0);
+    }
+    let r = (sw / sh) / (dw / dh); // source aspect / canvas aspect
+    match mode.round() as i32 {
+        1 => if r > 1.0 { (1.0, r) } else { (1.0 / r, 1.0) }, // contain
+        2 => if r > 1.0 { (1.0 / r, 1.0) } else { (1.0, r) }, // cover
+        _ => (1.0, 1.0),                                      // stretch
+    }
+}
+
 struct App {
     initial_video: Option<String>,
     window: Option<Arc<Window>>,
@@ -75,6 +90,7 @@ struct App {
     // Master content framerate (frame-hold / stutter). 30 = smooth (default).
     master_fps: f32,
     last_content_advance: Instant,
+    content_tick: u64,
     content_time: f32,
     // Master output size: aspect ratio label + quality (shorter-side px).
     output_ratio: String,
@@ -130,6 +146,7 @@ impl App {
             tap_times: Vec::new(),
             master_fps: 30.0,
             last_content_advance: Instant::now(),
+            content_tick: 0,
             content_time: 0.0,
             output_ratio: "16:9".to_string(),
             output_quality: 1080,
@@ -432,6 +449,19 @@ impl App {
                                 layer.effects.chroma_color_b = b;
                             }
                         }
+                        "chroma_bg_enable" => {
+                            if let Some(b) = value.as_bool() {
+                                layer.effects.chroma_bg_enable = if b { 1.0 } else { 0.0 };
+                            }
+                        }
+                        "chroma_bg_color" => {
+                            if let Some(s) = value.as_str() {
+                                let (r, g, b) = hex_to_rgb01(s);
+                                layer.effects.chroma_bg_r = r;
+                                layer.effects.chroma_bg_g = g;
+                                layer.effects.chroma_bg_b = b;
+                            }
+                        }
                         "slice_intensity" => {
                             if let Some(v) = value.as_f64() {
                                 layer.effects.slice_intensity = (v as f32).clamp(0.0, 1.0);
@@ -497,6 +527,36 @@ impl App {
                                 layer.effects.datamosh = (v as f32).clamp(0.0, 1.0);
                             }
                         }
+                        "feedback_persistence" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_persistence = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "feedback_zoom" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_zoom = (v as f32).clamp(0.8, 1.2);
+                            }
+                        }
+                        "feedback_rotate" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_rotate = (v as f32).clamp(-30.0, 30.0);
+                            }
+                        }
+                        "feedback_luma_key" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_luma_key = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "feedback_chroma" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_chroma = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
+                        "feedback_additive" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.feedback_additive = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
                         "layer_x" => {
                             if let Some(v) = value.as_f64() {
                                 layer.effects.layer_x = (v as f32).clamp(-1.0, 1.0);
@@ -512,6 +572,89 @@ impl App {
                                 layer.effects.layer_scale = (v as f32).clamp(0.1, 4.0);
                             }
                         }
+                        "fit_mode" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.effects.fit_mode = (v as f32).clamp(0.0, 2.0).round();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            WebAction::ResetLayerGroup { index, group } => {
+                if let Some(layer) = self.layers.get_mut(index) {
+                    let d = crate::effects::EffectUniforms::default();
+                    match group.as_str() {
+                        "blend" => {
+                            layer.opacity = 1.0;
+                            layer.speed = 1.0;
+                            layer.fps = 30.0;
+                            layer.blend_mode = crate::layers::BlendMode::Normal;
+                        }
+                        "color" => {
+                            layer.effects.hue_shift = d.hue_shift;
+                            layer.effects.saturation = d.saturation;
+                            layer.effects.brightness = d.brightness;
+                            layer.effects.contrast = d.contrast;
+                        }
+                        "digital" => {
+                            layer.effects.pixelate_size = d.pixelate_size;
+                            layer.effects.rgb_split = d.rgb_split;
+                            layer.effects.posterize = d.posterize;
+                            layer.effects.invert = d.invert;
+                        }
+                        "warp" => {
+                            layer.effects.wave_amp = d.wave_amp;
+                            layer.effects.wave_freq = d.wave_freq;
+                            layer.effects.wave_speed = d.wave_speed;
+                            layer.effects.wave_axis = d.wave_axis;
+                            layer.effects.swirl_angle = d.swirl_angle;
+                            layer.effects.swirl_radius = d.swirl_radius;
+                            layer.effects.bulge_strength = d.bulge_strength;
+                            layer.effects.bulge_radius = d.bulge_radius;
+                        }
+                        "key" => {
+                            layer.effects.chroma_enable = d.chroma_enable;
+                            layer.effects.chroma_threshold = d.chroma_threshold;
+                            layer.effects.chroma_smoothness = d.chroma_smoothness;
+                            layer.effects.chroma_spill = d.chroma_spill;
+                            layer.effects.chroma_color_r = d.chroma_color_r;
+                            layer.effects.chroma_color_g = d.chroma_color_g;
+                            layer.effects.chroma_color_b = d.chroma_color_b;
+                            layer.effects.chroma_bg_enable = d.chroma_bg_enable;
+                            layer.effects.chroma_bg_r = d.chroma_bg_r;
+                            layer.effects.chroma_bg_g = d.chroma_bg_g;
+                            layer.effects.chroma_bg_b = d.chroma_bg_b;
+                        }
+                        "shift" => {
+                            layer.effects.slice_intensity = d.slice_intensity;
+                            layer.effects.slice_height = d.slice_height;
+                            layer.effects.slice_prob = d.slice_prob;
+                            layer.effects.slice_speed = d.slice_speed;
+                            layer.effects.block_size = d.block_size;
+                            layer.effects.block_intensity = d.block_intensity;
+                            layer.effects.block_prob = d.block_prob;
+                            layer.effects.block_speed = d.block_speed;
+                            layer.effects.shift_chroma = d.shift_chroma;
+                            layer.effects.slice_axis = d.slice_axis;
+                            layer.effects.jitter_amount = d.jitter_amount;
+                            layer.effects.jitter_speed = d.jitter_speed;
+                            layer.effects.datamosh = d.datamosh;
+                        }
+                        "feedback" => {
+                            layer.effects.feedback_persistence = d.feedback_persistence;
+                            layer.effects.feedback_zoom = d.feedback_zoom;
+                            layer.effects.feedback_rotate = d.feedback_rotate;
+                            layer.effects.feedback_luma_key = d.feedback_luma_key;
+                            layer.effects.feedback_chroma = d.feedback_chroma;
+                            layer.effects.feedback_additive = d.feedback_additive;
+                        }
+                        "transform" => {
+                            layer.effects.layer_x = d.layer_x;
+                            layer.effects.layer_y = d.layer_y;
+                            layer.effects.layer_scale = d.layer_scale;
+                            layer.effects.fit_mode = d.fit_mode;
+                        }
                         _ => {}
                     }
                 }
@@ -519,7 +662,7 @@ impl App {
             WebAction::SetNtscParam { param, value } => {
                 self.ntsc_state.set_param(&param, &value);
             }
-            WebAction::StartExport { width, height, fps, duration_secs } => {
+            WebAction::StartExport { width, height, fps, duration_secs, match_preview } => {
                 if self.export_job.is_none() || self.export_job.as_ref().unwrap().is_done() {
                     let patch = patch::PatchState::capture(
                         &self.master_effects,
@@ -550,6 +693,7 @@ impl App {
                         duration_secs,
                         output_path,
                         bpm: self.tap_bpm,
+                        match_preview,
                     };
                     self.export_job = Some(render_export::ExportJob::start(patch, config, &lib_folder));
                     log::info!("Export started");
@@ -781,6 +925,12 @@ impl App {
                     l.effects.chroma_color_g,
                     l.effects.chroma_color_b,
                 ),
+                chroma_bg_enable: l.effects.chroma_bg_enable > 0.5,
+                chroma_bg_color: rgb01_to_hex(
+                    l.effects.chroma_bg_r,
+                    l.effects.chroma_bg_g,
+                    l.effects.chroma_bg_b,
+                ),
                 slice_intensity: l.effects.slice_intensity,
                 slice_height: l.effects.slice_height,
                 slice_prob: l.effects.slice_prob,
@@ -794,9 +944,16 @@ impl App {
                 jitter_amount: l.effects.jitter_amount,
                 jitter_speed: l.effects.jitter_speed,
                 datamosh: l.effects.datamosh,
+                feedback_persistence: l.effects.feedback_persistence,
+                feedback_zoom: l.effects.feedback_zoom,
+                feedback_rotate: l.effects.feedback_rotate,
+                feedback_luma_key: l.effects.feedback_luma_key,
+                feedback_chroma: l.effects.feedback_chroma,
+                feedback_additive: l.effects.feedback_additive,
                 layer_x: l.effects.layer_x,
                 layer_y: l.effects.layer_y,
                 layer_scale: l.effects.layer_scale,
+                fit_mode: l.effects.fit_mode as u32,
             }).collect(),
             library: self.library_files.iter().filter_map(|p| {
                 p.file_name().map(|n| n.to_string_lossy().to_string())
@@ -1254,27 +1411,30 @@ impl ApplicationHandler for App {
                 let now = Instant::now();
                 if now - self.last_frame_time >= FRAME_DURATION {
                     self.last_frame_time = now;
+                    self.content_tick = self.content_tick.wrapping_add(1);
 
-                    // Master content clock: gate content advancement (decode + the
-                    // animated `time` uniform) at master_fps so the look stutters
-                    // without making the web UI laggy (drain/push/present stay below).
-                    // At the default 30 this short-circuits to advance every frame.
-                    let content_interval = Duration::from_secs_f32(1.0 / self.master_fps);
-                    let advance_content = self.master_fps >= TARGET_FPS as f32
-                        || now - self.last_content_advance >= content_interval;
+                    // Frame-hold / stutter: content (decode + the animated `time`
+                    // uniform) advances every `stride` render ticks. Only 30/k rates
+                    // land evenly on the fixed 30fps tick grid, so the UI exposes
+                    // those presets; stride = round(30 / master_fps). At 30 this is 1
+                    // (advance every tick); web drain/push/present stay below the gate.
+                    let stride = (TARGET_FPS as f32 / self.master_fps).round().max(1.0) as u64;
+                    let advance_content = self.content_tick % stride == 0;
                     if advance_content {
+                        // Real wall-clock time since the last content advance — drives
+                        // catch-up decode so footage tracks the same clock as
+                        // content_time / the animated `time` uniform (stays in sync
+                        // even when a tick runs long, e.g. the blocking VHS readback).
+                        let dt = (now - self.last_content_advance).as_secs_f32();
                         self.last_content_advance = now;
                         self.content_time = self.start_time.elapsed().as_secs_f32();
 
-                        // Decode next frame for each layer (per-layer timing, speed, pause)
+                        // Advance each layer's footage by the real elapsed time.
                         if !self.master_paused {
                             for layer in &mut self.layers {
-                                if !layer.paused && layer.ready_for_frame() {
-                                    if let Some(frame_data) = layer.decoder.next_frame() {
-                                        let renderer = self.renderer.as_ref().unwrap();
-                                        layer.upload_frame(&renderer.queue, &frame_data);
-                                    }
-                                    layer.last_decode = Instant::now();
+                                if !layer.paused {
+                                    let queue = &self.renderer.as_ref().unwrap().queue;
+                                    layer.advance(dt, queue);
                                 }
                             }
                         }
@@ -1345,6 +1505,16 @@ impl ApplicationHandler for App {
                         for (param, expr) in &layer.automations {
                             layer.effects.set_by_name(param, expr.eval(elapsed, beat, bpm));
                         }
+                        // Recompute fit scale each frame so it tracks canvas resize.
+                        let (fx, fy) = fit_scale(
+                            layer.effects.fit_mode,
+                            layer.effects.resolution[0],
+                            layer.effects.resolution[1],
+                            output_width as f32,
+                            output_height as f32,
+                        );
+                        layer.effects.fit_scale_x = fx;
+                        layer.effects.fit_scale_y = fy;
                     }
                     self.master_effects.time = elapsed;
                     // Evaluate master automations (same `t` so live matches export).
@@ -1361,26 +1531,30 @@ impl ApplicationHandler for App {
                     renderer.render_layers(&mut encoder, &self.layers);
                     renderer.render_master_effects(&mut encoder, &self.master_effects);
 
-                    // NTSC/VHS post-process (CPU-based, requires GPU sync)
+                    // NTSC/VHS post-process at half resolution. The GPU does the
+                    // down/upscale (bilinear); ntsc-rs runs on the half-res pixels,
+                    // so only ~1/4 the data crosses the bus and there are no CPU
+                    // resampling loops. Keeps the live path off slow-motion.
                     if self.ntsc_state.params.enabled {
-                        // Submit current GPU work so composite_textures[0] is ready
+                        // GPU: downscale composite[0] → half texture, then submit so it's ready.
+                        renderer.downscale_to_half(&mut encoder);
                         renderer.queue.submit(std::iter::once(encoder.finish()));
 
-                        // Read back, process, write back
-                        let mut pixels = renderer.readback_composite();
-                        self.ntsc_state.apply(
-                            &mut pixels,
-                            renderer.output_width,
-                            renderer.output_height,
-                        );
-                        renderer.write_composite(&pixels);
+                        let half_w = (renderer.output_width / 2).max(1);
+                        let half_h = (renderer.output_height / 2).max(1);
 
-                        // Create fresh encoder for the egui pass
+                        // CPU: read half-res, run ntsc-rs at half-res, write back.
+                        let mut pixels = renderer.readback_half();
+                        self.ntsc_state.apply_full_res(&mut pixels, half_w, half_h);
+                        renderer.write_half(&pixels);
+
+                        // Fresh encoder: GPU upscale half → composite[0]; egui pass appends after.
                         encoder = renderer.device.create_command_encoder(
                             &wgpu::CommandEncoderDescriptor {
                                 label: Some("Post-NTSC Encoder"),
                             },
                         );
+                        renderer.upscale_half_to_composite(&mut encoder);
                     }
 
                     let egui_renderer = self.egui_renderer.as_mut().unwrap();
@@ -2043,6 +2217,8 @@ fn run_cli_render(args: &[String]) -> Result<(), String> {
         // Patches don't carry tempo; use the default so beat-synced formulas
         // render deterministically (phase starts at 0 in offline export).
         bpm: 120.0,
+        // CLI renders at full-res VHS (highest quality) by default.
+        match_preview: false,
     };
 
     println!(

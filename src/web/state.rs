@@ -271,6 +271,8 @@ pub struct LayerSnapshot {
     pub chroma_smoothness: f32,
     pub chroma_spill: f32,
     pub chroma_color: String,
+    pub chroma_bg_enable: bool,
+    pub chroma_bg_color: String,
     // Per-layer effects (pixel shift / glitch)
     pub slice_intensity: f32,
     pub slice_height: f32,
@@ -285,10 +287,19 @@ pub struct LayerSnapshot {
     pub jitter_amount: f32,
     pub jitter_speed: f32,
     pub datamosh: f32,
+    // Per-layer effects (feedback / obliteration)
+    pub feedback_persistence: f32,
+    pub feedback_zoom: f32,
+    pub feedback_rotate: f32,
+    pub feedback_luma_key: f32,
+    pub feedback_chroma: f32,
+    pub feedback_additive: f32,
     // Per-layer transform (position / size)
     pub layer_x: f32,
     pub layer_y: f32,
     pub layer_scale: f32,
+    /// Fit mode: 0=stretch, 1=fit/contain, 2=fill/cover
+    pub fit_mode: u32,
 }
 
 /// Actions the browser can request (processed by the render loop).
@@ -322,6 +333,9 @@ pub enum WebAction {
     /// Reset a specific effect group (digital, analog, motion)
     #[serde(rename = "reset_group")]
     ResetGroup { group: String },
+    /// Reset a specific per-layer effect group (blend, color, digital, warp, key, shift, transform)
+    #[serde(rename = "reset_layer_group")]
+    ResetLayerGroup { index: usize, group: String },
     /// Set a per-layer parameter (opacity, speed, blend_mode)
     #[serde(rename = "set_layer_param")]
     SetLayerParam { index: usize, param: String, value: serde_json::Value },
@@ -336,7 +350,7 @@ pub enum WebAction {
     SetNtscParam { param: String, value: serde_json::Value },
     /// Start an offline render export
     #[serde(rename = "start_export")]
-    StartExport { width: u32, height: u32, fps: u32, duration_secs: f32 },
+    StartExport { width: u32, height: u32, fps: u32, duration_secs: f32, #[serde(default)] match_preview: bool },
     /// Cancel a running export
     #[serde(rename = "cancel_export")]
     CancelExport,

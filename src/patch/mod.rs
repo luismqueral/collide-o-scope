@@ -72,9 +72,16 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
         "jitter_amount" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "continuous wobble" }),
         "jitter_speed" => Some(ParamMeta { step: 1.0, min: 0.0, max: 30.0, desc: "wobble rate" }),
         "datamosh" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "prev-frame bleed" }),
+        "feedback_persistence" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "whole-frame trails (1=freeze)" }),
+        "feedback_zoom" => Some(ParamMeta { step: 0.005, min: 0.8, max: 1.2, desc: "droste zoom (1=off)" }),
+        "feedback_rotate" => Some(ParamMeta { step: 0.5, min: -30.0, max: 30.0, desc: "spiral smear deg" }),
+        "feedback_luma_key" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "bias trails to bright" }),
+        "feedback_chroma" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "channel-desync ghosts" }),
+        "feedback_additive" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "mix->additive bloom" }),
         "layer_x" => Some(ParamMeta { step: 0.01, min: -1.0, max: 1.0, desc: "horizontal offset" }),
         "layer_y" => Some(ParamMeta { step: 0.01, min: -1.0, max: 1.0, desc: "vertical offset" }),
         "layer_scale" => Some(ParamMeta { step: 0.01, min: 0.1, max: 4.0, desc: "zoom (1=unchanged)" }),
+        "fit_mode" => Some(ParamMeta { step: 1.0, min: 0.0, max: 2.0, desc: "0=stretch 1=fit 2=fill" }),
         _ => None,
     }
 }
@@ -286,6 +293,15 @@ pub struct EffectsConfig {
     pub chroma_g: f32,
     #[serde(default)]
     pub chroma_b: f32,
+    // Chroma key background fill (replace keyed-out regions with a solid color)
+    #[serde(default)]
+    pub chroma_bg_enable: bool,
+    #[serde(default)]
+    pub chroma_bg_r: f32,
+    #[serde(default)]
+    pub chroma_bg_g: f32,
+    #[serde(default)]
+    pub chroma_bg_b: f32,
     // Pixel shift / glitch
     #[serde(default)]
     pub slice_intensity: f32,
@@ -313,6 +329,20 @@ pub struct EffectsConfig {
     pub jitter_speed: f32,
     #[serde(default)]
     pub datamosh: f32,
+    // Feedback / obliteration family
+    #[serde(default)]
+    pub feedback_persistence: f32,
+    // Must default to 1.0: a 0.0 default would divide-collapse the feedback UV.
+    #[serde(default = "one")]
+    pub feedback_zoom: f32,
+    #[serde(default)]
+    pub feedback_rotate: f32,
+    #[serde(default)]
+    pub feedback_luma_key: f32,
+    #[serde(default)]
+    pub feedback_chroma: f32,
+    #[serde(default)]
+    pub feedback_additive: f32,
     // Layer transform (position / size)
     #[serde(default)]
     pub layer_x: f32,
@@ -322,6 +352,9 @@ pub struct EffectsConfig {
     // collapse the layer to a point.
     #[serde(default = "one")]
     pub layer_scale: f32,
+    // Fit mode: 0=stretch (default, = old behavior), 1=fit/contain, 2=fill/cover
+    #[serde(default)]
+    pub fit_mode: f32,
 }
 
 fn default_wave_freq() -> f32 { 8.0 }
@@ -371,6 +404,10 @@ impl Default for EffectsConfig {
             chroma_r: 0.0,
             chroma_g: 1.0,
             chroma_b: 0.0,
+            chroma_bg_enable: false,
+            chroma_bg_r: 0.0,
+            chroma_bg_g: 0.0,
+            chroma_bg_b: 0.0,
             slice_intensity: 0.0,
             slice_height: 16.0,
             slice_prob: 0.3,
@@ -384,9 +421,16 @@ impl Default for EffectsConfig {
             jitter_amount: 0.0,
             jitter_speed: 8.0,
             datamosh: 0.0,
+            feedback_persistence: 0.0,
+            feedback_zoom: 1.0,
+            feedback_rotate: 0.0,
+            feedback_luma_key: 0.0,
+            feedback_chroma: 0.0,
+            feedback_additive: 0.0,
             layer_x: 0.0,
             layer_y: 0.0,
             layer_scale: 1.0,
+            fit_mode: 0.0,
         }
     }
 }
@@ -428,6 +472,10 @@ impl EffectsConfig {
             chroma_r: u.chroma_color_r,
             chroma_g: u.chroma_color_g,
             chroma_b: u.chroma_color_b,
+            chroma_bg_enable: u.chroma_bg_enable > 0.5,
+            chroma_bg_r: u.chroma_bg_r,
+            chroma_bg_g: u.chroma_bg_g,
+            chroma_bg_b: u.chroma_bg_b,
             slice_intensity: u.slice_intensity,
             slice_height: u.slice_height,
             slice_prob: u.slice_prob,
@@ -441,9 +489,16 @@ impl EffectsConfig {
             jitter_amount: u.jitter_amount,
             jitter_speed: u.jitter_speed,
             datamosh: u.datamosh,
+            feedback_persistence: u.feedback_persistence,
+            feedback_zoom: u.feedback_zoom,
+            feedback_rotate: u.feedback_rotate,
+            feedback_luma_key: u.feedback_luma_key,
+            feedback_chroma: u.feedback_chroma,
+            feedback_additive: u.feedback_additive,
             layer_x: u.layer_x,
             layer_y: u.layer_y,
             layer_scale: u.layer_scale,
+            fit_mode: u.fit_mode,
         }
     }
 
@@ -480,6 +535,10 @@ impl EffectsConfig {
         u.chroma_color_r = self.chroma_r.clamp(0.0, 1.0);
         u.chroma_color_g = self.chroma_g.clamp(0.0, 1.0);
         u.chroma_color_b = self.chroma_b.clamp(0.0, 1.0);
+        u.chroma_bg_enable = if self.chroma_bg_enable { 1.0 } else { 0.0 };
+        u.chroma_bg_r = self.chroma_bg_r.clamp(0.0, 1.0);
+        u.chroma_bg_g = self.chroma_bg_g.clamp(0.0, 1.0);
+        u.chroma_bg_b = self.chroma_bg_b.clamp(0.0, 1.0);
         u.slice_intensity = self.slice_intensity.clamp(0.0, 1.0);
         u.slice_height = self.slice_height.clamp(1.0, 128.0);
         u.slice_prob = self.slice_prob.clamp(0.0, 1.0);
@@ -493,9 +552,17 @@ impl EffectsConfig {
         u.jitter_amount = self.jitter_amount.clamp(0.0, 1.0);
         u.jitter_speed = self.jitter_speed.clamp(0.0, 30.0);
         u.datamosh = self.datamosh.clamp(0.0, 1.0);
+        u.feedback_persistence = self.feedback_persistence.clamp(0.0, 1.0);
+        u.feedback_zoom = self.feedback_zoom.clamp(0.8, 1.2);
+        u.feedback_rotate = self.feedback_rotate.clamp(-30.0, 30.0);
+        u.feedback_luma_key = self.feedback_luma_key.clamp(0.0, 1.0);
+        u.feedback_chroma = self.feedback_chroma.clamp(0.0, 1.0);
+        u.feedback_additive = self.feedback_additive.clamp(0.0, 1.0);
         u.layer_x = self.layer_x.clamp(-1.0, 1.0);
         u.layer_y = self.layer_y.clamp(-1.0, 1.0);
         u.layer_scale = self.layer_scale.clamp(0.1, 4.0);
+        // fit_scale_x/y are computed per-frame, not persisted; only fit_mode here.
+        u.fit_mode = self.fit_mode.clamp(0.0, 2.0).round();
     }
 
     /// Get fields organized into groups for display.
@@ -542,6 +609,10 @@ impl EffectsConfig {
                 ("chroma_r", format!("{:.2}", self.chroma_r)),
                 ("chroma_g", format!("{:.2}", self.chroma_g)),
                 ("chroma_b", format!("{:.2}", self.chroma_b)),
+                ("chroma_bg_enable", format!("{}", self.chroma_bg_enable)),
+                ("chroma_bg_r", format!("{:.2}", self.chroma_bg_r)),
+                ("chroma_bg_g", format!("{:.2}", self.chroma_bg_g)),
+                ("chroma_bg_b", format!("{:.2}", self.chroma_bg_b)),
             ]),
             ("shift", vec![
                 ("slice_intensity", format!("{:.2}", self.slice_intensity)),
@@ -558,10 +629,19 @@ impl EffectsConfig {
                 ("jitter_speed", format!("{:.1}", self.jitter_speed)),
                 ("datamosh", format!("{:.2}", self.datamosh)),
             ]),
+            ("feedback", vec![
+                ("feedback_persistence", format!("{:.2}", self.feedback_persistence)),
+                ("feedback_zoom", format!("{:.3}", self.feedback_zoom)),
+                ("feedback_rotate", format!("{:.1}", self.feedback_rotate)),
+                ("feedback_luma_key", format!("{:.2}", self.feedback_luma_key)),
+                ("feedback_chroma", format!("{:.2}", self.feedback_chroma)),
+                ("feedback_additive", format!("{:.2}", self.feedback_additive)),
+            ]),
             ("transform", vec![
                 ("layer_x", format!("{:.2}", self.layer_x)),
                 ("layer_y", format!("{:.2}", self.layer_y)),
                 ("layer_scale", format!("{:.2}", self.layer_scale)),
+                ("fit_mode", format!("{:.0}", self.fit_mode)),
             ]),
         ]
     }
@@ -601,6 +681,10 @@ impl EffectsConfig {
             "chroma_r" => { if let Ok(v) = value.parse() { self.chroma_r = v; return true; } }
             "chroma_g" => { if let Ok(v) = value.parse() { self.chroma_g = v; return true; } }
             "chroma_b" => { if let Ok(v) = value.parse() { self.chroma_b = v; return true; } }
+            "chroma_bg_enable" => { if let Ok(v) = value.parse() { self.chroma_bg_enable = v; return true; } }
+            "chroma_bg_r" => { if let Ok(v) = value.parse() { self.chroma_bg_r = v; return true; } }
+            "chroma_bg_g" => { if let Ok(v) = value.parse() { self.chroma_bg_g = v; return true; } }
+            "chroma_bg_b" => { if let Ok(v) = value.parse() { self.chroma_bg_b = v; return true; } }
             "slice_intensity" => { if let Ok(v) = value.parse() { self.slice_intensity = v; return true; } }
             "slice_height" => { if let Ok(v) = value.parse() { self.slice_height = v; return true; } }
             "slice_prob" => { if let Ok(v) = value.parse() { self.slice_prob = v; return true; } }
@@ -614,9 +698,16 @@ impl EffectsConfig {
             "jitter_amount" => { if let Ok(v) = value.parse() { self.jitter_amount = v; return true; } }
             "jitter_speed" => { if let Ok(v) = value.parse() { self.jitter_speed = v; return true; } }
             "datamosh" => { if let Ok(v) = value.parse() { self.datamosh = v; return true; } }
+            "feedback_persistence" => { if let Ok(v) = value.parse() { self.feedback_persistence = v; return true; } }
+            "feedback_zoom" => { if let Ok(v) = value.parse() { self.feedback_zoom = v; return true; } }
+            "feedback_rotate" => { if let Ok(v) = value.parse() { self.feedback_rotate = v; return true; } }
+            "feedback_luma_key" => { if let Ok(v) = value.parse() { self.feedback_luma_key = v; return true; } }
+            "feedback_chroma" => { if let Ok(v) = value.parse() { self.feedback_chroma = v; return true; } }
+            "feedback_additive" => { if let Ok(v) = value.parse() { self.feedback_additive = v; return true; } }
             "layer_x" => { if let Ok(v) = value.parse() { self.layer_x = v; return true; } }
             "layer_y" => { if let Ok(v) = value.parse() { self.layer_y = v; return true; } }
             "layer_scale" => { if let Ok(v) = value.parse() { self.layer_scale = v; return true; } }
+            "fit_mode" => { if let Ok(v) = value.parse() { self.fit_mode = v; return true; } }
             _ => {}
         }
         false

@@ -62,6 +62,26 @@ struct Uniforms {
     layer_x: f32,
     layer_y: f32,
     layer_scale: f32,
+    // Fit mode (computed scale on CPU) + pad
+    fit_mode: f32,
+    fit_scale_x: f32,
+    fit_scale_y: f32,
+    _pad_fit: f32,
+    // Feedback: persistence + transform + luma key
+    feedback_persistence: f32,
+    feedback_zoom: f32,
+    feedback_rotate: f32,
+    feedback_luma_key: f32,
+    // Feedback: channel desync + additive blend + pad
+    feedback_chroma: f32,
+    feedback_additive: f32,
+    _pad_fb0: f32,
+    _pad_fb1: f32,
+    // Chroma key background fill
+    chroma_bg_enable: f32,
+    chroma_bg_r: f32,
+    chroma_bg_g: f32,
+    chroma_bg_b: f32,
 };
 
 @group(0) @binding(0) var tex: texture_2d<f32>;
@@ -267,12 +287,16 @@ fn linear_to_srgb(c: vec3f) -> vec3f {
 fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
     var sample_uv = uv;
 
-    // --- Layer transform: scale + position. Areas outside the moved/scaled
+    // --- Layer transform: fit + scale + position. Areas outside the moved/scaled
     // frame become transparent (out_alpha = 0 at the end) so the layers below
-    // show through. Defaults (scale 1, x/y 0) skip this entirely. ---
+    // show through. Defaults (scale 1, x/y 0, fit_scale 1) skip this entirely.
+    // fit_scale > 1 (Fit/contain) pushes UVs out of bounds -> transparent bars;
+    // fit_scale < 1 (Fill/cover) samples a sub-region -> crop. ---
     var layer_oob = false;
-    if uniforms.layer_scale != 1.0 || uniforms.layer_x != 0.0 || uniforms.layer_y != 0.0 {
+    if uniforms.layer_scale != 1.0 || uniforms.layer_x != 0.0 || uniforms.layer_y != 0.0
+       || uniforms.fit_scale_x != 1.0 || uniforms.fit_scale_y != 1.0 {
         sample_uv = (sample_uv - 0.5) / max(uniforms.layer_scale, 0.01) + 0.5;
+        sample_uv = (sample_uv - 0.5) * vec2f(uniforms.fit_scale_x, uniforms.fit_scale_y) + 0.5;
         sample_uv += vec2f(-uniforms.layer_x, uniforms.layer_y); // +x = right, +y = up
         if sample_uv.x < 0.0 || sample_uv.x > 1.0 || sample_uv.y < 0.0 || sample_uv.y > 1.0 {
             layer_oob = true;
@@ -390,13 +414,43 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
         color = textureSample(tex, samp, sample_uv);
     }
 
-    // --- Datamosh: displaced blocks bleed the previous output frame ---
-    // Sampling the held previous frame at the displaced UV makes blocks drag
-    // last frame's pixels; because that frame already held the smear, trails
-    // accumulate (bounded by mix, so they fade rather than blow out).
-    if uniforms.datamosh > 0.0 && mosh_amt > 0.0 {
-        let prev = textureSample(prev_tex, samp, sample_uv);
-        color = mix(color, prev, uniforms.datamosh);
+    // --- Feedback family (datamosh + persistence + transform + key/chroma/additive) ---
+    // bleed = max(gated datamosh, ungated persistence). At persistence=1.0 the current
+    // frame stops contributing -> freeze / bloom-out. Sampling the held previous frame
+    // makes trails accumulate frame-over-frame (bounded by the blend so they fade).
+    let bleed_base = max(uniforms.datamosh * mosh_amt, uniforms.feedback_persistence);
+    if bleed_base > 0.0 {
+        // Transform the feedback sample UV (droste zoom + spiral rotate, about center).
+        var fb_uv = sample_uv;
+        if uniforms.feedback_zoom != 1.0 || uniforms.feedback_rotate != 0.0 {
+            let c = sample_uv - 0.5;
+            let ang = radians(uniforms.feedback_rotate);
+            let ca = cos(ang);
+            let sa = sin(ang);
+            let r = vec2f(c.x * ca - c.y * sa, c.x * sa + c.y * ca);
+            fb_uv = r / max(uniforms.feedback_zoom, 0.01) + 0.5;
+        }
+        // Sample previous frame, optionally desyncing channels for color ghosts.
+        var prev: vec4f;
+        if uniforms.feedback_chroma > 0.0 {
+            let off = uniforms.feedback_chroma * 0.02;
+            let pr = textureSample(prev_tex, samp, fb_uv + vec2f(off, 0.0)).r;
+            let pg = textureSample(prev_tex, samp, fb_uv).g;
+            let pb = textureSample(prev_tex, samp, fb_uv - vec2f(off, 0.0)).b;
+            prev = vec4f(pr, pg, pb, 1.0);
+        } else {
+            prev = textureSample(prev_tex, samp, fb_uv);
+        }
+        // Keyed feedback: bias bleed toward bright regions.
+        var b = bleed_base;
+        if uniforms.feedback_luma_key > 0.0 {
+            let l = dot(color.rgb, vec3f(0.299, 0.587, 0.114));
+            b = bleed_base * mix(1.0, l, uniforms.feedback_luma_key);
+        }
+        // Blend: crossfade mix -> additive accumulation.
+        let mixed = mix(color, prev, b);
+        let added = min(color + prev * b, vec4f(1.0));
+        color = mix(mixed, added, uniforms.feedback_additive);
     }
 
     var rgb = color.rgb;
@@ -460,6 +514,15 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
         // spill: pull toward grey where we're near the key hue
         let luma = dot(rgb, vec3f(0.299, 0.587, 0.114));
         rgb = mix(vec3f(luma), rgb, mix(1.0, k, uniforms.chroma_spill));
+        // Optional solid background fill: paint keyed-out (transparent) regions with a
+        // chosen color and make the layer opaque, so a single keyed layer is usable with
+        // nothing beneath it. Uses the keyed alpha as the blend weight before restoring
+        // the layer's own coverage.
+        if uniforms.chroma_bg_enable > 0.5 {
+            let bg = vec3f(uniforms.chroma_bg_r, uniforms.chroma_bg_g, uniforms.chroma_bg_b);
+            rgb = mix(bg, rgb, out_alpha);
+            out_alpha = color.a;
+        }
     }
 
     // Layer transform pushed this fragment outside the source frame: make it
