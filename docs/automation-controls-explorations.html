@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automation controls — outside-the-box explorations</title>
+<style>
+  :root{
+    --bg:#16161c; --surface:#1d1d26; --surface-2:#23232f; --border:#2a2a35;
+    --text:#e6e6ef; --text-dim:#9a9aab; --accent:#5a8fe6; --accent-dim:#3a5f9e;
+    --ok:#5ad28f; --warn:#e6a15a; --radius:8px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; background:var(--bg); color:var(--text);
+    font-family:"IBM Plex Sans",-apple-system,system-ui,sans-serif; font-size:14px; line-height:1.5}
+  code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+  header{padding:24px 28px; border-bottom:1px solid var(--border)}
+  h1{font-size:18px; margin:0 0 6px}
+  header p{margin:4px 0; color:var(--text-dim); max-width:90ch}
+  .tempo-bar{display:flex; align-items:center; gap:12px; margin-top:14px}
+  .tap-btn{padding:8px 18px; border-radius:6px; border:1px solid var(--accent); background:rgba(90,143,230,.12); color:var(--accent); cursor:pointer; font-weight:600; letter-spacing:.06em}
+  .tap-btn:active{background:var(--accent); color:#0c1118}
+  .bpm{font-family:"IBM Plex Mono",monospace; color:var(--text); font-variant-numeric:tabular-nums; min-width:64px}
+  .bpm small{color:var(--text-dim); font-size:10px}
+  .beat-dot{width:12px; height:12px; border-radius:50%; background:var(--border); transition:transform .09s ease-out, background .09s}
+  .beat-dot.on{background:var(--accent); transform:scale(1.6)}
+  .tempo-bar .hint{font-size:12px; color:var(--text-dim)}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:20px; padding:24px 28px}
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; display:flex; flex-direction:column}
+  .card-head{padding:14px 16px; border-bottom:1px solid var(--border)}
+  .card-head h2{font-size:14px; margin:0 0 2px}
+  .card-head .tag{font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em}
+  .card-head p{margin:6px 0 0; font-size:12px; color:var(--text-dim)}
+  .card-body{padding:16px; display:flex; flex-direction:column; gap:14px}
+
+  canvas.scope{width:100%; height:84px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; display:block}
+  .valrow{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-dim)}
+  .valrow .val{margin-left:auto; color:var(--accent); font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono",monospace}
+
+  .formula-wrap{display:flex; flex-direction:column; gap:4px}
+  .formula-lbl{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim)}
+  code.formula{display:block; font-size:12px; color:var(--ok); background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; white-space:pre-wrap; word-break:break-word; user-select:all}
+  code.formula .approx{color:var(--warn)}
+
+  /* shape chips (buttons, not a dropdown) */
+  .chips{display:flex; gap:6px; flex-wrap:wrap}
+  .chips button{flex:1; min-width:40px; padding:8px 0; font-size:16px; background:var(--surface-2); color:var(--text-dim); border:1px solid var(--border); border-radius:6px; cursor:pointer}
+  .chips button.active{border-color:var(--accent); color:var(--accent); background:rgba(90,143,230,.12)}
+
+  /* 1. XY pad */
+  .pad{position:relative; width:100%; aspect-ratio:1/1; max-height:240px; background:
+      linear-gradient(var(--border) 1px, transparent 1px) 0 0/100% 25%,
+      linear-gradient(90deg, var(--border) 1px, transparent 1px) 0 0/25% 100%,
+      var(--surface-2);
+    border:1px solid var(--border); border-radius:8px; touch-action:none; cursor:crosshair; overflow:hidden}
+  .puck{position:absolute; width:22px; height:22px; margin:-11px 0 0 -11px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 0 4px rgba(90,143,230,.25); pointer-events:none}
+  .pad-lbl{position:absolute; font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; pointer-events:none}
+  .pad-lbl.x{right:8px; bottom:6px}
+  .pad-lbl.y{left:6px; top:6px; writing-mode:vertical-rl}
+
+  /* 2. knobs */
+  .knobs{display:flex; justify-content:space-around; gap:8px}
+  .knob{display:flex; flex-direction:column; align-items:center; gap:6px}
+  .knob canvas{width:72px; height:72px; touch-action:none; cursor:ns-resize}
+  .knob .knob-lbl{font-size:11px; color:var(--text-dim)}
+  .knob .knob-val{font-size:11px; color:var(--accent); font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono",monospace}
+
+  /* 3. draw the curve */
+  canvas.draw{width:100%; height:120px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; display:block; touch-action:none; cursor:crosshair}
+  .mini-btns{display:flex; gap:6px}
+  .mini-btns button{flex:1; padding:7px 0; font-size:12px; background:var(--surface-2); color:var(--text); border:1px solid var(--border); border-radius:6px; cursor:pointer}
+  .mini-btns button:hover{border-color:var(--accent); color:var(--accent)}
+  .mini-btns button.active{border-color:var(--accent); color:var(--accent); background:rgba(90,143,230,.12)}
+
+  /* 4. step sequencer */
+  .steps{display:flex; gap:3px; height:120px; align-items:flex-end; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:6px; touch-action:none; cursor:ns-resize}
+  .step{flex:1; background:var(--accent-dim); border-radius:3px 3px 0 0; min-height:2px; position:relative; transition:background .05s}
+  .step.cur{background:var(--accent); box-shadow:0 0 8px rgba(90,143,230,.6)}
+
+  /* 5. flick wheel */
+  .wheel{display:block; margin:2px auto 0; width:150px; height:150px; touch-action:none; cursor:grab}
+  .wheel:active{cursor:grabbing}
+
+  /* 6. touch ribbon */
+  .ribbon{position:relative; width:100%; height:70px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; overflow:hidden; touch-action:none; cursor:ew-resize}
+  .ribbon .fill{position:absolute; top:0; left:0; bottom:0; width:50%; background:linear-gradient(90deg, rgba(90,143,230,.05), rgba(90,143,230,.22)); border-right:2px solid var(--accent)}
+
+  /* 7. macro dial */
+  .macro{display:flex; justify-content:center}
+  .macro-knob{width:120px; height:120px; touch-action:none; cursor:ns-resize}
+  .macro-read{display:flex; justify-content:center; flex-wrap:wrap; gap:4px 14px; font-size:11px; color:var(--text-dim); font-family:"IBM Plex Mono",monospace}
+  .macro-read b{color:var(--accent); font-weight:600}
+
+  /* 8. bouncing ball */
+  .tube{position:relative; width:72px; height:210px; margin:0 auto; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; overflow:hidden; touch-action:none; cursor:ns-resize}
+  .ball{position:absolute; left:50%; width:34px; height:34px; margin-left:-17px; bottom:0; border-radius:50%; background:var(--accent); box-shadow:0 0 14px rgba(90,143,230,.55)}
+
+  .note{padding:0 28px 32px}
+  .note h3{font-size:13px; margin:20px 0 8px}
+  .ideas{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px}
+  .idea{background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px 14px}
+  .idea h4{margin:0 0 4px; font-size:13px; color:var(--accent)}
+  .idea p{margin:0; font-size:12px; color:var(--text-dim)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Automation controls — outside-the-box explorations</h1>
+  <p>Same automation engine, but driven by controls built for <b>hands-on live use</b> instead of sliders and dropdowns. Each is interactive; the oscilloscope and resulting formula update live. Everything is still <b>time-based and slow by default</b>; the step sequencer is the one that rides the tapped tempo.</p>
+  <div class="tempo-bar">
+    <button class="tap-btn" id="tap">TAP</button>
+    <span class="bpm" id="bpm">120 <small>bpm</small></span>
+    <span class="beat-dot" id="beatdot" title="beat"></span>
+    <span class="hint">Tap on the beat (or press <b>T</b>) — sets tempo &amp; the downbeat for the step sequencer.</span>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- 1. XY PAD -->
+  <div class="card">
+    <div class="card-head">
+      <span class="tag">Controller 1</span>
+      <h2>XY pad — rate × depth</h2>
+      <p>One thumb, two params. Drag the puck: left↔right = speed, down↕up = amount. Made for a touchscreen or trackpad — expressive sweeps in one gesture, like a Kaoss pad.</p>
+    </div>
+    <div class="card-body">
+      <div class="chips" id="xy-shapes"></div>
+      <div class="pad" id="xy-pad">
+        <div class="puck" id="xy-puck"></div>
+        <span class="pad-lbl x">speed →</span>
+        <span class="pad-lbl y">amount →</span>
+      </div>
+      <canvas class="scope" id="xy-scope"></canvas>
+      <div class="valrow">live value <span class="val" id="xy-val">—</span></div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting formula</span><code class="formula" id="xy-formula">…</code></div>
+    </div>
+  </div>
+
+  <!-- 2. KNOBS -->
+  <div class="card">
+    <div class="card-head">
+      <span class="tag">Controller 2</span>
+      <h2>Rotary knobs</h2>
+      <p>Hardware feel: click-drag a knob up/down to turn it. Compact, familiar to anyone who's touched a mixer, and 1:1 mappable to a real MIDI controller's encoders later.</p>
+    </div>
+    <div class="card-body">
+      <div class="chips" id="kn-shapes"></div>
+      <div class="knobs">
+        <div class="knob"><canvas id="kn-speed" width="144" height="144"></canvas><span class="knob-lbl">Speed</span><span class="knob-val" id="kn-speedv">—</span></div>
+        <div class="knob"><canvas id="kn-amt" width="144" height="144"></canvas><span class="knob-lbl">Amount</span><span class="knob-val" id="kn-amtv">—</span></div>
+        <div class="knob"><canvas id="kn-center" width="144" height="144"></canvas><span class="knob-lbl">Center</span><span class="knob-val" id="kn-centerv">—</span></div>
+      </div>
+      <canvas class="scope" id="kn-scope"></canvas>
+      <div class="valrow">live value <span class="val" id="kn-val">—</span></div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting formula</span><code class="formula" id="kn-formula">…</code></div>
+    </div>
+  </div>
+
+  <!-- 3. DRAW THE CURVE -->
+  <div class="card">
+    <div class="card-head">
+      <span class="tag">Controller 3</span>
+      <h2>Draw your own shape</h2>
+      <p>Sketch the motion directly — the drawn curve becomes one loop of the LFO. No preset can match this for getting an exact custom move. Pick a loop length, then draw.</p>
+    </div>
+    <div class="card-body">
+      <canvas class="draw" id="dr-canvas"></canvas>
+      <div class="mini-btns" id="dr-loop"></div>
+      <div class="mini-btns">
+        <button id="dr-sine">↺ Load sine</button>
+        <button id="dr-smooth">∿ Smooth</button>
+        <button id="dr-clear">⌫ Clear</button>
+      </div>
+      <canvas class="scope" id="dr-scope"></canvas>
+      <div class="valrow">live value <span class="val" id="dr-val">—</span></div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting representation</span><code class="formula" id="dr-formula">…</code></div>
+    </div>
+  </div>
+
+  <!-- 4. STEP SEQUENCER -->
+  <div class="card">
+    <div class="card-head">
+      <span class="tag">Controller 4</span>
+      <h2>Step sequencer (beat-synced)</h2>
+      <p>A drum-machine for a parameter: 16 steps, one per beat, looping at the tapped tempo. Drag across the bars to paint levels. Best for rhythmic, on-the-grid moves.</p>
+    </div>
+    <div class="card-body">
+      <div class="steps" id="seq"></div>
+      <div class="mini-btns" id="seq-len"></div>
+      <canvas class="scope" id="seq-scope"></canvas>
+      <div class="valrow">live value <span class="val" id="seq-val">—</span></div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting representation</span><code class="formula" id="seq-formula">…</code></div>
+    </div>
+  </div>
+
+  <!-- 5. FLICK WHEEL -->
+  <div class="card">
+    <div class="card-head">
+      <span class="tag">Controller 5</span>
+      <h2>Flick wheel (jog)</h2>
+      <p>DJ-platter feel: grab and spin. Flick speed sets the rate, direction sets which way it cycles — then let go and it coasts down on friction. Throw it for a fast sweep that naturally settles, like a turntable.</p>
+    </div>
+    <div class="card-body">
+      <div class="chips" id="jog-shapes"></div>
+      <canvas class="wheel" id="jog-wheel" width="300" height="300"></canvas>
+      <canvas class="scope" id="jog-scope"></canvas>
+      <div class="valrow">live value <span class="val" id="jog-val">—</span></div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting representation</span><code class="formula" id="jog-formula">…</code></div>
+    </div>
+  </div>
+
+  <!-- 6. TOUCH RIBBON -->
+  <div class="card">
+    <div class="card-head">
+      <span class="tag">Controller 6</span>
+      <h2>Touch ribbon</h2>
+      <p>One-axis strip, theremin-style: finger position = value. Pick what a lift does — <b>Hold</b> freezes where you let go, <b>Spring</b> eases back to zero. The fastest control to grab mid-performance.</p>
+    </div>
+    <div class="card-body">
+      <div class="mini-btns" id="rib-mode"></div>
+      <div class="ribbon" id="ribbon"><div class="fill" id="rib-fill"></div><span class="pad-lbl x">value →</span></div>
+      <canvas class="scope" id="rib-scope"></canvas>
+      <div class="valrow">live value <span class="val" id="rib-val">—</span></div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting representation</span><code class="formula" id="rib-formula">…</code></div>
+    </div>
+  </div>
+
+  <!-- 7. MACRO DIAL -->
+  <div class="card">
+    <div class="card-head">
+      <span class="tag">Controller 7</span>
+      <h2>Macro dial</h2>
+      <p>One “intensity” knob driving a whole scene: speed, amount and depth all move together along preset ranges. Turn one thing and the look transforms — a single hand controls a full motion.</p>
+    </div>
+    <div class="card-body">
+      <div class="chips" id="mac-shapes"></div>
+      <div class="macro"><canvas id="mac-knob" class="macro-knob"></canvas></div>
+      <div class="macro-read" id="mac-read">…</div>
+      <canvas class="scope" id="mac-scope"></canvas>
+      <div class="valrow">live value <span class="val" id="mac-val">—</span></div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting formula</span><code class="formula" id="mac-formula">…</code></div>
+    </div>
+  </div>
+
+  <!-- 8. BOUNCING BALL -->
+  <div class="card">
+    <div class="card-head">
+      <span class="tag">Controller 8</span>
+      <h2>Bouncing ball (physics)</h2>
+      <p>A little gravity engine. Drag the ball up to set the drop height and release — it bounces, each hit a touch lower, then re-launches. Gravity and bounciness reshape the rhythm. Organic, never perfectly even.</p>
+    </div>
+    <div class="card-body">
+      <div class="tube" id="tube"><div class="ball" id="ball"></div></div>
+      <div class="knobs">
+        <div class="knob"><canvas id="ball-grav" width="144" height="144"></canvas><span class="knob-lbl">Gravity</span><span class="knob-val" id="ball-gravv">—</span></div>
+        <div class="knob"><canvas id="ball-bounce" width="144" height="144"></canvas><span class="knob-lbl">Bounce</span><span class="knob-val" id="ball-bouncev">—</span></div>
+      </div>
+      <canvas class="scope" id="ball-scope"></canvas>
+      <div class="valrow">live value <span class="val" id="ball-val">—</span></div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting representation</span><code class="formula" id="ball-formula">…</code></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="note">
+  <h3>More ideas worth a prototype (not built here)</h3>
+  <div class="ideas">
+    <div class="idea"><h4>Performance pads</h4><p>Big momentary/latch buttons: <em>hold</em> to engage a motion (release = snap back), or tap to latch. Perfect for build-ups and drops, like Ableton/Serato pads.</p></div>
+    <div class="idea"><h4>MIDI learn</h4><p>Right-click a param → wiggle a physical knob/fader → it's bound. The on-screen control becomes a mirror of the hardware. The end-goal for live.</p></div>
+    <div class="idea"><h4>Tilt / gesture</h4><p>On a tablet, device tilt drives depth; shake triggers a random reseed of the noise shapes (Drift/Wander).</p></div>
+    <div class="idea"><h4>Audio-reactive envelope</h4><p>Mic/line level (or a band split) drives the param — kick pumps depth, hats flick the RGB split. The VJ classic.</p></div>
+    <div class="idea"><h4>Springs &amp; pendulums</h4><p>Beyond the bouncing ball: drag-release a spring for a damped overshoot, or chain pendulums for coupled, never-repeating motion.</p></div>
+  </div>
+  <h3>How these relate to the formula engine</h3>
+  <p style="color:var(--text-dim); font-size:13px; max-width:90ch">XY pad, knobs and the <b>macro dial</b> just move the same sine/shape parameters, so they compile to the exact same closed-form formula as the sliders (the macro dial simply remaps one input across several params). The <b>flick wheel</b> is closed-form too — it only drives the LFO rate — but its phase is live-integrated, so its export is a steady sine at whatever Hz it has coasted to. <b>Draw-your-own</b>, the <b>step sequencer</b>, the <b>touch ribbon</b> and the <b>bouncing ball</b> aren't closed forms — they're a stored table or a live/physical signal (recorded curve, 16 levels, eased finger position, a gravity sim) replayed against <code>t</code> or <code>beat</code>. In the real app those would either bake to a small lookup the engine samples, or stay preview-only — flagged so live↔export parity stays honest.</p>
+</div>
+
+<script>
+// ---------- shared engine ----------
+function hash(n){ const s=Math.sin(n*127.1)*43758.5453; return s-Math.floor(s); }
+function valNoise(x,seed){ x+=(seed||0)*100; const i=Math.floor(x),f=x-i; const a=hash(i+(seed||0)*57),b=hash(i+1+(seed||0)*57); const u=f*f*(3-2*f); return a+(b-a)*u; }
+function speedHz(s01){ const s=s01/100; return 0.03 + s*s*1.6; }              // 0.03..~1.63 Hz, slow-biased
+function speedLabel(s01){ const hz=speedHz(s01), per=1/hz; return per>=1?per.toFixed(1)+'s/cyc':hz.toFixed(1)+'Hz'; }
+const accent=getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+const border=getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
+const dim   =getComputedStyle(document.documentElement).getPropertyValue('--text-dim').trim();
+const r3 = n => (+n).toFixed(3).replace(/\.?0+$/,'');
+
+// shape -> base wave (-1..1)
+function baseWave(shape, ph, seed){
+  switch(shape){
+    case 'triangle':{ const p=((ph%1)+1)%1; return 1-4*Math.abs(p-0.5); }
+    case 'saw':{ const p=((ph%1)+1)%1; return 2*p-1; }
+    case 'square':{ const p=((ph%1)+1)%1; return p<0.5?1:-1; }
+    case 'smooth': return valNoise(ph,seed)*2-1;
+    default: return Math.sin(ph*2*Math.PI);
+  }
+}
+function shapeNorm(shape, s01, amt, center, tSec, seed){
+  const ph = tSec*speedHz(s01);
+  const v = center/100 + baseWave(shape,ph,seed)*0.5*(amt/100);
+  return Math.max(0,Math.min(1,v));
+}
+function shapeExpr(shape, s01, amt, center){
+  const tt=`t*${r3(speedHz(s01))}`;
+  let base;
+  switch(shape){
+    case 'triangle': base=`tri(${tt})`; break;
+    case 'saw': base=`saw(${tt})`; break;
+    case 'square': base=`square(${tt})`; break;
+    case 'smooth': base=`noise(${tt})*2-1`; break;
+    default: base=`sin(${tt}*tau)`;
+  }
+  const approx = shape==='smooth';
+  return { expr:`clamp(${r3(center/100)} + (${base})*${r3(0.5*amt/100)}, 0, 1)`, approx };
+}
+
+// ---------- tempo (for the step sequencer) ----------
+let bpm=120, downbeat=performance.now()/1000, tapTimes=[];
+function beatsAt(n){ return (n-downbeat)*bpm/60; }
+function tap(){
+  const now=performance.now()/1000;
+  if(tapTimes.length && now-tapTimes[tapTimes.length-1]>2) tapTimes=[];
+  tapTimes.push(now);
+  if(tapTimes.length>=2){ const iv=[]; for(let i=1;i<tapTimes.length;i++) iv.push(tapTimes[i]-tapTimes[i-1]); const a=iv.reduce((x,y)=>x+y,0)/iv.length; bpm=Math.max(30,Math.min(300,60/a)); }
+  downbeat=now; document.getElementById('bpm').innerHTML=Math.round(bpm)+' <small>bpm</small>';
+}
+document.getElementById('tap').addEventListener('click',tap);
+window.addEventListener('keydown',e=>{ if(e.key==='t' && !/^(input|select|textarea)$/i.test(e.target.tagName)) tap(); });
+
+// ---------- generic scrolling scope (fn: tSec -> 0..1) ----------
+function scope(canvas, fn){
+  const dpr=window.devicePixelRatio||1, W=canvas.clientWidth, H=canvas.clientHeight;
+  if(canvas.width!==W*dpr){ canvas.width=W*dpr; canvas.height=H*dpr; }
+  const ctx=canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+  const pad=4, span=4, N=160, now=performance.now()/1000, start=now-span/2;
+  ctx.strokeStyle=border; ctx.lineWidth=1;
+  [pad,H-pad].forEach(y=>{ ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke(); });
+  ctx.strokeStyle=accent; ctx.lineWidth=1.5; ctx.beginPath();
+  for(let i=0;i<N;i++){ const t=start+(i/(N-1))*span; const v=fn(t); const x=pad+(i/(N-1))*(W-2*pad); const y=(H-pad)-v*(H-2*pad); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }
+  ctx.stroke();
+  const px=pad+0.5*(W-2*pad); ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,H); ctx.stroke(); ctx.globalAlpha=1;
+}
+function setFormula(id, o){ const el=document.getElementById(id); el.innerHTML = o.expr + (o.approx?'  <span class="approx">// ≈ approximation</span>':''); }
+const lerp=(a,b,t)=>a+(b-a)*t;
+
+// rolling history scope (for live/physical controls with no closed form) — "now" is the right edge
+function pushHist(buf,v){ const t=performance.now()/1000; buf.push([t,v]); while(buf.length && buf[0][0] < t-6) buf.shift(); }
+function historyScope(canvas, buf){
+  const dpr=window.devicePixelRatio||1, W=canvas.clientWidth, H=canvas.clientHeight;
+  if(canvas.width!==W*dpr){ canvas.width=W*dpr; canvas.height=H*dpr; }
+  const ctx=canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+  const pad=4, span=4, now=performance.now()/1000, start=now-span;
+  ctx.strokeStyle=border; ctx.lineWidth=1;
+  [pad,H-pad].forEach(y=>{ ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke(); });
+  ctx.strokeStyle=accent; ctx.lineWidth=1.5; ctx.beginPath(); let started=false;
+  for(const [t,v] of buf){ if(t<start) continue; const x=pad+((t-start)/span)*(W-2*pad); const y=(H-pad)-v*(H-2*pad); started?ctx.lineTo(x,y):ctx.moveTo(x,y); started=true; }
+  ctx.stroke();
+}
+
+// shape chip helper (buttons, not a dropdown)
+const SHAPES=[['sine','∿'],['triangle','△'],['saw','⋰'],['square','⊓'],['smooth','≈']];
+function buildChips(boxId, get, set){
+  const box=document.getElementById(boxId);
+  SHAPES.forEach(([v,g],i)=>{ const b=document.createElement('button'); b.textContent=g; b.title=v; if(v===get())b.classList.add('active');
+    b.addEventListener('click',()=>{ set(v); box.querySelectorAll('button').forEach(n=>n.classList.toggle('active',n===b)); }); box.appendChild(b); });
+}
+
+/* ===== 1. XY PAD ===== */
+const xy={shape:'sine', speed:22, amt:70};
+buildChips('xy-shapes', ()=>xy.shape, v=>xy.shape=v);
+const pad=document.getElementById('xy-pad'), puck=document.getElementById('xy-puck');
+function placePuck(){ puck.style.left=(xy.speed/100*100)+'%'; puck.style.top=((1-xy.amt/100)*100)+'%'; }
+function padFromEvent(e){ const r=pad.getBoundingClientRect();
+  xy.speed=Math.max(0,Math.min(100,(e.clientX-r.left)/r.width*100));
+  xy.amt  =Math.max(0,Math.min(100,(1-(e.clientY-r.top)/r.height)*100)); placePuck(); }
+pad.addEventListener('pointerdown',e=>{ pad.setPointerCapture(e.pointerId); padFromEvent(e); });
+pad.addEventListener('pointermove',e=>{ if(e.buttons) padFromEvent(e); });
+placePuck();
+
+/* ===== 2. KNOBS ===== */
+const kn={shape:'sine', speed:22, amt:70, center:50};
+buildChips('kn-shapes', ()=>kn.shape, v=>kn.shape=v);
+function drawKnob(canvas, val01, S){
+  S=S||72;
+  const dpr=window.devicePixelRatio||1; if(canvas.width!==S*dpr){ canvas.width=S*dpr; canvas.height=S*dpr; }
+  const ctx=canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,S,S);
+  const cx=S/2, cy=S/2, rad=S*0.36, a0=Math.PI*0.75, a1=a0+Math.PI*1.5;
+  ctx.lineCap='round';
+  ctx.strokeStyle=border; ctx.lineWidth=S/12; ctx.beginPath(); ctx.arc(cx,cy,rad,a0,a1); ctx.stroke();
+  const ang=a0+val01*Math.PI*1.5;
+  ctx.strokeStyle=accent; ctx.beginPath(); ctx.arc(cx,cy,rad,a0,ang); ctx.stroke();
+  ctx.strokeStyle=accent; ctx.lineWidth=S/24; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+Math.cos(ang)*rad, cy+Math.sin(ang)*rad); ctx.stroke();
+}
+function makeKnob(canvasId, valId, getter, setter, fmt, size){
+  const c=document.getElementById(canvasId); let sy=0, sv=0, drag=false;
+  c.addEventListener('pointerdown',e=>{ drag=true; sy=e.clientY; sv=getter(); c.setPointerCapture(e.pointerId); });
+  c.addEventListener('pointermove',e=>{ if(!drag)return; setter(Math.max(0,Math.min(100, sv+(sy-e.clientY)*0.6))); });
+  c.addEventListener('pointerup',()=>drag=false);
+  c._render=()=>{ const v=getter(); drawKnob(c, v/100, size); const el=valId&&document.getElementById(valId); if(el) el.textContent=fmt?fmt(v):Math.round(v); };
+  return c;
+}
+const knSpeed=makeKnob('kn-speed','kn-speedv',()=>kn.speed,v=>kn.speed=v, v=>speedLabel(v));
+const knAmt  =makeKnob('kn-amt','kn-amtv',()=>kn.amt,v=>kn.amt=v, v=>Math.round(v)+'%');
+const knCen  =makeKnob('kn-center','kn-centerv',()=>kn.center,v=>kn.center=v, v=>Math.round(v)+'%');
+
+/* ===== 3. DRAW THE CURVE ===== */
+const NPTS=128; let curve=new Float32Array(NPTS).map((_, i)=>0.5+0.4*Math.sin(i/NPTS*2*Math.PI));
+let drLoop=4; // seconds
+const drCanvas=document.getElementById('dr-canvas');
+function drawCurveEditor(){
+  const dpr=window.devicePixelRatio||1, W=drCanvas.clientWidth, H=drCanvas.clientHeight;
+  if(drCanvas.width!==W*dpr){ drCanvas.width=W*dpr; drCanvas.height=H*dpr; }
+  const ctx=drCanvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle=border; ctx.lineWidth=1; [0.25,0.5,0.75].forEach(f=>{ ctx.beginPath(); ctx.moveTo(0,H*f); ctx.lineTo(W,H*f); ctx.stroke(); });
+  // playhead position within loop
+  const phase=((performance.now()/1000)/drLoop)%1;
+  ctx.strokeStyle=dim; ctx.globalAlpha=.6; ctx.beginPath(); ctx.moveTo(phase*W,0); ctx.lineTo(phase*W,H); ctx.stroke(); ctx.globalAlpha=1;
+  ctx.strokeStyle=accent; ctx.lineWidth=2; ctx.beginPath();
+  for(let i=0;i<NPTS;i++){ const x=i/(NPTS-1)*W, y=(1-curve[i])*H; i?ctx.lineTo(x,y):ctx.moveTo(x,y); } ctx.stroke();
+}
+let drDrag=false, drLastI=-1;
+function drPaint(e){ const r=drCanvas.getBoundingClientRect();
+  const i=Math.max(0,Math.min(NPTS-1, Math.round((e.clientX-r.left)/r.width*(NPTS-1))));
+  const v=Math.max(0,Math.min(1, 1-(e.clientY-r.top)/r.height));
+  if(drLastI>=0 && Math.abs(i-drLastI)>1){ const lo=Math.min(i,drLastI), hi=Math.max(i,drLastI); for(let k=lo;k<=hi;k++) curve[k]=v; }
+  else curve[i]=v; drLastI=i;
+}
+drCanvas.addEventListener('pointerdown',e=>{ drDrag=true; drLastI=-1; drCanvas.setPointerCapture(e.pointerId); drPaint(e); });
+drCanvas.addEventListener('pointermove',e=>{ if(drDrag) drPaint(e); });
+drCanvas.addEventListener('pointerup',()=>{ drDrag=false; drLastI=-1; });
+document.getElementById('dr-clear').addEventListener('click',()=>curve.fill(0.5));
+document.getElementById('dr-sine').addEventListener('click',()=>{ for(let i=0;i<NPTS;i++) curve[i]=0.5+0.4*Math.sin(i/NPTS*2*Math.PI); });
+document.getElementById('dr-smooth').addEventListener('click',()=>{ const c2=curve.slice(); for(let i=0;i<NPTS;i++){ const a=c2[(i-1+NPTS)%NPTS], b=c2[i], d=c2[(i+1)%NPTS]; curve[i]=(a+b+d)/3; } });
+const drLoopBox=document.getElementById('dr-loop');
+[['2s',2],['4s',4],['8s',8],['16s',16]].forEach(([lbl,s])=>{ const b=document.createElement('button'); b.textContent=lbl; if(s===drLoop)b.classList.add('active');
+  b.addEventListener('click',()=>{ drLoop=s; drLoopBox.querySelectorAll('button').forEach(n=>n.classList.toggle('active',n===b)); }); drLoopBox.appendChild(b); });
+function drValue(t){ const i=Math.floor(((t/drLoop)%1+1)%1*NPTS)%NPTS; return curve[i]; }
+
+/* ===== 4. STEP SEQUENCER ===== */
+let nSteps=16; let seqVals=Array.from({length:32},(_,i)=>0.5+0.45*Math.sin(i/4));
+const seqBox=document.getElementById('seq');
+function buildSteps(){ seqBox.innerHTML=''; for(let i=0;i<nSteps;i++){ const d=document.createElement('div'); d.className='step'; d.dataset.i=i; seqBox.appendChild(d); } }
+buildSteps();
+let seqDrag=false;
+function seqPaint(e){ const r=seqBox.getBoundingClientRect();
+  const i=Math.max(0,Math.min(nSteps-1, Math.floor((e.clientX-r.left)/r.width*nSteps)));
+  const v=Math.max(0,Math.min(1, 1-(e.clientY-r.top)/r.height)); seqVals[i]=v; }
+seqBox.addEventListener('pointerdown',e=>{ seqDrag=true; seqBox.setPointerCapture(e.pointerId); seqPaint(e); });
+seqBox.addEventListener('pointermove',e=>{ if(seqDrag) seqPaint(e); });
+seqBox.addEventListener('pointerup',()=>seqDrag=false);
+const seqLenBox=document.getElementById('seq-len');
+[['8',8],['16',16],['32',32]].forEach(([lbl,n])=>{ const b=document.createElement('button'); b.textContent=lbl+' steps'; if(n===nSteps)b.classList.add('active');
+  b.addEventListener('click',()=>{ nSteps=n; buildSteps(); seqLenBox.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b)); }); seqLenBox.appendChild(b); });
+function seqValue(t){ const idx=((Math.floor(beatsAt(t))%nSteps)+nSteps)%nSteps; return seqVals[idx]; }
+
+/* ===== 5. FLICK WHEEL ===== */
+const jog={shape:'sine', amt:80, vel:0.25, phase:0, buf:[]};
+buildChips('jog-shapes', ()=>jog.shape, v=>jog.shape=v);
+const wheel=document.getElementById('jog-wheel');
+let jogDrag=false, jogLastA=0, jogLastT=0;
+function jogAng(e){ const r=wheel.getBoundingClientRect(); return Math.atan2(e.clientY-(r.top+r.height/2), e.clientX-(r.left+r.width/2)); }
+wheel.addEventListener('pointerdown',e=>{ jogDrag=true; jog.vel=0; jogLastA=jogAng(e); jogLastT=performance.now()/1000; wheel.setPointerCapture(e.pointerId); });
+wheel.addEventListener('pointermove',e=>{ if(!jogDrag)return; const a=jogAng(e), t=performance.now()/1000; let d=a-jogLastA; if(d>Math.PI)d-=2*Math.PI; if(d<-Math.PI)d+=2*Math.PI; const dt=Math.max(1e-3,t-jogLastT); jog.phase+=d/(2*Math.PI); jog.vel=(d/(2*Math.PI))/dt; jogLastA=a; jogLastT=t; });
+wheel.addEventListener('pointerup',()=>{ jogDrag=false; });
+function drawWheel(){
+  const c=wheel, dpr=window.devicePixelRatio||1, S=c.clientWidth||150;
+  if(c.width!==S*dpr){ c.width=S*dpr; c.height=S*dpr; }
+  const ctx=c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,S,S);
+  const cx=S/2, cy=S/2, R=S*0.42, ph=jog.phase*2*Math.PI;
+  ctx.strokeStyle=border; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(cx,cy,R,0,2*Math.PI); ctx.stroke();
+  ctx.lineWidth=1; for(let k=0;k<12;k++){ const a=ph+k/12*2*Math.PI; ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*R*0.62, cy+Math.sin(a)*R*0.62); ctx.lineTo(cx+Math.cos(a)*R, cy+Math.sin(a)*R); ctx.stroke(); }
+  ctx.fillStyle=border; ctx.beginPath(); ctx.arc(cx,cy,R*0.18,0,2*Math.PI); ctx.fill();
+  ctx.strokeStyle=accent; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+Math.cos(ph)*R*0.55, cy+Math.sin(ph)*R*0.55); ctx.stroke();
+  ctx.fillStyle=accent; ctx.beginPath(); ctx.arc(cx+Math.cos(ph)*R, cy+Math.sin(ph)*R, S*0.05, 0, 2*Math.PI); ctx.fill();
+}
+
+/* ===== 6. TOUCH RIBBON ===== */
+const rib={target:0.5, value:0.5, mode:'return', k:0.18, buf:[]};
+const ribEl=document.getElementById('ribbon'), ribFill=document.getElementById('rib-fill'); let ribDrag=false;
+function ribFrom(e){ const r=ribEl.getBoundingClientRect(); rib.target=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)); }
+ribEl.addEventListener('pointerdown',e=>{ ribDrag=true; ribEl.setPointerCapture(e.pointerId); ribFrom(e); });
+ribEl.addEventListener('pointermove',e=>{ if(ribDrag) ribFrom(e); });
+ribEl.addEventListener('pointerup',()=>{ ribDrag=false; if(rib.mode==='return') rib.target=0; });
+const ribModeBox=document.getElementById('rib-mode');
+[['Hold on lift','hold'],['Spring to 0','return']].forEach(([lbl,m])=>{ const b=document.createElement('button'); b.textContent=lbl; if(m===rib.mode)b.classList.add('active');
+  b.addEventListener('click',()=>{ rib.mode=m; ribModeBox.querySelectorAll('button').forEach(n=>n.classList.toggle('active',n===b)); }); ribModeBox.appendChild(b); });
+
+/* ===== 7. MACRO DIAL ===== */
+const macro={shape:'sine', m:35};
+buildChips('mac-shapes', ()=>macro.shape, v=>macro.shape=v);
+const macKnob=makeKnob('mac-knob', null, ()=>macro.m, v=>macro.m=v, null, 120);
+function macroParams(){ return { speed:lerp(6,62,macro.m/100), amt:lerp(18,92,macro.m/100), center:50 }; }
+
+/* ===== 8. BOUNCING BALL ===== */
+const ball={y:0.7, v:0, H:0.7, gPct:55, ePct:70, g:2, e:0.75, buf:[]};
+const tubeEl=document.getElementById('tube'), ballEl=document.getElementById('ball'); let ballDrag=false;
+function ballFrom(e){ const r=tubeEl.getBoundingClientRect(); let yy=1-(e.clientY-r.top)/r.height; yy=Math.max(0,Math.min(1,yy)); ball.y=yy; ball.v=0; ball.H=Math.max(0.08,yy); }
+tubeEl.addEventListener('pointerdown',e=>{ ballDrag=true; tubeEl.setPointerCapture(e.pointerId); ballFrom(e); });
+tubeEl.addEventListener('pointermove',e=>{ if(ballDrag) ballFrom(e); });
+tubeEl.addEventListener('pointerup',()=>{ ballDrag=false; });
+const ballGrav  =makeKnob('ball-grav','ball-gravv',()=>ball.gPct,v=>ball.gPct=v, v=>r3(lerp(0.6,6,v/100))+'g');
+const ballBounce=makeKnob('ball-bounce','ball-bouncev',()=>ball.ePct,v=>ball.ePct=v, v=>Math.round(lerp(0.5,0.93,v/100)*100)+'%');
+function positionBall(){ const h=tubeEl.clientHeight-ballEl.offsetHeight; ballEl.style.bottom=(ball.y*h)+'px'; }
+
+/* ===== main loop ===== */
+let lastBeat=-1, prevNow=performance.now()/1000;
+function frame(){
+  const now=performance.now()/1000;
+  const dt=Math.min(0.05, Math.max(0, now-prevNow)); prevNow=now;
+  // XY
+  const xyFn=t=>shapeNorm(xy.shape, xy.speed, xy.amt, 50, t, 1);
+  scope(document.getElementById('xy-scope'), xyFn);
+  document.getElementById('xy-val').textContent=xyFn(now).toFixed(2);
+  setFormula('xy-formula', shapeExpr(xy.shape, xy.speed, xy.amt, 50));
+  // knobs
+  knSpeed._render(); knAmt._render(); knCen._render();
+  const knFn=t=>shapeNorm(kn.shape, kn.speed, kn.amt, kn.center, t, 1);
+  scope(document.getElementById('kn-scope'), knFn);
+  document.getElementById('kn-val').textContent=knFn(now).toFixed(2);
+  setFormula('kn-formula', shapeExpr(kn.shape, kn.speed, kn.amt, kn.center));
+  // draw
+  drawCurveEditor();
+  scope(document.getElementById('dr-scope'), drValue);
+  document.getElementById('dr-val').textContent=drValue(now).toFixed(2);
+  setFormula('dr-formula', {expr:`wavetable(${NPTS} pts) sampled every ${drLoop}s`, approx:true});
+  // sequencer
+  const cur=((Math.floor(beatsAt(now))%nSteps)+nSteps)%nSteps;
+  seqBox.querySelectorAll('.step').forEach(d=>{ const i=+d.dataset.i; d.style.height=(seqVals[i]*100)+'%'; d.classList.toggle('cur', i===cur); });
+  scope(document.getElementById('seq-scope'), seqValue);
+  document.getElementById('seq-val').textContent=seqValue(now).toFixed(2);
+  setFormula('seq-formula', {expr:`step([${nSteps} levels], beat) — 1 step / beat @ ${Math.round(bpm)}bpm`, approx:true});
+  // flick wheel
+  if(!jogDrag){ jog.phase+=jog.vel*dt; jog.vel*=Math.pow(0.6,dt); if(Math.abs(jog.vel)<0.002) jog.vel=0; }
+  jog.vel=Math.max(-3,Math.min(3,jog.vel));
+  drawWheel();
+  const jogV=Math.max(0,Math.min(1, 0.5+0.5*(jog.amt/100)*baseWave(jog.shape, jog.phase, 1)));
+  pushHist(jog.buf, jogV); historyScope(document.getElementById('jog-scope'), jog.buf);
+  document.getElementById('jog-val').textContent=jogV.toFixed(2);
+  setFormula('jog-formula', {expr:`${jog.shape==='sine'?'sin':jog.shape}(phase) · phase flicked & coasting — rate ≈ ${r3(Math.abs(jog.vel))}Hz`, approx:true});
+  // touch ribbon
+  rib.value+=(rib.target-rib.value)*(1-Math.exp(-rib.k*60*dt));
+  ribFill.style.width=(rib.value*100)+'%';
+  pushHist(rib.buf, rib.value); historyScope(document.getElementById('rib-scope'), rib.buf);
+  document.getElementById('rib-val').textContent=rib.value.toFixed(2);
+  setFormula('rib-formula', {expr:`live ribbon → ${rib.mode==='hold'?'hold on lift':'spring → 0'} · ease(k=${rib.k})`, approx:true});
+  // macro dial
+  macKnob._render();
+  const mp=macroParams(), macFn=t=>shapeNorm(macro.shape, mp.speed, mp.amt, mp.center, t, 1);
+  scope(document.getElementById('mac-scope'), macFn);
+  document.getElementById('mac-val').textContent=macFn(now).toFixed(2);
+  document.getElementById('mac-read').innerHTML=`macro <b>${Math.round(macro.m)}%</b> · speed <b>${speedLabel(mp.speed)}</b> · amount <b>${Math.round(mp.amt)}%</b>`;
+  setFormula('mac-formula', shapeExpr(macro.shape, mp.speed, mp.amt, mp.center));
+  // bouncing ball
+  ball.g=lerp(0.6,6,ball.gPct/100); ball.e=lerp(0.5,0.93,ball.ePct/100);
+  if(!ballDrag){
+    ball.v-=ball.g*dt; ball.y+=ball.v*dt;
+    if(ball.y<=0){ ball.y=0; ball.v=-ball.v*ball.e; if(ball.v*ball.v/(2*ball.g) < 0.03) ball.v=Math.sqrt(2*ball.g*ball.H); }
+    if(ball.y>1){ ball.y=1; ball.v=-Math.abs(ball.v)*ball.e; }
+  }
+  positionBall(); ballGrav._render(); ballBounce._render();
+  pushHist(ball.buf, ball.y); historyScope(document.getElementById('ball-scope'), ball.buf);
+  document.getElementById('ball-val').textContent=ball.y.toFixed(2);
+  setFormula('ball-formula', {expr:`bounce(g=${r3(ball.g)}, e=${r3(ball.e)}) → height · drop ${Math.round(ball.H*100)}%`, approx:true});
+  // beat dot
+  const bi=Math.floor(beatsAt(now));
+  if(bi!==lastBeat){ lastBeat=bi; const d=document.getElementById('beatdot'); d.classList.add('on'); setTimeout(()=>d.classList.remove('on'),90); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automation UI — simpler variations</title>
+<style>
+  :root{
+    --bg:#16161c; --surface:#1d1d26; --surface-2:#23232f; --border:#2a2a35;
+    --text:#e6e6ef; --text-dim:#9a9aab; --accent:#5a8fe6; --accent-dim:#3a5f9e;
+    --ok:#5ad28f; --warn:#e6a15a;
+    --radius:8px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"IBM Plex Sans",-apple-system,system-ui,sans-serif; font-size:14px; line-height:1.5;
+  }
+  code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+  header{padding:24px 28px; border-bottom:1px solid var(--border)}
+  h1{font-size:18px; margin:0 0 6px}
+  header p{margin:4px 0; color:var(--text-dim); max-width:80ch}
+  .principles{display:flex; gap:10px; flex-wrap:wrap; margin-top:12px}
+  .pill{background:var(--surface-2); border:1px solid var(--border); border-radius:999px; padding:4px 12px; font-size:12px; color:var(--text-dim)}
+  .pill b{color:var(--accent)}
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:20px; padding:24px 28px}
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; display:flex; flex-direction:column}
+  .card-head{padding:14px 16px; border-bottom:1px solid var(--border)}
+  .card-head h2{font-size:14px; margin:0 0 2px}
+  .card-head .tag{font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em}
+  .card-head p{margin:6px 0 0; font-size:12px; color:var(--text-dim)}
+  .card-body{padding:16px; display:flex; flex-direction:column; gap:14px}
+  /* preview */
+  .preview-wrap{display:flex; flex-direction:column; gap:6px}
+  canvas.preview{width:100%; height:90px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; display:block}
+  .ghost{display:flex; align-items:center; gap:8px}
+  .ghost input[type=range]{flex:1; accent-color:var(--accent)}
+  .ghost .val{font-size:12px; min-width:54px; text-align:right; color:var(--accent); font-variant-numeric:tabular-nums}
+  .ghost .lbl{font-size:11px; color:var(--text-dim); min-width:44px}
+  /* control rows */
+  .row{display:flex; align-items:center; gap:10px}
+  .row > label{font-size:12px; color:var(--text-dim); min-width:58px}
+  .row input[type=range]{flex:1; accent-color:var(--accent)}
+  .row .num{font-size:12px; min-width:44px; text-align:right; color:var(--text); font-variant-numeric:tabular-nums}
+  select,button,input[type=text]{font-family:inherit; font-size:13px}
+  select{background:var(--surface-2); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:7px 10px; width:100%}
+  /* segmented shapes */
+  .seg{display:flex; gap:6px; flex-wrap:wrap}
+  .seg button{flex:1; min-width:42px; padding:9px 0; font-size:17px; line-height:1; background:var(--surface-2); color:var(--text-dim); border:1px solid var(--border); border-radius:6px; cursor:pointer}
+  .seg button.active{border-color:var(--accent); color:var(--accent); background:rgba(90,143,230,.12)}
+  /* preset cards */
+  .presets{display:grid; grid-template-columns:repeat(3,1fr); gap:8px}
+  .preset{background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:8px 6px 6px; cursor:pointer; text-align:center}
+  .preset.active{border-color:var(--accent)}
+  .preset canvas{width:100%; height:34px; display:block}
+  .preset span{display:block; font-size:11px; color:var(--text-dim); margin-top:4px}
+  .preset.active span{color:var(--accent)}
+  /* footer actions */
+  .actions{display:flex; gap:8px; margin-top:2px}
+  .actions button{flex:1; padding:9px 0; border-radius:6px; border:1px solid var(--border); cursor:pointer; background:var(--surface-2); color:var(--text)}
+  .actions .apply{background:var(--accent); border-color:var(--accent); color:#0c1118; font-weight:600}
+  .actions .remove{color:var(--warn)}
+  .adv{border-top:1px dashed var(--border); padding-top:12px; display:flex; flex-direction:column; gap:12px}
+  .adv.collapsed{display:none}
+  .adv-toggle{font-size:12px; color:var(--text-dim); background:none; border:none; cursor:pointer; padding:0; text-align:left}
+  .toggle{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-dim)}
+  .note{padding:0 28px 28px}
+  .note h3{font-size:13px; margin:18px 0 6px}
+  .note ul{margin:0; padding-left:18px; color:var(--text-dim); font-size:13px}
+  .compact-strip{display:flex; align-items:center; gap:10px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:8px 10px}
+  .compact-strip select{width:auto; flex:0 0 auto}
+  .compact-strip canvas{height:30px; width:90px; background:var(--bg); border:1px solid var(--border); border-radius:4px}
+  .compact-strip .mini-num{font-size:11px; color:var(--accent); min-width:40px; text-align:right; font-variant-numeric:tabular-nums}
+  /* tempo / tap row */
+  .tempo-row{display:flex; align-items:center; gap:10px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:8px 10px}
+  .tap-btn{padding:7px 16px; border-radius:6px; border:1px solid var(--accent); background:rgba(90,143,230,.12); color:var(--accent); cursor:pointer; font-weight:600; letter-spacing:.06em; font-size:13px}
+  .tap-btn:active{background:var(--accent); color:#0c1118}
+  .bpm{font-family:"IBM Plex Mono",ui-monospace,monospace; color:var(--text); font-variant-numeric:tabular-nums; min-width:64px}
+  .bpm small{color:var(--text-dim); font-size:10px}
+  .beat-dot{width:12px; height:12px; border-radius:50%; background:var(--border); transition:transform .09s ease-out, background .09s}
+  .beat-dot.on{background:var(--accent); transform:scale(1.6)}
+  .tempo-row .toggle{margin-left:auto}
+  .tempo-row .hint{font-size:11px; color:var(--text-dim)}
+  /* carousel / preset stepper (Variation D) */
+  .carousel{display:flex; flex-direction:column; gap:8px}
+  .carousel .arrow{flex:0 0 auto; width:40px; padding:3px 0; border:1px solid var(--border); background:var(--surface-2); color:var(--text); border-radius:6px; cursor:pointer; font-size:20px; line-height:1}
+  .carousel .arrow:hover{border-color:var(--accent); color:var(--accent)}
+  .carousel .arrow:active{background:var(--accent); color:#0c1118}
+  .carousel-name{display:flex; align-items:center; gap:10px}
+  .carousel-name .nm-wrap{flex:1; min-width:0; display:flex; align-items:baseline; justify-content:center; gap:8px}
+  .carousel-name .nm{font-size:15px; color:var(--accent)}
+  .carousel-idx{font-size:11px; color:var(--text-dim); font-variant-numeric:tabular-nums}
+  /* rotary knobs (Variation D) */
+  .knobs{display:flex; justify-content:space-around; gap:8px; flex-wrap:wrap}
+  .knob{display:flex; flex-direction:column; align-items:center; gap:6px}
+  .knob canvas{width:64px; height:64px; touch-action:none; cursor:ns-resize}
+  .knob .knob-lbl{font-size:11px; color:var(--text-dim)}
+  .knob .knob-val{font-size:11px; color:var(--accent); font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono",ui-monospace,monospace}
+  /* resulting formula readout */
+  .formula-wrap{display:flex; flex-direction:column; gap:4px}
+  .formula-lbl{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim)}
+  code.formula{display:block; font-size:12px; color:var(--ok); background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; white-space:pre-wrap; word-break:break-word; user-select:all; cursor:text}
+  code.formula .approx{color:var(--warn)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Automation editor — simpler variations</h1>
+  <p>Four takes on a leaner "make this param move" UI, to compare feel before committing. Each preview is live (oscilloscope: <em>now</em> is the centre line, the wave scrolls through it). All are <b>time-based</b> and default to a <b>slow</b> motion.</p>
+  <div class="principles">
+    <span class="pill">Default: <b>slow</b> &amp; <b>time-based</b> (no BPM)</span>
+    <span class="pill">Live value <b>visibly moves</b></span>
+    <span class="pill"><b>Remove</b> restores the base value</span>
+    <span class="pill">Beat-sync is opt-in, tucked away</span>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- ============ VARIATION A — Presets first ============ -->
+  <div class="card" data-variant="A">
+    <div class="card-head">
+      <span class="tag">Variation A</span>
+      <h2>Motion presets</h2>
+      <p>Pick a feel from a gallery (each tile previews itself), then fine-tune with sliders. No raw shapes or formulas — just a starting vibe you nudge. The fastest path for live use.</p>
+    </div>
+    <div class="card-body">
+      <div class="presets" id="A-presets"></div>
+      <div class="preview-wrap">
+        <canvas class="preview" id="A-preview"></canvas>
+        <div class="ghost"><span class="lbl">value</span><input type="range" id="A-ghost" min="0" max="1" step="0.001" disabled><span class="val" id="A-ghostval">—</span></div>
+      </div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting formula</span><code class="formula" id="A-formula">…</code></div>
+      <div class="row"><label>Speed</label><input type="range" id="A-speed" min="0" max="100" value="20"><span class="num" id="A-speedn">slow</span></div>
+      <div class="row"><label>Amount</label><input type="range" id="A-amt" min="0" max="100" value="70"><span class="num" id="A-amtn">70%</span></div>
+      <div class="row"><label>Center</label><input type="range" id="A-center" min="0" max="100" value="50"><span class="num" id="A-centern">50%</span></div>
+      <div class="row"><label>Phase</label><input type="range" id="A-phase" min="0" max="360" value="0"><span class="num" id="A-phasen">0°</span></div>
+      <div class="tempo-row">
+        <button class="tap-btn" id="A-tap" title="Tap on the beat (or press T)">TAP</button>
+        <span class="bpm" id="A-bpm">120 <small>bpm</small></span>
+        <span class="beat-dot" id="A-beatdot" title="beat"></span>
+        <label class="toggle"><input type="checkbox" id="A-sync"> Sync to beat</label>
+      </div>
+      <div class="actions"><button class="apply">Apply</button><button class="remove">Remove</button></div>
+    </div>
+  </div>
+
+  <!-- ============ VARIATION B — Shape + 2 sliders ============ -->
+  <div class="card" data-variant="B">
+    <div class="card-head">
+      <span class="tag">Variation B</span>
+      <h2>Shape + Speed + Amount</h2>
+      <p>One segmented shape picker and two sliders cover ~90% of cases. Everything else (center, phase, beat-sync) hides under “Advanced”.</p>
+    </div>
+    <div class="card-body">
+      <div class="seg" id="B-shapes"></div>
+      <div class="preview-wrap">
+        <canvas class="preview" id="B-preview"></canvas>
+        <div class="ghost"><span class="lbl">value</span><input type="range" id="B-ghost" min="0" max="1" step="0.001" disabled><span class="val" id="B-ghostval">—</span></div>
+      </div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting formula</span><code class="formula" id="B-formula">…</code></div>
+      <div class="row"><label>Speed</label><input type="range" id="B-speed" min="0" max="100" value="20"><span class="num" id="B-speedn">slow</span></div>
+      <div class="row"><label>Amount</label><input type="range" id="B-amt" min="0" max="100" value="70"><span class="num" id="B-amtn">70%</span></div>
+      <label class="toggle"><input type="checkbox" id="B-invert"> Invert direction</label>
+      <button class="adv-toggle" id="B-advtoggle">▸ Advanced</button>
+      <div class="adv collapsed" id="B-adv">
+        <div class="row"><label>Center</label><input type="range" id="B-center" min="0" max="100" value="50"><span class="num" id="B-centern">50%</span></div>
+        <div class="row"><label>Phase</label><input type="range" id="B-phase" min="0" max="360" value="0"><span class="num" id="B-phasen">0°</span></div>
+        <label class="toggle"><input type="checkbox" id="B-beat"> Sync to beat (tap tempo)</label>
+      </div>
+      <div class="actions"><button class="apply">Apply</button><button class="remove">Remove</button></div>
+    </div>
+  </div>
+
+  <!-- ============ VARIATION C — Inline compact ============ -->
+  <div class="card" data-variant="C">
+    <div class="card-head">
+      <span class="tag">Variation C</span>
+      <h2>Inline strip (no modal)</h2>
+      <p>A one-line control that expands right under the param — no overlay. Shape dropdown, two sliders, and a tiny live sparkline. Densest; good when automating many params at once.</p>
+    </div>
+    <div class="card-body">
+      <div class="compact-strip">
+        <select id="C-shape">
+          <option value="sine">∿ Sine</option>
+          <option value="triangle">△ Triangle</option>
+          <option value="saw">⋰ Ramp</option>
+          <option value="square">⊓ Square</option>
+          <option value="smooth">≈ Random (smooth)</option>
+          <option value="stepped">⊞ Random (stepped)</option>
+        </select>
+        <canvas id="C-spark"></canvas>
+        <span class="mini-num" id="C-ghostval">—</span>
+      </div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting formula</span><code class="formula" id="C-formula">…</code></div>
+      <div class="row"><label>Speed</label><input type="range" id="C-speed" min="0" max="100" value="15"><span class="num" id="C-speedn">slow</span></div>
+      <div class="row"><label>Amount</label><input type="range" id="C-amt" min="0" max="100" value="60"><span class="num" id="C-amtn">60%</span></div>
+      <div class="actions"><button class="apply">Apply</button><button class="remove">Remove</button></div>
+    </div>
+  </div>
+
+  <!-- ============ VARIATION D — Preset stepper (compact A) ============ -->
+  <div class="card" data-variant="D">
+    <div class="card-head">
+      <span class="tag">Variation D</span>
+      <h2>Preset stepper (compact)</h2>
+      <p>Variation A's presets, one at a time — click ‹ › or use ←/→ keys to cycle. Trades the gallery grid for one big preview, saving vertical space.</p>
+    </div>
+    <div class="card-body">
+      <div class="carousel">
+        <div class="carousel-name">
+          <button class="arrow" id="D-prev" title="Previous (←)">‹</button>
+          <span class="nm-wrap"><span class="nm" id="D-name">Pulse</span><span class="carousel-idx" id="D-idx">1/9</span></span>
+          <button class="arrow" id="D-next" title="Next (→)">›</button>
+        </div>
+        <canvas class="preview" id="D-preview"></canvas>
+      </div>
+      <div class="ghost"><span class="lbl">value</span><input type="range" id="D-ghost" min="0" max="1" step="0.001" disabled><span class="val" id="D-ghostval">—</span></div>
+      <div class="knobs">
+        <div class="knob"><canvas id="D-speed-k" width="64" height="64" title="drag up/down · double-click resets"></canvas><span class="knob-lbl">Speed</span><span class="knob-val" id="D-speedn">slow</span></div>
+        <div class="knob"><canvas id="D-amt-k" width="64" height="64" title="drag up/down · double-click resets"></canvas><span class="knob-lbl">Amount</span><span class="knob-val" id="D-amtn">100%</span></div>
+        <div class="knob"><canvas id="D-center-k" width="64" height="64" title="drag up/down · double-click resets"></canvas><span class="knob-lbl">Center</span><span class="knob-val" id="D-centern">50%</span></div>
+        <div class="knob"><canvas id="D-phase-k" width="64" height="64" title="drag up/down · double-click resets"></canvas><span class="knob-lbl">Phase</span><span class="knob-val" id="D-phasen">0°</span></div>
+      </div>
+      <div class="tempo-row">
+        <button class="tap-btn" id="D-tap" title="Tap on the beat (or press T)">TAP</button>
+        <span class="bpm" id="D-bpm">120 <small>bpm</small></span>
+        <span class="beat-dot" id="D-beatdot" title="beat"></span>
+        <label class="toggle"><input type="checkbox" id="D-sync"> Sync to beat</label>
+      </div>
+      <div class="formula-wrap"><span class="formula-lbl">resulting formula</span><code class="formula" id="D-formula">…</code></div>
+      <div class="actions"><button class="apply">Apply</button><button class="remove">Remove</button></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="note">
+  <h3>What each variation is trying to prove</h3>
+  <ul>
+    <li><b>A (Presets):</b> Is a curated gallery enough? Fewest decisions, but you can only get the looks we ship.</li>
+    <li><b>B (Shape + 2 sliders):</b> The middle ground — simple by default, full control one click away under “Advanced”.</li>
+    <li><b>C (Inline strip):</b> Does removing the modal entirely feel better for a fast live workflow? Trades preview size for density.</li>
+    <li><b>D (Preset stepper):</b> Variation A made compact — same presets, cycled one at a time with ‹ › / arrow keys. One big preview instead of a 3×3 grid; least scrolling.</li>
+  </ul>
+  <h3>Shared principles baked in (these also fix the bugs you hit)</h3>
+  <ul>
+    <li><b>Slow + time-based by default</b> — Speed starts low; one full cycle every several seconds. Beat/BPM is opt-in only (B).</li>
+    <li><b>The live value visibly animates</b> — the “value” bar/number under each preview moves continuously, so an active automation is obviously alive (today the param UI sits still).</li>
+    <li><b>Remove restores the base</b> — “Remove” snaps the param back to its manual value rather than freezing it at the last formula output.</li>
+  </ul>
+</div>
+
+<script>
+// ---- Shared normalized shape engine (0..1), time-based ----
+function hash(n){ const s = Math.sin(n*127.1)*43758.5453; return s - Math.floor(s); }
+function valNoise(x, seed){
+  x += (seed||0)*100; const i = Math.floor(x), f = x - i;
+  const a = hash(i+ (seed||0)*57), b = hash(i+1+(seed||0)*57);
+  const u = f*f*(3-2*f); return a + (b-a)*u;
+}
+// fractal value noise (layered octaves) -> richer, more organic wander than plain smooth. 0..1
+function fbm(x, seed){
+  let v=0, amp=0.5, f=1, tot=0;
+  for(let o=0;o<4;o++){ v += valNoise(x*f, (seed||0)+o*13)*amp; tot+=amp; amp*=0.5; f*=2; }
+  return v/tot;
+}
+// speed01 (0..100 slider) -> cycles/sec, slow-biased so the low end is genuinely slow.
+function speedHz(speed01){ const s = speed01/100; return 0.03 + s*s*1.6; } // 0.03..~1.63 Hz
+function speedLabel(speed01){ const hz = speedHz(speed01); const per = 1/hz; return per>=1 ? per.toFixed(1)+'s/cycle' : hz.toFixed(1)+'Hz'; }
+
+// --- tempo (shared) ---  downbeat = elapsed-seconds anchor of last tap (beat phase 0)
+let bpm = 120, downbeat = performance.now()/1000, tapTimes = [];
+function beatsAt(nowSec){ return (nowSec - downbeat) * bpm/60; }
+const DIVS = [8,4,2,1,0.5,0.25]; // beats per cycle, slow -> fast
+function beatsPerCycle(speed01){ return DIVS[Math.min(DIVS.length-1, Math.floor(speed01/100*DIVS.length))]; }
+function divLabel(b){ return b>=1 ? b+' beats/cyc' : '1/'+Math.round(1/b)+' beat/cyc'; }
+
+function shapeNorm(o, tSec){
+  const ph = (o.beatSync ? beatsAt(tSec)/beatsPerCycle(o.speed) : tSec*speedHz(o.speed)) + (o.phase||0)/360;
+  let base; // -1..1
+  switch(o.shape){
+    case 'triangle':{ const p=((ph%1)+1)%1; base=1-4*Math.abs(p-0.5); break; }
+    case 'saw':{ const p=((ph%1)+1)%1; base=2*p-1; break; }
+    case 'square':{ const p=((ph%1)+1)%1; base=p<0.5?1:-1; break; }
+    case 'pulse':{ const p=((ph%1)+1)%1; const d=p-0.5, w=0.12; base=2*Math.exp(-(d*d)/(w*w))-1; break; } // sharp throb: low, fast spike, low
+    case 'smooth': base = valNoise(ph, o.seed)*2-1; break;        // organic wander
+    case 'fbm':    base = fbm(ph, o.seed)*2-1; break;             // layered organic
+    case 'hold':   base = hash(Math.floor(ph)+(o.seed||0)*99)*2-1; break; // sample & hold (hard random jumps)
+    case 'stepped':base = (Math.round(valNoise(ph,o.seed)*6)/6)*2-1; break;
+    default: base = Math.sin(ph*2*Math.PI); // sine
+  }
+  const depth=(o.amt!=null?o.amt:70)/100;
+  const center=(o.center!=null?o.center:50)/100;
+  let v = center + (o.invert?-1:1)*base*0.5*depth;
+  return Math.max(0, Math.min(1, v));
+}
+
+const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+const border = getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
+
+// Build the fasteval string the engine would actually run (mirror of the Rust-side buildExpr).
+// Numbers rounded for readability; output is the normalized 0..1 form (the real param maps it to its range).
+function buildExpr(o){
+  const r = n => (+n).toFixed(3).replace(/\.?0+$/,'');
+  const ph = (o.phase||0)/360;
+  const tt = o.beatSync ? `beat/${r(beatsPerCycle(o.speed))}` : `t*${r(speedHz(o.speed))}`;
+  const P  = ph ? `(${tt} + ${r(ph)})` : `(${tt})`;
+  let base, approx=false;
+  switch(o.shape){
+    case 'triangle': base = `tri${P}`; break;
+    case 'saw':      base = `saw${P}`; break;
+    case 'square':   base = `square${P}`; break;
+    case 'pulse':    base = `2*exp(-((${P}-floor${P}-0.5)^2)/0.0144)-1`; approx=true; break;
+    case 'smooth':   base = `noise${P}*2-1`; break;
+    case 'fbm':      base = `(noise${P}*0.53 + noise(${tt}*2)*0.27 + noise(${tt}*4)*0.13)*2-1`; approx=true; break;
+    case 'hold':     base = `noise(floor${P})*2-1`; approx=true; break;
+    case 'stepped':  base = `round(noise${P}*6)/6*2-1`; approx=true; break;
+    default:         base = `sin(${P}*tau)`; break; // sine
+  }
+  const depth = (o.amt!=null?o.amt:70)/100;
+  const center= (o.center!=null?o.center:50)/100;
+  const expr = `clamp(${r(center)} ${o.invert?'-':'+'} (${base})*${r(0.5*depth)}, 0, 1)`;
+  return { expr, approx };
+}
+const _lastFx = {};
+function refreshFormulas(){
+  [['A',A],['B',B],['C',C],['D',D]].forEach(([id,o])=>{
+    const el = document.getElementById(id+'-formula'); if(!el) return;
+    const {expr,approx} = buildExpr(o);
+    const key = expr + approx;
+    if(_lastFx[id]===key) return; // skip DOM write if unchanged (don't clobber text selection)
+    _lastFx[id]=key;
+    el.innerHTML = expr + (approx ? '  <span class="approx">// ≈ preview approximation</span>' : '');
+  });
+}
+
+// Oscilloscope: now at centre, 4s window scrolling through.
+function drawScope(canvas, o, withGrid=true){
+  const dpr = window.devicePixelRatio||1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  if(canvas.width!==W*dpr){ canvas.width=W*dpr; canvas.height=H*dpr; }
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  const pad=4, span=4, N=160;
+  const now = performance.now()/1000; const start = now - span/2;
+  if(withGrid){
+    ctx.strokeStyle=border; ctx.lineWidth=1;
+    [pad, H-pad].forEach(y=>{ ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke(); });
+  }
+  ctx.strokeStyle=accent; ctx.lineWidth=1.5; ctx.beginPath();
+  for(let i=0;i<N;i++){
+    const t = start + (i/(N-1))*span;
+    const v = shapeNorm(o, t);
+    const x = pad + (i/(N-1))*(W-2*pad);
+    const y = (H-pad) - v*(H-2*pad);
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.stroke();
+  // centre playhead
+  const px = pad + 0.5*(W-2*pad);
+  ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,H); ctx.stroke(); ctx.globalAlpha=1;
+}
+
+// ---- State ----
+const A = { shape:'sine', speed:20, amt:70, center:50, phase:0, invert:false, beatSync:false, seed:1 };
+const B = { shape:'sine', speed:20, amt:70, center:50, phase:0, invert:false, beat:false, seed:2 };
+const C = { shape:'sine', speed:15, amt:60, center:50, phase:0, invert:false, seed:3 };
+const D = { shape:'pulse', speed:26, amt:100, center:50, phase:0, invert:false, beatSync:false, seed:1 };
+
+// ---- Variation A: preset gallery ----
+const A_PRESETS = [
+  // clean waves (kept minimal — Pulse = punchy, Breathe = calm; clearly different now)
+  ['Pulse',   {shape:'pulse', speed:26, amt:100,center:50}],  // sharp recurring throb
+  ['Breathe', {shape:'sine',  speed:7,  amt:55, center:55}],  // the one calm sine
+  ['Ramp',    {shape:'saw',   speed:18, amt:100,center:50}],
+  ['Strobe',  {shape:'square',speed:55, amt:100,center:50}],
+  // procedural / random (the "Drift" family)
+  ['Drift',   {shape:'smooth',speed:10, amt:80, center:50}],  // organic wander
+  ['Wander',  {shape:'fbm',   speed:6,  amt:90, center:50}],  // big slow layered sweeps
+  ['Jitter',  {shape:'smooth',speed:62, amt:28, center:50}],  // nervous fast micro-shake
+  ['Steps',   {shape:'hold',  speed:16, amt:85, center:50}],  // random hard jumps (sample & hold)
+  ['Flicker', {shape:'hold',  speed:44, amt:65, center:55}],  // fast random levels
+];
+const aPresetBox = document.getElementById('A-presets');
+A_PRESETS.forEach((p,i)=>{
+  const el = document.createElement('div'); el.className='preset'+(i===0?' active':'');
+  el.innerHTML = `<canvas></canvas><span>${p[0]}</span>`;
+  el.addEventListener('click', ()=>{
+    document.querySelectorAll('#A-presets .preset').forEach(n=>n.classList.remove('active'));
+    el.classList.add('active');
+    Object.assign(A, {shape:'sine',amt:70,center:50,phase:0,invert:false}, p[1]);
+    document.getElementById('A-speed').value=A.speed; document.getElementById('A-amt').value=A.amt;
+    document.getElementById('A-center').value=A.center; document.getElementById('A-phase').value=A.phase;
+    syncA();
+  });
+  el._cfg = Object.assign({seed:i+1, center:50, amt:70}, p[1]);
+  aPresetBox.appendChild(el);
+});
+function syncA(){
+  document.getElementById('A-speedn').textContent =
+    A.beatSync ? divLabel(beatsPerCycle(A.speed)) : (A.speed<=22?'slow':speedLabel(A.speed));
+  document.getElementById('A-amtn').textContent = A.amt+'%';
+  document.getElementById('A-centern').textContent = A.center+'%';
+  document.getElementById('A-phasen').textContent = A.phase+'°';
+}
+document.getElementById('A-speed').addEventListener('input',e=>{A.speed=+e.target.value; syncA();});
+document.getElementById('A-amt').addEventListener('input',e=>{A.amt=+e.target.value; syncA();});
+document.getElementById('A-center').addEventListener('input',e=>{A.center=+e.target.value; syncA();});
+document.getElementById('A-phase').addEventListener('input',e=>{A.phase=+e.target.value; syncA();});
+document.getElementById('A-sync').addEventListener('change',e=>{A.beatSync=e.target.checked; syncA();});
+
+// --- tap tempo: each tap sets BPM (from intervals) AND resets the downbeat to "now" ---
+// the last tap is your "1", so tapping along to the track syncs the motion's phase live.
+function tap(){
+  const now = performance.now()/1000;
+  if(tapTimes.length && now - tapTimes[tapTimes.length-1] > 2) tapTimes = []; // stale run -> restart
+  tapTimes.push(now);
+  if(tapTimes.length >= 2){
+    const iv = []; for(let i=1;i<tapTimes.length;i++) iv.push(tapTimes[i]-tapTimes[i-1]);
+    const avg = iv.reduce((a,b)=>a+b,0)/iv.length;
+    bpm = Math.max(30, Math.min(300, 60/avg));
+  }
+  downbeat = now; // phase reset on every tap = live re-sync
+  updateBpmReadouts();
+  syncA(); syncD();
+}
+function updateBpmReadouts(){ document.querySelectorAll('.bpm').forEach(el=>{ el.innerHTML = Math.round(bpm)+' <small>bpm</small>'; }); }
+document.getElementById('A-tap').addEventListener('click', tap);
+window.addEventListener('keydown', e=>{ if(e.key==='t' && !/^(input|select|textarea)$/i.test(e.target.tagName)) tap(); });
+syncA();
+
+// ---- Variation B: segmented shapes + advanced ----
+const SHAPES = [['sine','∿'],['triangle','△'],['saw','⋰'],['square','⊓'],['smooth','≈'],['stepped','⊞']];
+const bSeg = document.getElementById('B-shapes');
+SHAPES.forEach(([v,g],i)=>{
+  const b=document.createElement('button'); b.textContent=g; b.dataset.shape=v; if(i===0)b.classList.add('active');
+  b.addEventListener('click',()=>{ B.shape=v; bSeg.querySelectorAll('button').forEach(n=>n.classList.toggle('active',n===b)); });
+  bSeg.appendChild(b);
+});
+function syncB(){
+  document.getElementById('B-speedn').textContent = B.speed<=22?'slow':speedLabel(B.speed);
+  document.getElementById('B-amtn').textContent = B.amt+'%';
+  document.getElementById('B-centern').textContent = B.center+'%';
+  document.getElementById('B-phasen').textContent = B.phase+'°';
+}
+document.getElementById('B-speed').addEventListener('input',e=>{B.speed=+e.target.value; syncB();});
+document.getElementById('B-amt').addEventListener('input',e=>{B.amt=+e.target.value; syncB();});
+document.getElementById('B-center').addEventListener('input',e=>{B.center=+e.target.value; syncB();});
+document.getElementById('B-phase').addEventListener('input',e=>{B.phase=+e.target.value; syncB();});
+document.getElementById('B-invert').addEventListener('change',e=>{B.invert=e.target.checked;});
+document.getElementById('B-beat').addEventListener('change',e=>{B.beat=e.target.checked;});
+document.getElementById('B-advtoggle').addEventListener('click',()=>{
+  const adv=document.getElementById('B-adv'); const open=adv.classList.toggle('collapsed');
+  document.getElementById('B-advtoggle').textContent=(open?'▸':'▾')+' Advanced';
+});
+syncB();
+
+// ---- Variation C: inline strip ----
+function syncC(){
+  document.getElementById('C-speedn').textContent = C.speed<=18?'slow':speedLabel(C.speed);
+  document.getElementById('C-amtn').textContent = C.amt+'%';
+}
+document.getElementById('C-shape').addEventListener('change',e=>{C.shape=e.target.value;});
+document.getElementById('C-speed').addEventListener('input',e=>{C.speed=+e.target.value; syncC();});
+document.getElementById('C-amt').addEventListener('input',e=>{C.amt=+e.target.value; syncC();});
+syncC();
+
+// ---- Variation D: preset stepper (compact A) ----
+let dIdx = 0;
+function syncD(){
+  document.getElementById('D-speedn').textContent =
+    D.beatSync ? divLabel(beatsPerCycle(D.speed)) : (D.speed<=22?'slow':speedLabel(D.speed));
+  document.getElementById('D-amtn').textContent = D.amt+'%';
+  document.getElementById('D-centern').textContent = D.center+'%';
+  document.getElementById('D-phasen').textContent = D.phase+'°';
+}
+function dStep(i){
+  dIdx = (i % A_PRESETS.length + A_PRESETS.length) % A_PRESETS.length;
+  const [name,cfg] = A_PRESETS[dIdx];
+  Object.assign(D, {shape:'sine',amt:70,center:50,phase:0,invert:false,seed:dIdx+1}, cfg);
+  // speed/amt/center/phase are knobs, redrawn from state each frame
+  document.getElementById('D-name').textContent=name;
+  document.getElementById('D-idx').textContent=(dIdx+1)+'/'+A_PRESETS.length;
+  syncD();
+}
+document.getElementById('D-prev').addEventListener('click',()=>dStep(dIdx-1));
+document.getElementById('D-next').addEventListener('click',()=>dStep(dIdx+1));
+document.getElementById('D-sync').addEventListener('change',e=>{D.beatSync=e.target.checked; syncD();});
+
+// Amount / Center / Phase as rotary knobs — drag up/down to turn, double-click to reset.
+function drawKnob(canvas, t){
+  const dpr=window.devicePixelRatio||1, S=64;
+  if(canvas.width!==S*dpr){ canvas.width=S*dpr; canvas.height=S*dpr; }
+  const ctx=canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,S,S);
+  const cx=S/2, cy=S/2, rad=S*0.34, a0=Math.PI*0.75, a1=a0+Math.PI*1.5;
+  ctx.lineCap='round';
+  ctx.strokeStyle=border; ctx.lineWidth=5; ctx.beginPath(); ctx.arc(cx,cy,rad,a0,a1); ctx.stroke();
+  const ang=a0+Math.max(0,Math.min(1,t))*Math.PI*1.5;
+  ctx.strokeStyle=accent; ctx.beginPath(); ctx.arc(cx,cy,rad,a0,ang); ctx.stroke();
+  ctx.lineWidth=2.5; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+Math.cos(ang)*rad, cy+Math.sin(ang)*rad); ctx.stroke();
+}
+function makeKnob(canvasId, valId, min, max, get, set, fmt, def){
+  const c=document.getElementById(canvasId), range=max-min; let drag=false, sy=0, sv=0;
+  c.addEventListener('pointerdown',e=>{ drag=true; sy=e.clientY; sv=get(); c.setPointerCapture(e.pointerId); e.preventDefault(); });
+  c.addEventListener('pointermove',e=>{ if(!drag) return; const dv=(sy-e.clientY)/200*range; set(Math.max(min,Math.min(max, sv+dv))); });
+  c.addEventListener('pointerup',()=>{ drag=false; });
+  c.addEventListener('dblclick',()=>{ set(def!=null?def:min); });
+  c._draw=()=>{ drawKnob(c, (get()-min)/range); const el=document.getElementById(valId); if(el&&fmt) el.textContent=fmt(get()); };
+  return c;
+}
+// Speed: fmt is null so syncD() keeps its special "slow" / beat-division label.
+const dSpeedK  = makeKnob('D-speed-k', null, 0,100, ()=>D.speed,  v=>{D.speed=Math.round(v);  syncD();}, null, 26);
+const dAmtK    = makeKnob('D-amt-k','D-amtn',0,100, ()=>D.amt,    v=>{D.amt=Math.round(v);    syncD();}, v=>Math.round(v)+'%', 100);
+const dCenterK = makeKnob('D-center-k','D-centern',0,100,()=>D.center, v=>{D.center=Math.round(v); syncD();}, v=>Math.round(v)+'%', 50);
+const dPhaseK  = makeKnob('D-phase-k','D-phasen',0,360,()=>D.phase,  v=>{D.phase=Math.round(v);  syncD();}, v=>Math.round(v)+'°', 0);
+document.getElementById('D-tap').addEventListener('click', tap);
+window.addEventListener('keydown', e=>{
+  if(/^(input|select|textarea)$/i.test(e.target.tagName)) return;
+  if(e.key==='ArrowLeft'){ dStep(dIdx-1); e.preventDefault(); }
+  if(e.key==='ArrowRight'){ dStep(dIdx+1); e.preventDefault(); }
+});
+dStep(0);
+
+// ---- Single rAF loop drives every live preview ----
+function frame(){
+  drawScope(document.getElementById('A-preview'), A);
+  drawScope(document.getElementById('B-preview'), B);
+  drawScope(document.getElementById('C-spark'), C, false);
+  drawScope(document.getElementById('D-preview'), D);
+  dSpeedK._draw(); dAmtK._draw(); dCenterK._draw(); dPhaseK._draw();
+  // preset thumbnails
+  document.querySelectorAll('#A-presets .preset').forEach(el=>{
+    drawScope(el.querySelector('canvas'), el._cfg, false);
+  });
+  // live "value" ghosts
+  const now = performance.now()/1000;
+  setGhost('A', A, now); setGhost('B', B, now); setGhost('D', D, now);
+  document.getElementById('C-ghostval').textContent = shapeNorm(C, now).toFixed(2);
+  // beat-dot pulse (drives the live sync feel) — pulse every dot
+  const bi = Math.floor(beatsAt(now));
+  if(bi !== lastBeatIdx){ lastBeatIdx = bi; document.querySelectorAll('.beat-dot').forEach(d=>{ d.classList.add('on'); setTimeout(()=>d.classList.remove('on'),90); }); }
+  refreshFormulas();
+  requestAnimationFrame(frame);
+}
+let lastBeatIdx = -1;
+function setGhost(id, o, now){
+  const v = shapeNorm(o, now);
+  const g = document.getElementById(id+'-ghost'); if(g) g.value = v;
+  document.getElementById(id+'-ghostval').textContent = v.toFixed(2);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
