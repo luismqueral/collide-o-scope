@@ -499,8 +499,14 @@ function syncTempo(bpm, beat) {
 
 function syncEffects(effects, automations, automationErrors) {
   if (!effects) return;
+  // Scope to the master panel: layer cards (#layers-list) reuse the same
+  // data-param names and sit EARLIER in the DOM, so a global querySelector
+  // would match a layer's row instead of the master row and the master
+  // sliders would never update live.
+  const masterFx = document.getElementById('master-fx');
+  if (!masterFx) return;
   for (const [param, value] of Object.entries(effects)) {
-    const row = document.querySelector(`.param-row[data-param="${param}"]`);
+    const row = masterFx.querySelector(`.param-row[data-param="${param}"]`);
     if (!row) continue;
 
     const slider = row.querySelector('input[type="range"]');

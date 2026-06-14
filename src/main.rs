@@ -1502,8 +1502,18 @@ impl ApplicationHandler for App {
                     for layer in &mut self.layers {
                         layer.effects.time = elapsed;
                         // Evaluate any automated params against `t = elapsed`.
+                        // speed/opacity/fps are LAYER-level fields (not effect
+                        // uniforms), so route them to the layer directly —
+                        // otherwise set_by_name drops them and the snapshot keeps
+                        // sending the unchanged field, freezing the slider.
                         for (param, expr) in &layer.automations {
-                            layer.effects.set_by_name(param, expr.eval(elapsed, beat, bpm));
+                            let v = expr.eval(elapsed, beat, bpm);
+                            match param.as_str() {
+                                "opacity" => layer.opacity = v.clamp(0.0, 1.0),
+                                "speed" => layer.speed = v.clamp(0.25, 4.0),
+                                "fps" => layer.fps = v.clamp(1.0, 60.0),
+                                _ => layer.effects.set_by_name(param, v),
+                            }
                         }
                         // Recompute fit scale each frame so it tracks canvas resize.
                         let (fx, fy) = fit_scale(
