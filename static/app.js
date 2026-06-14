@@ -1522,6 +1522,25 @@ function valueNoise(x) {
 }
 const wiggle = (freq, amp, t) => valueNoise(t * freq) * amp;
 const noise = (seed) => valueNoise(seed);
+// Variation-D shapes (mirror src/automation.rs). All output -1..1.
+const pulse = (x) => { const p = fract(x), d = p - 0.5, w = 0.12; return 2 * Math.exp(-(d * d) / (w * w)) - 1; };
+function fbm(x) { let v = 0, amp = 0.5, f = 1, tot = 0; for (let o = 0; o < 4; o++) { v += valueNoise(x * f + o * 13) * amp; tot += amp; amp *= 0.5; f *= 2; } return v / tot; }
+const hold = (x) => hash01(Math.floor(x));
+
+// --- Speed-knob timing model (mirror docs/automation-ui-mockups.html, Var D) ---
+// One Speed knob (0..100) drives the timebase: continuous slow-biased Hz in Free
+// mode, snapping to musical beat-divisions when Beat-synced.
+const DIVS = [8, 4, 2, 1, 0.5, 0.25];                       // beats/cycle, slow→fast
+const speedHz = (s) => 0.03 + (s / 100) ** 2 * 1.6;          // ~0.03..1.63 Hz
+const beatsPerCycle = (s) => DIVS[Math.min(DIVS.length - 1, Math.floor(s / 100 * DIVS.length))];
+// Speed label: musical division when synced, else "slow" at the low end or a
+// human period/frequency.
+function speedLabel(c) {
+  if (c.beatSync) { const b = beatsPerCycle(c.speed); return b >= 1 ? `${b} beat/cyc` : `1/${Math.round(1 / b)} beat`; }
+  if (c.speed <= 22) return 'slow';
+  const hz = speedHz(c.speed), per = 1 / hz;
+  return per >= 1 ? `${per.toFixed(1)}s/cyc` : `${hz.toFixed(1)}Hz`;
+}
 
 // The modulator model (docs/automation-editor.md §3). A small set of controls
 // compiles deterministically to one fasteval expression — mental model: a synth
@@ -1530,54 +1549,27 @@ const noise = (seed) => valueNoise(seed);
 // noise, never repeating; see §3.4).
 
 function defaultControls() {
-  return { shape: 'sine', sync: 'beat', rate: 1, depth: 1, center: 0.5, phase: 0, seed: 0, invert: false };
+  return { shape: 'sine', beatSync: false, speed: 20, depth: 1, center: 0.5, phase: 0, seed: 0, invert: false, presetIdx: 0 };
 }
 
-// [value, glyph, label]. The glyph is drawn on the shape button.
-const SHAPES = [
-  ['sine', '\u223F', 'Sine'],
-  ['triangle', '\u25B3', 'Triangle'],
-  ['sawup', '\u2571', 'Saw up'],
-  ['sawdown', '\u2572', 'Saw down'],
-  ['square', '\u2293', 'Square'],
-  ['smooth', '\u2248', 'Smooth random'],
-  ['stepped', '\u25A5', 'Stepped random'],
-];
 // Random shapes wander instead of looping: phase is meaningless, so the Phase
-// control becomes Seed (picks which fixed noise sequence plays).
-const RANDOM_SHAPES = new Set(['smooth', 'stepped']);
-
-// Rate options. `value` is cycles-per-unit (per beat when synced, per second
-// when free); the label names the resulting period. 1 cycle/beat == "1 beat".
-const RATE_BEAT = [
-  ['0.0625', '4 bars'],
-  ['0.125', '2 bars'],
-  ['0.25', '1 bar'],
-  ['0.5', '1/2 note'],
-  ['1', '1 beat'],
-  ['2', '1/2 beat'],
-  ['4', '1/4 beat'],
-];
-const RATE_FREE = [
-  ['0.0625', '16 s'],
-  ['0.125', '8 s'],
-  ['0.25', '4 s'],
-  ['0.5', '2 s'],
-  ['1', '1 s'],
-  ['2', '0.5 s'],
-];
+// knob becomes Seed (picks which fixed noise sequence plays).
+const RANDOM_SHAPES = new Set(['smooth', 'stepped', 'fbm', 'hold']);
 
 // Presets seed the whole knob rack from a named starting point; you then tweak.
-// Each reproduces a familiar move (these mirror the old cookbook cards).
+// In Variation D the carousel is the only shape picker — stepping a preset sets
+// the shape + a slow-biased speed. depth/center are stored 0..1 (the knobs show
+// %). Mirrors docs/automation-ui-mockups.html A_PRESETS.
 const PRESETS = [
-  ['Beat pulse', { shape: 'sine', sync: 'beat', rate: 1, depth: 1, center: 0.5, phase: 0, invert: false }],
-  ['Beat strobe', { shape: 'square', sync: 'beat', rate: 1, depth: 1, center: 0.5, phase: 0, invert: false }],
-  ['Off-beat', { shape: 'square', sync: 'beat', rate: 0.5, depth: 1, center: 0.5, phase: 0, invert: false }],
-  ['Bar sweep', { shape: 'sine', sync: 'beat', rate: 0.25, depth: 1, center: 0.5, phase: 0, invert: false }],
-  ['Beat ramp', { shape: 'sawup', sync: 'beat', rate: 1, depth: 1, center: 0.5, phase: 0, invert: false }],
-  ['Slow drift', { shape: 'sine', sync: 'free', rate: 0.0625, depth: 1, center: 0.5, phase: 0, invert: false }],
-  ['Wander', { shape: 'smooth', sync: 'free', rate: 0.5, depth: 1, center: 0.5, seed: 0, invert: false }],
-  ['Jitter', { shape: 'stepped', sync: 'beat', rate: 2, depth: 1, center: 0.5, seed: 0, invert: false }],
+  ['Pulse', { shape: 'pulse', speed: 26, depth: 1.0, center: 0.5 }],   // sharp recurring throb
+  ['Breathe', { shape: 'sine', speed: 7, depth: 0.55, center: 0.55 }], // calm sine
+  ['Ramp', { shape: 'sawup', speed: 18, depth: 1.0, center: 0.5 }],
+  ['Strobe', { shape: 'square', speed: 55, depth: 1.0, center: 0.5 }],
+  ['Drift', { shape: 'smooth', speed: 10, depth: 0.8, center: 0.5 }],  // organic wander
+  ['Wander', { shape: 'fbm', speed: 6, depth: 0.9, center: 0.5 }],     // big slow layered sweeps
+  ['Jitter', { shape: 'smooth', speed: 62, depth: 0.28, center: 0.5 }],// nervous fast micro-shake
+  ['Steps', { shape: 'hold', speed: 16, depth: 0.85, center: 0.5 }],   // random hard jumps (S&H)
+  ['Flicker', { shape: 'hold', speed: 44, depth: 0.65, center: 0.55 }],// fast random levels
 ];
 
 // Compact a number for a generated expression (drops float noise).
@@ -1589,31 +1581,34 @@ function num(n) {
 // §3.2). The shape S(x) is bipolar (-1..1); it's folded to 0..1 with depth +
 // center, then range-scaled to [lo,hi]. Simplifications: drop +phase when 0,
 // skip the clamp/center wrapper at depth 100% / center 50%, omit the range
-// wrapper when the param is already 0..1. Only sine needs `x` parenthesized
-// (the `*tau` multiply); tri/saw/square take raw x.
+// wrapper when the param is already 0..1. The Speed knob compiles the timebase:
+// slow-biased Hz (`t*hz`) in Free mode, musical beat-divisions (`beat/N`) when
+// Beat-synced. The core is always compound, so sine's `*tau` is parenthesized.
 function buildExpr(c, lo, hi) {
-  const base = c.sync === 'beat' ? 'beat' : 't';
-  const core = c.rate === 1 ? base : `${base}*${num(c.rate)}`;
+  const core = c.beatSync
+    ? `beat/${num(beatsPerCycle(c.speed))}`
+    : `t*${num(speedHz(c.speed))}`;
   let S;
-  if (c.shape === 'smooth') {
-    // Continuous value-noise → organic, non-looping drift; seed shifts which
-    // stretch of noise plays (see §3.4). noise() is smooth in the engine.
-    S = `noise(${c.seed ? `${core}+${num(c.seed)}` : core})`;
-  } else if (c.shape === 'stepped') {
-    // Held value that re-rolls on each integer step of the timebase.
-    const inner = c.seed ? `floor(${core})+${num(c.seed)}` : `floor(${core})`;
-    S = `noise(${inner})`;
+  if (RANDOM_SHAPES.has(c.shape)) {
+    // Random family wanders instead of looping: phase is meaningless, seed picks
+    // which fixed noise sequence plays (see §3.4).
+    const inner = c.seed ? `${core}+${num(c.seed)}` : core;
+    switch (c.shape) {
+      case 'stepped': S = `noise(floor(${inner}))`; break; // held, re-rolls per step
+      case 'fbm': S = `fbm(${inner})`; break;              // layered organic wander
+      case 'hold': S = `hold(${inner})`; break;            // hard random S&H jumps
+      default: S = `noise(${inner})`;                      // smooth value-noise drift
+    }
   } else {
     const phase01 = c.phase / 360;
     const x = phase01 > 1e-6 ? `${core}+${num(phase01)}` : core;
-    const compound = c.rate !== 1 || phase01 > 1e-6;
-    const xw = compound ? `(${x})` : x;
     switch (c.shape) {
       case 'triangle': S = `tri(${x})`; break;
       case 'sawup': S = `saw(${x})`; break;
       case 'sawdown': S = `0-saw(${x})`; break;
       case 'square': S = `square(${x})`; break;
-      default: S = `sin(${xw}*tau)`; // sine
+      case 'pulse': S = `pulse(${x})`; break;
+      default: S = `sin((${x})*tau)`; // sine — x is compound, parenthesize
     }
   }
   if (c.invert) S = `0-(${S})`;
@@ -1632,18 +1627,24 @@ function buildExpr(c, lo, hi) {
 // shape (drawCurve auto-scales Y, so no range-scaling needed here). Uses the
 // same helpers as the engine so preview ≈ export.
 function evalControls(c, tSec, beat) {
-  const base = c.sync === 'beat' ? beat : tSec;
-  const coreVal = base * c.rate;
+  const coreVal = c.beatSync ? beat / beatsPerCycle(c.speed) : tSec * speedHz(c.speed);
   let S;
-  if (c.shape === 'smooth') { S = valueNoise(coreVal + c.seed); }
-  else if (c.shape === 'stepped') { S = valueNoise(Math.floor(coreVal) + c.seed); }
-  else {
+  if (RANDOM_SHAPES.has(c.shape)) {
+    const inner = coreVal + (c.seed || 0);
+    switch (c.shape) {
+      case 'stepped': S = valueNoise(Math.floor(inner)); break;
+      case 'fbm': S = fbm(inner); break;
+      case 'hold': S = hold(inner); break;
+      default: S = valueNoise(inner); // smooth
+    }
+  } else {
     const x = coreVal + c.phase / 360;
     switch (c.shape) {
       case 'triangle': S = tri(x); break;
       case 'sawup': S = saw(x); break;
       case 'sawdown': S = -saw(x); break;
       case 'square': S = square(x); break;
+      case 'pulse': S = pulse(x); break;
       default: S = Math.sin(x * TAU); // sine
     }
   }
@@ -1664,6 +1665,9 @@ let aeControls = defaultControls();
 let aeRawMode = false;                // raw escape-hatch active?
 let aeRaf = null;                     // preview animation-frame handle
 let aePreviewCard = null;             // { canvas, ctx, fn, xUnit } for drawCurve
+let aeKnobs = [];                     // rotary knob components (redrawn each frame)
+let aePhaseKnob = null;               // the morphing 4th knob (Phase ↔ Seed)
+let aeIdx = 0;                        // current preset-carousel index
 
 function isEditorOpen() {
   const m = document.getElementById('automation');
@@ -1701,29 +1705,29 @@ function scopeName(t) {
 function openEditor(target, valueEl) {
   aeTarget = target;
   aeValueEl = valueEl;
-  aeControls = defaultControls();
 
   document.getElementById('ae-context').textContent =
     `Automate \u00B7 ${scopeName(target)} \u203A ${target.label}`;
 
-  const ps = document.getElementById('ae-presets');
-  if (ps) ps.selectedIndex = 0;       // reset the preset picker to its placeholder
-
   const existing = valueEl && valueEl.dataset.expr;
-  let useRaw = false;
-  if (existing) {
-    const cached = readCachedControls(valueEl, target, existing);
-    if (cached) aeControls = cached;  // resume knob editing
-    else useRaw = true;               // can't reconstruct → show the raw text
-  }
+  const cached = existing ? readCachedControls(valueEl, target, existing) : null;
 
   setupGhost();
-  syncControlsUI();
-  if (useRaw) {
+
+  if (cached) {
+    // Resume knob editing from the cached control state.
+    aeControls = cached;
+    exitRawMode();
+    syncControlsUI();
+    recompute();
+  } else if (existing) {
+    // Foreign / hand-typed formula we can't reverse-parse → raw escape hatch.
+    aeControls = defaultControls();
+    syncControlsUI();
     enterRawMode(existing);
   } else {
-    exitRawMode();
-    recompute();
+    // Fresh param: load the first preset as a starting point (Variation-D init).
+    dStep(0);
   }
 
   document.getElementById('automation').removeAttribute('hidden');
@@ -1752,73 +1756,47 @@ function closeEditor() {
 
 // --- Control rack ↔ UI sync ---
 
-// Reflect aeControls onto every input. Called on open, preset, shape, sync.
+// Reflect aeControls onto the carousel, knobs, and sync toggle. Called on open,
+// preset step, and sync change. The knob faces themselves redraw each frame in
+// the preview rAF loop; here we refresh the morph state + non-knob widgets.
 function syncControlsUI() {
-  document.querySelectorAll('#ae-shapes .ae-shape').forEach((b) => {
-    b.classList.toggle('active', b.dataset.shape === aeControls.shape);
-  });
-  document.querySelectorAll('#ae-sync button').forEach((b) => {
-    b.classList.toggle('active', b.dataset.sync === aeControls.sync);
-  });
+  // Carousel title tracks the last-loaded preset (knobs may since be tweaked).
+  const idx = aeControls.presetIdx || 0;
+  aeIdx = idx;
+  const nm = document.getElementById('ae-name');
+  const ix = document.getElementById('ae-idx');
+  if (nm) nm.textContent = PRESETS[idx] ? PRESETS[idx][0] : 'Custom';
+  if (ix) ix.textContent = `${idx + 1}/${PRESETS.length}`;
 
-  // Rate options follow the sync mode (cycles/beat vs cycles/sec).
-  populateRate(aeControls.sync);
-  const rateSel = document.getElementById('ae-rate');
-  rateSel.value = String(aeControls.rate);
-  if (rateSel.selectedIndex < 0) {       // rate not in the list — add it transiently
-    const opt = document.createElement('option');
-    opt.value = String(aeControls.rate);
-    opt.textContent = String(aeControls.rate);
-    rateSel.appendChild(opt);
-    rateSel.value = String(aeControls.rate);
-  }
-
-  // Depth / Center are stored 0..1, shown as %.
-  const depth = document.getElementById('ae-depth');
-  depth.value = String(Math.round(aeControls.depth * 100));
-  document.getElementById('ae-depth-val').textContent = `${Math.round(aeControls.depth * 100)}%`;
-  const center = document.getElementById('ae-center');
-  center.value = String(Math.round(aeControls.center * 100));
-  document.getElementById('ae-center-val').textContent = `${Math.round(aeControls.center * 100)}%`;
-
-  document.getElementById('ae-invert').checked = !!aeControls.invert;
-
-  // Tap/tempo only matters for beat-synced formulas — grey it out in Free mode.
+  // Sync-to-beat toggle; grey the tempo row out in Free mode.
+  const toggle = document.getElementById('ae-sync-toggle');
+  if (toggle) toggle.checked = !!aeControls.beatSync;
   const tempoRow = document.getElementById('ae-tempo-row');
-  if (tempoRow) tempoRow.classList.toggle('ae-dim', aeControls.sync !== 'beat');
+  if (tempoRow) tempoRow.classList.toggle('ae-dim', !aeControls.beatSync);
 
-  morphControls();                       // Phase vs Seed, shape-dependent
+  morphControls();                       // Phase ↔ Seed on the 4th knob
+  redrawKnobs();                         // immediate refresh (labels + faces)
 }
 
-// The bottom-left slot is Phase for periodic shapes, Seed for random ones.
+// The 4th knob is Phase (0–360°) for periodic shapes, Seed (0–64) for random
+// ones. Reconfigure its bound cfg in place so makeKnob keeps working.
 function morphControls() {
-  const isRandom = RANDOM_SHAPES.has(aeControls.shape);
+  if (!aePhaseKnob) return;
   const lbl = document.getElementById('ae-phase-lbl');
-  const slider = document.getElementById('ae-phase');
-  const val = document.getElementById('ae-phase-val');
-  if (isRandom) {
-    lbl.textContent = 'Seed';
-    slider.min = '0'; slider.max = '64'; slider.step = '1';
-    slider.value = String(aeControls.seed || 0);
-    val.textContent = String(aeControls.seed || 0);
+  const cfg = aePhaseKnob.cfg;
+  if (RANDOM_SHAPES.has(aeControls.shape)) {
+    if (lbl) lbl.textContent = 'Seed';
+    cfg.min = 0; cfg.max = 64; cfg.def = 0;
+    cfg.get = () => aeControls.seed || 0;
+    cfg.set = (v) => { aeControls.seed = Math.round(v); };
+    cfg.fmt = (v) => String(Math.round(v));
   } else {
-    lbl.textContent = 'Phase';
-    slider.min = '0'; slider.max = '360'; slider.step = '1';
-    slider.value = String(aeControls.phase || 0);
-    val.textContent = `${aeControls.phase || 0}\u00B0`;
+    if (lbl) lbl.textContent = 'Phase';
+    cfg.min = 0; cfg.max = 360; cfg.def = 0;
+    cfg.get = () => aeControls.phase || 0;
+    cfg.set = (v) => { aeControls.phase = Math.round(v); };
+    cfg.fmt = (v) => `${Math.round(v)}\u00B0`;
   }
-}
-
-function populateRate(sync) {
-  const sel = document.getElementById('ae-rate');
-  const opts = sync === 'beat' ? RATE_BEAT : RATE_FREE;
-  sel.innerHTML = '';
-  opts.forEach(([value, label]) => {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = label;
-    sel.appendChild(opt);
-  });
 }
 
 // --- Formula generation / raw mode ---
@@ -1861,52 +1839,99 @@ function recompute() {
   document.getElementById('ae-formula').textContent = currentBuiltExpr();
 }
 
-// --- Static UI: shape buttons + preset chips (built once on load) ---
+// --- Rotary knobs (Variation D) — drag up/down to turn, double-click resets ---
 
-function buildShapeButtons() {
-  const box = document.getElementById('ae-shapes');
-  if (!box || box.children.length) return;
-  SHAPES.forEach(([value, glyph, label]) => {
-    const b = document.createElement('button');
-    b.className = 'ae-shape';
-    b.type = 'button';
-    b.dataset.shape = value;
-    b.textContent = glyph;
-    b.title = label;
-    b.addEventListener('click', () => {
-      aeControls.shape = value;
-      exitRawMode();
-      syncControlsUI();
-      recompute();
-    });
-    box.appendChild(b);
-  });
+// Draw a knob face into `canvas` with the normalized fill `t` (0..1).
+function drawKnob(canvas, t) {
+  const dpr = window.devicePixelRatio || 1, S = 64;
+  if (canvas.width !== S * dpr) { canvas.width = S * dpr; canvas.height = S * dpr; }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, S, S);
+  const cx = S / 2, cy = S / 2, rad = S * 0.34, a0 = Math.PI * 0.75, a1 = a0 + Math.PI * 1.5;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = borderCol; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(cx, cy, rad, a0, a1); ctx.stroke();
+  const ang = a0 + clamp(t, 0, 1) * Math.PI * 1.5;
+  ctx.strokeStyle = accent;
+  ctx.beginPath(); ctx.arc(cx, cy, rad, a0, ang); ctx.stroke();
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad); ctx.stroke();
 }
 
-function buildPresets() {
-  const sel = document.getElementById('ae-presets');
-  if (!sel || sel.children.length) return;
-  // Placeholder first option — the dropdown is a momentary "load a starting
-  // point" picker, so it snaps back here after each pick (see below).
-  const ph = document.createElement('option');
-  ph.value = '';
-  ph.textContent = 'Choose preset\u2026';
-  sel.appendChild(ph);
-  PRESETS.forEach(([name], i) => {
-    const opt = document.createElement('option');
-    opt.value = String(i);
-    opt.textContent = name;
-    sel.appendChild(opt);
+// Bind a knob canvas to a mutable cfg `{min,max,def,get,set,fmt,valId}`. The cfg
+// is mutable so the 4th knob can morph (Phase ↔ Seed) without rebinding.
+function makeKnob(canvasId, cfg) {
+  const c = document.getElementById(canvasId);
+  let drag = false, sy = 0, sv = 0;
+  c.addEventListener('pointerdown', (e) => {
+    drag = true; sy = e.clientY; sv = cfg.get();
+    c.setPointerCapture(e.pointerId); e.preventDefault();
   });
-  sel.addEventListener('change', () => {
-    const i = parseInt(sel.value, 10);
-    sel.selectedIndex = 0;             // snap back to the placeholder
-    if (Number.isNaN(i)) return;
-    aeControls = Object.assign(defaultControls(), PRESETS[i][1]);
-    exitRawMode();
-    syncControlsUI();
-    recompute();
+  c.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const range = cfg.max - cfg.min;
+    cfg.set(clamp(sv + (sy - e.clientY) / 200 * range, cfg.min, cfg.max));
+    exitRawMode(); recompute();
   });
+  c.addEventListener('pointerup', () => { drag = false; });
+  c.addEventListener('dblclick', () => { cfg.set(cfg.def); exitRawMode(); recompute(); });
+  return {
+    cfg,
+    draw() {
+      const range = (cfg.max - cfg.min) || 1;
+      drawKnob(c, (cfg.get() - cfg.min) / range);
+      const el = cfg.valId && document.getElementById(cfg.valId);
+      if (el && cfg.fmt) el.textContent = cfg.fmt(cfg.get());
+    },
+  };
+}
+
+function redrawKnobs() { aeKnobs.forEach((k) => k.draw()); }
+
+// Build the 4 knobs once. Speed/Amount/Center are fixed; the 4th morphs.
+function buildKnobs() {
+  if (aeKnobs.length) return;
+  const speed = makeKnob('ae-speed-k', {
+    min: 0, max: 100, def: 20, valId: 'ae-speedn',
+    get: () => aeControls.speed,
+    set: (v) => { aeControls.speed = Math.round(v); },
+    fmt: () => speedLabel(aeControls),   // special "slow" / Hz / beat-division label
+  });
+  const amt = makeKnob('ae-amt-k', {
+    min: 0, max: 100, def: 100, valId: 'ae-amtn',
+    get: () => Math.round(aeControls.depth * 100),
+    set: (v) => { aeControls.depth = Math.round(v) / 100; },
+    fmt: (v) => `${Math.round(v)}%`,
+  });
+  const center = makeKnob('ae-center-k', {
+    min: 0, max: 100, def: 50, valId: 'ae-centern',
+    get: () => Math.round(aeControls.center * 100),
+    set: (v) => { aeControls.center = Math.round(v) / 100; },
+    fmt: (v) => `${Math.round(v)}%`,
+  });
+  // 4th knob: cfg is reconfigured by morphControls (Phase ↔ Seed).
+  aePhaseKnob = makeKnob('ae-phase-k', {
+    min: 0, max: 360, def: 0, valId: 'ae-phasen',
+    get: () => aeControls.phase || 0,
+    set: (v) => { aeControls.phase = Math.round(v); },
+    fmt: (v) => `${Math.round(v)}\u00B0`,
+  });
+  aeKnobs = [speed, amt, center, aePhaseKnob];
+}
+
+// --- Preset carousel (Variation D): step through PRESETS with ‹ › / ←→ ---
+
+// Load preset `i` (wrapping) as the new starting point, then let the knobs tweak
+// it. Each preset gets a distinct noise seed so random shapes differ.
+function dStep(i) {
+  aeIdx = ((i % PRESETS.length) + PRESETS.length) % PRESETS.length;
+  const cfg = PRESETS[aeIdx][1];
+  aeControls = Object.assign(defaultControls(), { seed: aeIdx + 1 }, cfg, { presetIdx: aeIdx });
+  exitRawMode();
+  syncControlsUI();
+  recompute();
 }
 
 // --- Live preview (rides the tapped tempo) ---
@@ -1918,7 +1943,7 @@ function startPreview() {
     canvas,
     ctx: canvas.getContext('2d'),
     fn: (t, beat) => evalControls(aeControls, t, beat),
-    xUnit: aeControls.sync === 'beat' ? 'beat' : 'sec',
+    xUnit: aeControls.beatSync ? 'beat' : 'sec',
   };
   if (!aeRaf) aeRaf = requestAnimationFrame(drawPreview);
 }
@@ -1926,10 +1951,11 @@ function startPreview() {
 function drawPreview() {
   if (!isEditorOpen()) { aeRaf = null; return; }
   // Keep the axis/playhead matched to the current sync mode.
-  aePreviewCard.xUnit = aeControls.sync === 'beat' ? 'beat' : 'sec';
+  aePreviewCard.xUnit = aeControls.beatSync ? 'beat' : 'sec';
   const nowSec = performance.now() / 1000;
   drawCurve(aePreviewCard, nowSec);
   updateGhost(nowSec);
+  redrawKnobs();
   aeRaf = requestAnimationFrame(drawPreview);
 }
 
@@ -2085,8 +2111,7 @@ function drawCurve(card, nowSec) {
 
 // --- Wire the editor (built once; launchers are added per-row at init) ---
 
-buildShapeButtons();
-buildPresets();
+buildKnobs();
 
 // Close affordances: ✕ button, backdrop click, Escape.
 document.getElementById('ae-close').addEventListener('click', closeEditor);
@@ -2097,55 +2122,23 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isEditorOpen()) closeEditor();
 });
 
-// Sync segment: switching time base resets rate to a sensible default for that
-// base (its options differ — cycles/beat vs cycles/sec).
-document.querySelectorAll('#ae-sync button').forEach((b) => {
-  b.addEventListener('click', () => {
-    aeControls.sync = b.dataset.sync;
-    aeControls.rate = b.dataset.sync === 'beat' ? 1 : 0.25;
-    exitRawMode();
-    syncControlsUI();
-    recompute();
-  });
+// Preset carousel: ‹ › arrows step through PRESETS; ←/→ do the same while the
+// editor is open and focus is not inside an input/select/textarea.
+document.getElementById('ae-prev').addEventListener('click', () => dStep(aeIdx - 1));
+document.getElementById('ae-next').addEventListener('click', () => dStep(aeIdx + 1));
+document.addEventListener('keydown', (e) => {
+  if (!isEditorOpen()) return;
+  if (/^(input|select|textarea)$/i.test(e.target.tagName)) return;
+  if (e.key === 'ArrowLeft') { dStep(aeIdx - 1); e.preventDefault(); }
+  if (e.key === 'ArrowRight') { dStep(aeIdx + 1); e.preventDefault(); }
 });
 
-document.getElementById('ae-rate').addEventListener('change', (e) => {
-  aeControls.rate = parseFloat(e.target.value);
+// Sync-to-beat toggle: switch the timing base between wall-clock seconds
+// (`t*hz`) and musical beats (`beat/N`); dims the tempo row when off.
+document.getElementById('ae-sync-toggle').addEventListener('change', (e) => {
+  aeControls.beatSync = e.target.checked;
   exitRawMode();
-  recompute();
-});
-
-document.getElementById('ae-depth').addEventListener('input', (e) => {
-  aeControls.depth = parseInt(e.target.value) / 100;
-  document.getElementById('ae-depth-val').textContent = `${e.target.value}%`;
-  exitRawMode();
-  recompute();
-});
-
-document.getElementById('ae-center').addEventListener('input', (e) => {
-  aeControls.center = parseInt(e.target.value) / 100;
-  document.getElementById('ae-center-val').textContent = `${e.target.value}%`;
-  exitRawMode();
-  recompute();
-});
-
-// The shape-dependent slider: Seed for random shapes, Phase otherwise.
-document.getElementById('ae-phase').addEventListener('input', (e) => {
-  const v = parseInt(e.target.value);
-  if (RANDOM_SHAPES.has(aeControls.shape)) {
-    aeControls.seed = v;
-    document.getElementById('ae-phase-val').textContent = String(v);
-  } else {
-    aeControls.phase = v;
-    document.getElementById('ae-phase-val').textContent = `${v}\u00B0`;
-  }
-  exitRawMode();
-  recompute();
-});
-
-document.getElementById('ae-invert').addEventListener('change', (e) => {
-  aeControls.invert = e.target.checked;
-  exitRawMode();
+  syncControlsUI();
   recompute();
 });
 

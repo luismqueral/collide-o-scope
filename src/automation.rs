@@ -71,6 +71,11 @@ impl Expr {
                 "tri" => Some(tri(arg(0))),
                 "saw" => Some(saw(arg(0))),
                 "square" => Some(square(arg(0))),
+                "pulse" => Some(pulse(arg(0))),
+
+                // Procedural / random shapes (deterministic value-noise)
+                "fbm" => Some(fbm(arg(0))),
+                "hold" => Some(hold(arg(0))),
 
                 // Shaping helpers
                 "clamp" => Some(arg(0).clamp(arg(1), arg(2))),
@@ -116,6 +121,34 @@ fn square(t: f64) -> f64 {
     } else {
         -1.0
     }
+}
+
+/// Sharp recurring throb: mostly low with a fast Gaussian spike once per period,
+/// output -1..1. `w` sets the spike width.
+fn pulse(t: f64) -> f64 {
+    let p = t - t.floor(); // 0..1 phase
+    let d = p - 0.5;
+    let w = 0.12;
+    2.0 * (-(d * d) / (w * w)).exp() - 1.0
+}
+
+/// Fractal value-noise (4 octaves): organic, layered wander. Output -1..1
+/// (each octave is value_noise, already -1..1, normalized by total amplitude).
+fn fbm(x: f64) -> f64 {
+    let (mut v, mut amp, mut f, mut tot) = (0.0, 0.5, 1.0, 0.0);
+    for o in 0..4 {
+        v += value_noise(x * f + (o as f64) * 13.0) * amp;
+        tot += amp;
+        amp *= 0.5;
+        f *= 2.0;
+    }
+    v / tot
+}
+
+/// Sample-and-hold: a hard random level held for each integer step of the input
+/// (re-rolls on every whole number). Output -1..1.
+fn hold(x: f64) -> f64 {
+    hash01(x.floor())
 }
 
 /// Smooth Hermite interpolation between `lo` and `hi`, like GLSL smoothstep.

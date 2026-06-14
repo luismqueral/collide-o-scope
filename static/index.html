@@ -314,56 +314,14 @@
           <button class="ae-close" id="ae-close" title="Close (Esc)">&times;</button>
         </div>
 
-        <div class="ae-presets-row">
-          <span class="ae-lbl">Preset</span>
-          <select class="ae-select ae-presets-select" id="ae-presets"><!-- preset options via JS --></select>
-        </div>
-
-        <div class="ae-controls">
-          <div class="ae-ctl ae-ctl-shape">
-            <span class="ae-lbl">Shape</span>
-            <div class="ae-shapes" id="ae-shapes"><!-- shape buttons via JS --></div>
+        <!-- Preset carousel: ‹ name idx/total › above one large preview. The
+             carousel is the only shape picker (raw mode is the escape hatch). -->
+        <div class="carousel">
+          <div class="carousel-name">
+            <button class="arrow" id="ae-prev" type="button" title="Previous (←)">&lsaquo;</button>
+            <span class="nm-wrap"><span class="nm" id="ae-name">Pulse</span><span class="carousel-idx" id="ae-idx">1/9</span></span>
+            <button class="arrow" id="ae-next" type="button" title="Next (&rarr;)">&rsaquo;</button>
           </div>
-
-          <div class="ae-ctl">
-            <span class="ae-lbl">Sync</span>
-            <div class="ae-seg" id="ae-sync">
-              <button data-sync="beat" class="active">Beat</button>
-              <button data-sync="free">Free</button>
-            </div>
-            <span class="ae-lbl ae-lbl-rate">Rate</span>
-            <select id="ae-rate" class="ae-select"></select>
-          </div>
-
-          <div class="ae-ctl ae-ctl-tempo" id="ae-tempo-row">
-            <span class="ae-lbl">Tempo</span>
-            <button class="ae-btn ae-tap" id="ae-tap" type="button" title="Tap tempo (or press T while open)">TAP</button>
-            <span class="bpm-readout" id="ae-bpm" title="Click to set BPM">120</span>
-            <span class="ae-lbl">bpm</span>
-            <span class="beat-dot" id="ae-beat-dot" title="beat"></span>
-          </div>
-
-          <div class="ae-ctl">
-            <span class="ae-lbl">Depth</span>
-            <input type="range" id="ae-depth" min="0" max="100" step="1" value="100">
-            <span class="ae-val" id="ae-depth-val">100%</span>
-          </div>
-
-          <div class="ae-ctl">
-            <span class="ae-lbl">Center</span>
-            <input type="range" id="ae-center" min="0" max="100" step="1" value="50">
-            <span class="ae-val" id="ae-center-val">50%</span>
-          </div>
-
-          <div class="ae-ctl" id="ae-phase-row">
-            <span class="ae-lbl" id="ae-phase-lbl">Phase</span>
-            <input type="range" id="ae-phase" min="0" max="360" step="1" value="0">
-            <span class="ae-val" id="ae-phase-val">0&deg;</span>
-            <label class="ae-invert"><input type="checkbox" id="ae-invert"> Invert</label>
-          </div>
-        </div>
-
-        <div class="ae-preview-wrap">
           <canvas id="ae-preview" class="ae-preview" width="560" height="120"></canvas>
         </div>
 
@@ -375,6 +333,24 @@
           <input type="range" id="ae-ghost" class="ae-ghost" tabindex="-1" disabled>
           <span class="ae-ghost-end" id="ae-ghost-hi">1</span>
           <span class="ae-ghost-val" id="ae-ghost-val">&mdash;</span>
+        </div>
+
+        <!-- Rotary knobs: drag up/down to turn, double-click resets. The 4th
+             knob morphs Phase (periodic shapes) ↔ Seed (random shapes). -->
+        <div class="knobs">
+          <div class="knob"><canvas id="ae-speed-k" width="64" height="64" title="drag up/down · double-click resets"></canvas><span class="knob-lbl">Speed</span><span class="knob-val" id="ae-speedn">slow</span></div>
+          <div class="knob"><canvas id="ae-amt-k" width="64" height="64" title="drag up/down · double-click resets"></canvas><span class="knob-lbl">Amount</span><span class="knob-val" id="ae-amtn">100%</span></div>
+          <div class="knob"><canvas id="ae-center-k" width="64" height="64" title="drag up/down · double-click resets"></canvas><span class="knob-lbl">Center</span><span class="knob-val" id="ae-centern">50%</span></div>
+          <div class="knob"><canvas id="ae-phase-k" width="64" height="64" title="drag up/down · double-click resets"></canvas><span class="knob-lbl" id="ae-phase-lbl">Phase</span><span class="knob-val" id="ae-phasen">0&deg;</span></div>
+        </div>
+
+        <!-- Tempo + Sync-to-beat: TAP/BPM are dimmed (.ae-dim) while in Free mode. -->
+        <div class="ae-tempo-row" id="ae-tempo-row">
+          <button class="ae-btn ae-tap" id="ae-tap" type="button" title="Tap tempo (or press T while open)">TAP</button>
+          <span class="bpm-readout" id="ae-bpm" title="Click to set BPM">120</span>
+          <span class="ae-lbl">bpm</span>
+          <span class="beat-dot" id="ae-beat-dot" title="beat"></span>
+          <label class="ae-toggle"><input type="checkbox" id="ae-sync-toggle"> Sync to beat</label>
         </div>
 
         <div class="ae-formula-row">

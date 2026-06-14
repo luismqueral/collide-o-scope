@@ -1186,6 +1186,99 @@ input[type="range"]::-webkit-slider-thumb:hover {
   display: block;
 }
 
+/* Preset carousel (Variation D): ‹ name idx/total › stacked above the big
+   preview. The carousel is the only shape picker (raw mode is the escape). */
+.carousel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.carousel-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.carousel-name .nm-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+}
+
+.carousel-name .nm { font-size: 15px; color: var(--accent); }
+
+.carousel-idx {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.carousel .arrow {
+  flex: 0 0 auto;
+  width: 40px;
+  padding: 3px 0;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  font-family: inherit;
+}
+
+.carousel .arrow:hover { border-color: var(--accent); color: var(--accent); }
+.carousel .arrow:active { background: var(--accent); color: var(--bg); }
+
+/* Rotary knob rack: drag a face up/down to turn, double-click resets. */
+.knobs {
+  display: flex;
+  justify-content: space-around;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 14px 12px;
+}
+
+.knob {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.knob canvas {
+  width: 64px;
+  height: 64px;
+  touch-action: none;
+  cursor: ns-resize;
+}
+
+.knob .knob-lbl { font-size: 11px; color: var(--text-dim); }
+.knob .knob-val { font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/* Tempo row + Sync-to-beat toggle (dimmed via .ae-dim in Free mode). */
+.ae-tempo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+
+.ae-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  margin-left: auto;
+}
+
 /* Generated-formula line + raw escape hatch. */
 .ae-formula-row {
   display: flex;
@@ -1257,9 +1350,9 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .ae-remove:hover { border-color: #e55; color: #e55; }
 
-/* Raw mode: dim the knob rack + presets so it's clear they're detached. */
-.ae-modal.raw .ae-controls,
-.ae-modal.raw .ae-presets-row {
+/* Raw mode: dim the carousel + knob rack so it's clear they're detached. */
+.ae-modal.raw .carousel,
+.ae-modal.raw .knobs {
   opacity: 0.4;
   pointer-events: none;
 }
