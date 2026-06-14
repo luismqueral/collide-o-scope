@@ -7,8 +7,24 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
-    <main class="columns">
+  <div class="app view-classic">
+    <header class="topbar">
+      <span class="topbar-brand">collide&middot;o&middot;scope</span>
+      <div class="view-toggle" id="view-toggle">
+        <button class="view-tab is-active" id="view-classic-btn" data-view="classic">Classic</button>
+        <button class="view-tab" id="view-matrix-btn" data-view="matrix">Matrix</button>
+      </div>
+      <div class="topbar-transport">
+        <button class="transport-btn" id="btn-play-all" title="Play All">&#x25B6;</button>
+        <button class="transport-btn" id="btn-stop" title="Reset FX">&#x21BA;</button>
+        <span class="ws-dot" id="ws-status" title="connecting..."></span>
+      </div>
+      <div class="topbar-drawers">
+        <button class="drawer-toggle" id="drawer-patches-btn" title="Patches">patches</button>
+        <button class="drawer-toggle" id="drawer-library-btn" title="Media library">library</button>
+      </div>
+    </header>
+    <main class="columns" id="classic-view">
       <!-- LEFT: Patches + Media Library -->
       <aside class="col-left">
         <section class="patches-section">
@@ -45,11 +61,6 @@
       <!-- RIGHT: Transport + Master Effects -->
       <aside class="col-right">
         <h3 class="panel-title">Master Effects</h3>
-        <div class="transport-row">
-          <button class="transport-btn" id="btn-play-all" title="Play All">&#x25B6;</button>
-          <button class="transport-btn" id="btn-stop" title="Reset FX">&#x21BA;</button>
-          <span class="ws-dot" id="ws-status" title="connecting..."></span>
-        </div>
         <div class="fx-scroll" id="master-fx">
           <div class="fx-group" data-group="output">
             <div class="fx-group-header">
@@ -306,6 +317,29 @@
       </aside>
     </main>
 
+    <!-- MATRIX VIEW (transposed parameter grid) -->
+    <section class="matrix-view" id="matrix-view">
+      <div class="mx-scroll" id="mx-scroll">
+        <div class="matrix-grid" id="matrix-grid">
+          <!-- built by matrix.js -->
+        </div>
+      </div>
+      <aside class="mx-drawer mx-drawer-left" id="mx-drawer-patches">
+        <div class="mx-drawer-head">
+          <span class="panel-title">patches</span>
+          <input type="text" id="mx-patch-name" class="patch-name-input" placeholder="name…" maxlength="48">
+          <button id="mx-patch-save" class="patch-save-btn" title="Save current patch"><i data-lucide="save"></i></button>
+        </div>
+        <div class="patches-list" id="mx-patches-list"></div>
+      </aside>
+      <aside class="mx-drawer mx-drawer-right" id="mx-drawer-library">
+        <div class="mx-drawer-head">
+          <span class="panel-title">media library</span>
+        </div>
+        <div class="library-grid" id="mx-library-grid"></div>
+      </aside>
+    </section>
+
     <!-- AUTOMATION EDITOR (modal overlay) -->
     <div class="ae-modal" id="automation" hidden>
       <div class="ae-panel">
@@ -371,6 +405,8 @@
 
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="app.js"></script>
+  <script src="matrix-schema.js"></script>
+  <script src="matrix.js"></script>
   <script src="https://queral.studio/dom-tools.js"></script>
 </body>
 </html>

@@ -41,6 +41,7 @@ function connect() {
         syncTransport(msg.paused);
         syncExport(msg.export_progress, msg.export_error);
         syncTempo(msg.bpm, msg.beat);
+        if (window.onMatrixState) window.onMatrixState(msg);
       }
     } catch (err) {
       console.warn('[ws] parse error:', err);

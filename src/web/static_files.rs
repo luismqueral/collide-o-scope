@@ -7,6 +7,8 @@ use axum::response::{IntoResponse, Response};
 const INDEX_HTML: &str = include_str!("../../static/index.html");
 const STYLE_CSS: &str = include_str!("../../static/style.css");
 const APP_JS: &str = include_str!("../../static/app.js");
+const MATRIX_SCHEMA_JS: &str = include_str!("../../static/matrix-schema.js");
+const MATRIX_JS: &str = include_str!("../../static/matrix.js");
 
 pub async fn serve(uri: axum::http::Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
@@ -15,6 +17,8 @@ pub async fn serve(uri: axum::http::Uri) -> Response {
         "" | "index.html" => (INDEX_HTML, "text/html; charset=utf-8"),
         "style.css" => (STYLE_CSS, "text/css; charset=utf-8"),
         "app.js" => (APP_JS, "text/javascript; charset=utf-8"),
+        "matrix-schema.js" => (MATRIX_SCHEMA_JS, "text/javascript; charset=utf-8"),
+        "matrix.js" => (MATRIX_JS, "text/javascript; charset=utf-8"),
         _ => {
             return (StatusCode::NOT_FOUND, "Not found").into_response();
         }
