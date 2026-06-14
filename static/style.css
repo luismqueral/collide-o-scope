@@ -1413,7 +1413,9 @@ input[type="range"]::-webkit-slider-thumb:hover {
 /* --- View switching (class-based; [hidden] is unreliable under display:grid) --- */
 .app.view-classic #matrix-view { display: none; }
 .app.view-matrix #classic-view { display: none; }
-.app.view-classic .topbar-drawers { visibility: hidden; }
+/* Sidebar/hamburger belong to the matrix view only; classic keeps its own
+   always-on left column. */
+.app.view-classic .topbar-hamburger { display: none; }
 
 /* --- Top bar --- */
 .topbar {
@@ -1456,38 +1458,59 @@ input[type="range"]::-webkit-slider-thumb:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.topbar-drawers {
-  display: flex;
-  gap: 6px;
   margin-left: auto;
 }
-.drawer-toggle {
-  background: var(--surface-2);
+.topbar-hamburger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  background: transparent;
   color: var(--text-dim);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 11px;
   cursor: pointer;
+  padding: 0;
 }
-.drawer-toggle:hover { color: var(--text); }
-.drawer-toggle.is-active {
+.topbar-hamburger:hover { color: var(--text); }
+.topbar-hamburger svg { width: 15px; height: 15px; }
+.app.sidebar-open .topbar-hamburger {
   color: var(--accent);
   border-color: var(--accent);
 }
 
 /* --- Matrix container --- */
+/* Flex row: optional sidebar (left) pushes the scrollable grid; nothing
+   overlays the grid so no UI is ever covered. */
 .matrix-view {
-  position: relative;
   flex: 1;
+  display: flex;
+  min-height: 0;
   overflow: hidden;
 }
 .mx-scroll {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  flex: 1;
+  min-width: 0;
   overflow: auto;
+}
+
+/* --- Sidebar (patches + library, stacked like the classic left column) --- */
+.mx-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+.app:not(.sidebar-open) .mx-sidebar { display: none; }
+.mx-sidebar .library-section .panel-title {
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .matrix-grid {
   display: grid;
@@ -1697,37 +1720,18 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 .mx-flash { background: color-mix(in srgb, var(--accent) 25%, transparent); }
 
-/* --- Drawers --- */
-.mx-drawer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 250px;
+/* --- Layer column reordering (drag the column header) --- */
+.mx-colhead.mx-col-layer { cursor: grab; }
+.mx-colhead.mx-dragging {
+  cursor: grabbing;
   background: var(--surface);
-  border: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  z-index: 6;
-  transition: transform 0.16s ease;
+  color: var(--accent);
+  opacity: 0.85;
 }
-.mx-drawer-left { left: 0; transform: translateX(-110%); border-left: none; }
-.mx-drawer-right { right: 0; transform: translateX(110%); border-right: none; }
-.mx-drawer-left.open,
-.mx-drawer-right.open { transform: translateX(0); }
-.mx-drawer-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px;
-  border-bottom: 1px solid var(--border);
-}
-.mx-drawer-head .panel-title { flex: 1; }
-.mx-drawer .patches-list,
-.mx-drawer .library-grid {
-  flex: 1;
-  overflow: auto;
-  padding: 6px;
-}
+.mx-colhead.mx-drop-before { box-shadow: inset 2px 0 0 var(--accent); }
+.mx-colhead.mx-drop-after { box-shadow: inset -2px 0 0 var(--accent); }
+
+/* --- Sidebar list rows (patches) --- */
 .mx-patch-row { display: flex; gap: 4px; margin-bottom: 4px; }
 .mx-patch-load {
   flex: 1;

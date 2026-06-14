@@ -126,6 +126,9 @@
       h.className = 'mx-colhead mx-col-' + col.kind;
       h.textContent = col.label;
       if (col.filename) h.title = col.filename;
+      col.headEl = h;
+      // Layer columns are draggable to reorder; MASTER stays pinned first.
+      if (col.kind === 'layer') attachColumnDrag(h, col);
       gridEl.appendChild(h);
     });
 
@@ -306,6 +309,83 @@
   }
 
   // =====================================================================
+  // Layer column reordering (drag the column header)
+  // =====================================================================
+  // Mirrors the classic view: pointer-driven so it survives the pointer leaving
+  // the header. Rust owns order — we send move_layer and let the next snapshot
+  // rebuild the grid in the new order. MASTER (kind !== 'layer') is never
+  // draggable, so it stays pinned as the first column.
+  let colDrag = null; // { fromIndex, headEl, target }
+
+  function layerCols() {
+    return columns.filter((c) => c.kind === 'layer' && c.headEl);
+  }
+
+  function clearColDropMarks() {
+    gridEl.querySelectorAll('.mx-drop-before, .mx-drop-after')
+      .forEach((e) => e.classList.remove('mx-drop-before', 'mx-drop-after'));
+  }
+
+  // Resolve which layer header the pointer is over (by X) and which edge.
+  function colDropTarget(clientX) {
+    clearColDropMarks();
+    const heads = layerCols();
+    if (!heads.length) return null;
+    let best = null;
+    for (const col of heads) {
+      const r = col.headEl.getBoundingClientRect();
+      if (clientX >= r.left && clientX <= r.right) {
+        best = { col, before: clientX < r.left + r.width / 2 };
+        break;
+      }
+    }
+    if (!best) {
+      const firstR = heads[0].headEl.getBoundingClientRect();
+      best = clientX < firstR.left
+        ? { col: heads[0], before: true }
+        : { col: heads[heads.length - 1], before: false };
+    }
+    best.col.headEl.classList.add(best.before ? 'mx-drop-before' : 'mx-drop-after');
+    return best;
+  }
+
+  function onColMove(e) {
+    if (!colDrag) return;
+    e.preventDefault();
+    colDrag.target = colDropTarget(e.clientX);
+  }
+
+  function onColUp() {
+    if (!colDrag) return;
+    const from = colDrag.fromIndex;
+    const t = colDrag.target;
+    if (t) {
+      const targetIndex = t.col.index;
+      const insertion = t.before ? targetIndex : targetIndex + 1;
+      // Account for the gap left by lifting the source out first.
+      let to = from < insertion ? insertion - 1 : insertion;
+      to = Math.max(0, Math.min(to, layerCols().length - 1));
+      if (to !== from) sendAction({ action: 'move_layer', from, to });
+    }
+    if (colDrag.headEl) colDrag.headEl.classList.remove('mx-dragging');
+    clearColDropMarks();
+    colDrag = null;
+    document.removeEventListener('pointermove', onColMove);
+    document.removeEventListener('pointerup', onColUp);
+  }
+
+  function attachColumnDrag(headEl, col) {
+    headEl.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      colDrag = { fromIndex: col.index, headEl, target: null };
+      headEl.classList.add('mx-dragging');
+      document.addEventListener('pointermove', onColMove);
+      document.addEventListener('pointerup', onColUp);
+    });
+  }
+
+  // =====================================================================
   // Sync
   // =====================================================================
   function syncMatrix(msg) {
@@ -313,7 +393,7 @@
     if (view !== 'matrix') return;
     ensureBuilt(msg);
     updateCells(msg);
-    if (drawerOpen) renderDrawers(msg);
+    if (sidebarOpen) renderSidebar(msg);
   }
 
   function ensureBuilt(msg) {
@@ -623,23 +703,20 @@
     if (next === 'matrix' && lastMsg) {
       ensureBuilt(lastMsg);
       updateCells(lastMsg);
-      if (drawerOpen) renderDrawers(lastMsg);
+      if (sidebarOpen) renderSidebar(lastMsg);
     }
   }
 
-  let drawerOpen = null; // 'patches' | 'library' | null
-  function toggleDrawer(which) {
-    drawerOpen = drawerOpen === which ? null : which;
-    document.getElementById('mx-drawer-patches').classList.toggle('open', drawerOpen === 'patches');
-    document.getElementById('mx-drawer-library').classList.toggle('open', drawerOpen === 'library');
-    document.getElementById('drawer-patches-btn').classList.toggle('is-active', drawerOpen === 'patches');
-    document.getElementById('drawer-library-btn').classList.toggle('is-active', drawerOpen === 'library');
-    if (drawerOpen && lastMsg) renderDrawers(lastMsg);
+  let sidebarOpen = false;
+  function toggleSidebar() {
+    sidebarOpen = !sidebarOpen;
+    app.classList.toggle('sidebar-open', sidebarOpen);
+    if (sidebarOpen && lastMsg) renderSidebar(lastMsg);
   }
 
-  function renderDrawers(msg) {
-    if (drawerOpen === 'patches') renderPatches(msg.patches || []);
-    if (drawerOpen === 'library') renderLibrary(msg.library || []);
+  function renderSidebar(msg) {
+    renderPatches(msg.patches || []);
+    renderLibrary(msg.library || []);
   }
 
   function renderPatches(patches) {
@@ -689,8 +766,8 @@
   function init() {
     document.getElementById('view-classic-btn').addEventListener('click', () => setView('classic'));
     document.getElementById('view-matrix-btn').addEventListener('click', () => setView('matrix'));
-    document.getElementById('drawer-patches-btn').addEventListener('click', () => toggleDrawer('patches'));
-    document.getElementById('drawer-library-btn').addEventListener('click', () => toggleDrawer('library'));
+    const sb = document.getElementById('mx-sidebar-btn');
+    if (sb) sb.addEventListener('click', toggleSidebar);
 
     const saveBtn = document.getElementById('mx-patch-save');
     if (saveBtn) saveBtn.addEventListener('click', () => {
