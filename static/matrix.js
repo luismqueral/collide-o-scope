@@ -32,6 +32,9 @@
   let columns = [];                 // layer columns only: [{ key, kind, label, index }]
   let rows = [];                    // [{ group, def, cells: [cellInfo|null] }]
   let masterRows = [];              // [{ group, def, cell }] for the master panel
+  let outputCells = [];             // [{ refresh }] OUTPUT-section cycle cells
+  let vhsPresetName = null;         // currently applied VHS preset name (or null)
+  let vhsPresetEls = null;          // { name, mod } spans on the VHS header
   let addColCells = [];             // every cell in the trailing add-layer column
   const cellIndex = new Map();      // "<colKey>|<paramKey>" -> cellInfo
   const collapsed = new Set();      // collapsed group names
@@ -196,7 +199,7 @@
       gh.className = 'mx-group mx-group-head';
       gh.dataset.group = group.name;
       gh.innerHTML = '<span class="mx-chevron">\u25BC</span><span class="mx-group-label">' + group.name + '</span>';
-      gh.addEventListener('click', () => toggleGroup(group.name));
+      gh.addEventListener('click', () => toggleGroup(group.name, 'layer'));
       gridEl.appendChild(gh);
 
       columns.forEach((col) => {
@@ -301,8 +304,10 @@
       });
     });
 
-    // Re-apply any collapsed groups to the freshly built cells.
-    collapsed.forEach((name) => applyCollapse(name, true));
+    // Re-apply any collapsed layer groups to the freshly built cells.
+    collapsed.forEach((key) => {
+      if (key.startsWith('layer:')) applyCollapse(key.slice(6), 'layer', true);
+    });
 
     // Render the Lucide glyphs in the freshly built group-control buttons.
     if (window.lucide) window.lucide.createIcons();
@@ -346,6 +351,8 @@
   // that have master/global params (COLOR, DIGITAL, ANALOG, MOTION, VHS/NTSC).
   function buildMasterPanel() {
     masterRows = [];
+    outputCells = [];
+    vhsPresetEls = null;
     masterGridEl.innerHTML = '';
     masterGridEl.style.setProperty('--mx-cols', 1);
 
@@ -355,6 +362,11 @@
     h.className = 'mx-master-head';
     h.textContent = 'MASTER';
     masterGridEl.appendChild(h);
+
+    // OUTPUT section — global render settings (dimensions + framerate). These
+    // aren't per-param effects, so they sit above the effect groups as their own
+    // band of click-to-cycle cells.
+    buildOutputSection();
 
     // Section-header hand-off (matches the main layer grid): every group header
     // pins at the same top (just below the MASTER head), so as you scroll the
@@ -367,7 +379,31 @@
       gh.className = 'mx-group';
       gh.dataset.group = group.name;
       gh.innerHTML = '<span class="mx-chevron">\u25BC</span><span class="mx-group-label">' + group.name + '</span>';
-      gh.addEventListener('click', () => toggleGroup(group.name));
+      gh.addEventListener('click', () => toggleGroup(group.name, 'master'));
+
+      // Right-aligned controls on the header band: an optional VHS preset cycle,
+      // then per-group randomize + reset (mirrors the layer columns' buttons).
+      const ctl = document.createElement('span');
+      ctl.className = 'mx-grp-btns';
+      if (group.name === 'VHS/NTSC') ctl.appendChild(buildVhsPresetControl());
+
+      const rnd = document.createElement('button');
+      rnd.className = 'mx-grp-btn';
+      rnd.type = 'button';
+      rnd.title = 'Randomize ' + group.name;
+      rnd.innerHTML = '<i data-lucide="dices"></i>';
+      rnd.addEventListener('click', (e) => { e.stopPropagation(); randomizeMasterGroup(group.name); });
+      ctl.appendChild(rnd);
+
+      const rst = document.createElement('button');
+      rst.className = 'mx-grp-btn';
+      rst.type = 'button';
+      rst.title = 'Reset ' + group.name;
+      rst.innerHTML = '<i data-lucide="rotate-ccw"></i>';
+      rst.addEventListener('click', (e) => { e.stopPropagation(); resetMasterGroup(group.name); });
+      ctl.appendChild(rst);
+
+      gh.appendChild(ctl);
       masterGridEl.appendChild(gh);
 
       group.params.forEach((def) => {
@@ -391,13 +427,180 @@
     });
 
     masterBuilt = true;
-    collapsed.forEach((name) => applyCollapse(name, true));
+    if (window.lucide) window.lucide.createIcons();
+    collapsed.forEach((key) => {
+      if (key.startsWith('master:')) applyCollapse(key.slice(7), 'master', true);
+    });
+  }
+
+  // ---- OUTPUT section (ratio / quality / framerate) -------------------------
+  const OUTPUT_RATIOS = ['16:9', '4:3', '1:1', '9:16', '21:9'];
+  const OUTPUT_QUALITIES = [720, 1080, 1440];
+  const MASTER_FPS = [30, 15, 10, 7.5, 6];
+
+  function buildOutputSection() {
+    const head = document.createElement('div');
+    head.className = 'mx-group mx-group-static';
+    head.innerHTML = '<span class="mx-group-label">OUTPUT</span>';
+    masterGridEl.appendChild(head);
+
+    addOutputRow('ratio',
+      () => (lastMsg && lastMsg.output_ratio) || '16:9',
+      (dir) => {
+        const cur = (lastMsg && lastMsg.output_ratio) || '16:9';
+        const i = Math.max(0, OUTPUT_RATIOS.indexOf(cur));
+        const ratio = OUTPUT_RATIOS[(i + dir + OUTPUT_RATIOS.length) % OUTPUT_RATIOS.length];
+        const quality = (lastMsg && lastMsg.output_quality) || 1080;
+        sendAction({ action: 'set_output_size', ratio, quality });
+      });
+
+    addOutputRow('quality',
+      () => String((lastMsg && lastMsg.output_quality) || 1080) + 'p',
+      (dir) => {
+        const cur = (lastMsg && lastMsg.output_quality) || 1080;
+        const i = Math.max(0, OUTPUT_QUALITIES.indexOf(cur));
+        const quality = OUTPUT_QUALITIES[(i + dir + OUTPUT_QUALITIES.length) % OUTPUT_QUALITIES.length];
+        const ratio = (lastMsg && lastMsg.output_ratio) || '16:9';
+        sendAction({ action: 'set_output_size', ratio, quality });
+      });
+
+    addOutputRow('fps',
+      () => String((lastMsg && lastMsg.framerate) || 30),
+      (dir) => {
+        const cur = (lastMsg && lastMsg.framerate) || 30;
+        const i = Math.max(0, MASTER_FPS.indexOf(cur));
+        const value = MASTER_FPS[(i + dir + MASTER_FPS.length) % MASTER_FPS.length];
+        sendAction({ action: 'set_master_framerate', value });
+      });
+  }
+
+  // A label + click-to-cycle value cell, styled like an enum cell. getText()
+  // returns the current display string; onCycle(dir) advances + sends the action.
+  function addOutputRow(labelText, getText, onCycle) {
+    const label = document.createElement('div');
+    label.className = 'mx-label';
+    label.textContent = labelText;
+    masterGridEl.appendChild(label);
+
+    const el = document.createElement('div');
+    el.className = 'mx-cell mx-ptype-enum';
+    const val = document.createElement('span');
+    val.className = 'mx-val mx-enum';
+    val.textContent = getText();
+    el.appendChild(val);
+    el.addEventListener('click', () => onCycle(1));
+    masterGridEl.appendChild(el);
+
+    outputCells.push({ refresh: () => { val.textContent = getText(); } });
+  }
+
+  // ---- Master group reset / randomize ---------------------------------------
+  // Client-side, mirroring the layer band: reset writes each applicable master
+  // param back to its schema default; randomize scatters numeric params in-range.
+  // Enums/bools/colors are left untouched by randomize (matches classic).
+  function resetMasterGroup(groupName) {
+    const group = groups.find((g) => g.name === groupName);
+    if (!group) return;
+    group.params.forEach((def) => {
+      if (!applies(def, 'master')) return;
+      if (def.def === undefined) return;
+      sendAction(setValueAction(MASTER_COL, def, def.def));
+    });
+    if (groupName === 'VHS/NTSC') clearVhsPreset();
+  }
+
+  function randomizeMasterGroup(groupName) {
+    const group = groups.find((g) => g.name === groupName);
+    if (!group) return;
+    group.params.forEach((def) => {
+      if (!applies(def, 'master')) return;
+      if (def.ptype !== 'float' && def.ptype !== 'bipolar') return;
+      const v = randInRange(def.min, def.max, def.step || 0.01);
+      sendAction(setValueAction(MASTER_COL, def, v));
+    });
+    if (groupName === 'VHS/NTSC') flagVhsModifiedLocal();
+  }
+
+  // ---- VHS preset cycle + "modified" indicator ------------------------------
+  function buildVhsPresetControl() {
+    const wrap = document.createElement('span');
+    wrap.className = 'mx-vhs-preset';
+    wrap.title = 'Cycle VHS preset';
+    const name = document.createElement('span');
+    name.className = 'mx-vhs-preset-name';
+    name.textContent = vhsPresetName || 'preset';
+    wrap.appendChild(name);
+    const mod = document.createElement('span');
+    mod.className = 'mx-vhs-preset-mod';
+    mod.textContent = '*';
+    mod.style.display = 'none';
+    wrap.appendChild(mod);
+    vhsPresetEls = { name, mod };
+    wrap.addEventListener('click', (e) => { e.stopPropagation(); cycleVhsPreset(1); });
+    return wrap;
+  }
+
+  function presetNames() { return Object.keys(window.VHS_PRESETS || {}); }
+
+  function cycleVhsPreset(dir) {
+    const names = presetNames();
+    if (!names.length) return;
+    const i = names.indexOf(vhsPresetName);
+    const next = i === -1 ? names[0] : names[(i + dir + names.length) % names.length];
+    applyVhsPreset(next);
+  }
+
+  function applyVhsPreset(name) {
+    const preset = (window.VHS_PRESETS || {})[name];
+    if (!preset) return;
+    // Direct sendAction batch (mirrors classic); flag stays clear until the user
+    // tweaks a VHS control afterward.
+    for (const [param, value] of Object.entries(preset)) {
+      sendAction({ action: 'set_ntsc_param', param, value });
+    }
+    vhsPresetName = name;
+    refreshVhsPreset(false);
+  }
+
+  function clearVhsPreset() {
+    vhsPresetName = null;
+    refreshVhsPreset(false);
+  }
+
+  function flagVhsModifiedLocal() {
+    if (vhsPresetName) refreshVhsPreset(true);
+  }
+
+  function refreshVhsPreset(modified) {
+    if (!vhsPresetEls) return;
+    vhsPresetEls.name.textContent = vhsPresetName || 'preset';
+    vhsPresetEls.mod.style.display = (vhsPresetName && modified) ? '' : 'none';
   }
 
   function updateMasterPanel(msg) {
     if (!masterBuilt) return;
     const [autos, errors] = readAutos(msg, MASTER_COL);
     masterRows.forEach((r) => updateCell(r.cell, msg, autos, errors));
+    outputCells.forEach((c) => c.refresh());
+    syncVhsModified(msg);
+  }
+
+  // State-driven "modified" detection: once a preset is applied, mark it modified
+  // when any VHS param in the live snapshot diverges from the preset's values.
+  function syncVhsModified(msg) {
+    if (!vhsPresetName || !vhsPresetEls) return;
+    const preset = (window.VHS_PRESETS || {})[vhsPresetName];
+    const ntsc = msg.ntsc || {};
+    if (!preset) return;
+    let modified = false;
+    for (const [param, want] of Object.entries(preset)) {
+      const got = ntsc[param];
+      if (got === undefined) continue;
+      if (typeof want === 'number') {
+        if (Math.abs((got || 0) - want) > 1e-4) { modified = true; break; }
+      } else if (got !== want) { modified = true; break; }
+    }
+    refreshVhsPreset(modified);
   }
 
   function buildCell(def, col, groupName) {
@@ -820,7 +1023,7 @@
   // Keyboard navigation
   // =====================================================================
   function rebuildNav() {
-    navRows = rows.filter((r) => !collapsed.has(r.group));
+    navRows = rows.filter((r) => !collapsed.has('layer:' + r.group));
     if (focus.r >= navRows.length) focus.r = Math.max(0, navRows.length - 1);
   }
 
@@ -941,27 +1144,32 @@
   // =====================================================================
   // Collapsible groups
   // =====================================================================
-  function toggleGroup(name) {
-    if (collapsed.has(name)) collapsed.delete(name);
-    else collapsed.add(name);
-    applyCollapse(name, collapsed.has(name));
-    rebuildNav();
-    ensureFocusable();
-    paintFocus(false);
+  // Collapse state is scoped per grid ('layer:NAME' / 'master:NAME') so the
+  // layer grid and the master panel expand/collapse the same-named group
+  // independently.
+  function toggleGroup(name, scope) {
+    const key = scope + ':' + name;
+    if (collapsed.has(key)) collapsed.delete(key);
+    else collapsed.add(key);
+    applyCollapse(name, scope, collapsed.has(key));
+    if (scope === 'layer') {
+      rebuildNav();
+      ensureFocusable();
+      paintFocus(false);
+    }
   }
 
-  function applyCollapse(name, isCollapsed) {
+  function applyCollapse(name, scope, isCollapsed) {
+    const root = scope === 'master' ? masterGridEl : gridEl;
     const sel = '[data-group="' + cssEscape(name) + '"]';
-    [gridEl, masterGridEl].forEach((root) => {
-      root.querySelectorAll(sel).forEach((el) => {
-        // The header band (group label + per-layer control cells) stays visible
-        // when collapsed — only the param rows hide.
-        if (el.classList.contains('mx-group') || el.classList.contains('mx-group-ctl')) {
-          el.classList.toggle('mx-collapsed', isCollapsed);
-        } else {
-          el.style.display = isCollapsed ? 'none' : '';
-        }
-      });
+    root.querySelectorAll(sel).forEach((el) => {
+      // The header band (group label + per-layer control cells) stays visible
+      // when collapsed — only the param rows hide.
+      if (el.classList.contains('mx-group') || el.classList.contains('mx-group-ctl')) {
+        el.classList.toggle('mx-collapsed', isCollapsed);
+      } else {
+        el.style.display = isCollapsed ? 'none' : '';
+      }
     });
   }
 

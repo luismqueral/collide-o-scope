@@ -395,6 +395,10 @@ const VHS_PRESETS = {
   },
 };
 
+// Exposed for the matrix view (separate IIFE) so its VHS-preset cell can reuse
+// the same preset definitions instead of duplicating them.
+window.VHS_PRESETS = VHS_PRESETS;
+
 let currentVhsPreset = null;
 let vhsModified = false;
 

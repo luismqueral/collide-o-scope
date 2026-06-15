@@ -1729,9 +1729,12 @@ input[type="range"]::-webkit-slider-thumb:hover {
 /* Master panel group headers hand off like the main layer grid: they share the
    base top (--mx-row-h, just under the MASTER head) so each section covers the
    previous on scroll. A fixed row height keeps the pinned header flush under the
-   MASTER head and fully opaque over the rows scrolling beneath it. */
+   MASTER head and fully opaque over the rows scrolling beneath it. z-index 3 sits
+   above the sticky-left .mx-label cells (z-index 2, later in DOM) so labels slide
+   under the pinned header instead of painting over it. */
 #mx-master-grid .mx-group {
   height: var(--mx-row-h);
+  z-index: 3;
 }
 /* Per-column control cells share the group band's top-sticky behavior so the
    whole band (label + dice/reset buttons) stays pinned together on scroll. */
@@ -1771,7 +1774,38 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 .mx-grp-btn svg { width: 12px; height: 12px; }
 .mx-group-ctl:hover .mx-grp-btn { opacity: 0.85; }
+.mx-group:hover .mx-grp-btn { opacity: 0.85; }
 .mx-grp-btn:hover { opacity: 1; color: var(--accent); }
+
+/* Right-aligned control cluster on the master group header band (VHS preset +
+   randomize/reset). margin-left:auto pushes it to the far edge of the header. */
+.mx-grp-btns {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* OUTPUT band header — a static (non-collapsing) group label, no chevron. */
+.mx-group.mx-group-static { cursor: default; }
+
+/* VHS preset cycle pill on the VHS/NTSC header. */
+.mx-vhs-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+}
+.mx-vhs-preset:hover { color: var(--text); border-color: var(--accent); }
+.mx-vhs-preset-name { font-size: 9px; }
+.mx-vhs-preset-mod { color: var(--accent); font-weight: 700; }
 
 /* --- Label column --- */
 .mx-label {
