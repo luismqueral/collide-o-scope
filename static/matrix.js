@@ -32,6 +32,7 @@
   let columns = [];                 // layer columns only: [{ key, kind, label, index }]
   let rows = [];                    // [{ group, def, cells: [cellInfo|null] }]
   let masterRows = [];              // [{ group, def, cell }] for the master panel
+  let addColCells = [];             // every cell in the trailing add-layer column
   const cellIndex = new Map();      // "<colKey>|<paramKey>" -> cellInfo
   const collapsed = new Set();      // collapsed group names
   let navRows = [];                 // rows visible for keyboard nav
@@ -123,6 +124,7 @@
   function buildMatrix(msg) {
     columns = buildColumns(msg);
     rows = [];
+    addColCells = [];
     cellIndex.clear();
     gridEl.innerHTML = '';
     gridEl.style.setProperty('--mx-cols', columns.length);
@@ -166,16 +168,13 @@
       }
       gridEl.appendChild(h);
     });
-    // Trailing add-layer column header (its own narrow column, right of L-last).
+    // Trailing add-layer column header. The whole add column is one big click
+    // target (delegated in init); this top cell carries the visible "+".
     const addHead = document.createElement('div');
     addHead.className = 'mx-addcol mx-addcol-head';
-    const addBtn = document.createElement('button');
-    addBtn.className = 'mx-add-layer';
-    addBtn.type = 'button';
-    addBtn.textContent = '+';
-    addBtn.title = 'Add a layer';
-    addBtn.addEventListener('click', () => openLibraryModal('add'));
-    addHead.appendChild(addBtn);
+    addHead.textContent = '+';
+    addHead.title = 'Add a layer';
+    addColCells.push(addHead);
     gridEl.appendChild(addHead);
 
     // Group + param rows (layer params only — master params live in the panel)
@@ -226,6 +225,7 @@
       const ghTail = document.createElement('div');
       ghTail.className = 'mx-group-ctl mx-addcol';
       ghTail.dataset.group = group.name;
+      addColCells.push(ghTail);
       gridEl.appendChild(ghTail);
 
       group.params.forEach((def) => {
@@ -266,6 +266,7 @@
         pad.className = 'mx-addcol' + (tall ? ' mx-row-tall' : '');
         pad.dataset.group = group.name;
         pad.dataset.mxrow = String(rowIndex);
+        addColCells.push(pad);
         gridEl.appendChild(pad);
 
         rows.push(rowObj);
@@ -1136,6 +1137,20 @@
     // own row index space and scopes its queries to its own root.
     attachRowHover(gridEl);
     attachRowHover(masterGridEl);
+
+    // The whole trailing add column behaves as one big "add layer" button:
+    // clicking anywhere in it opens the library in add mode, and hovering any
+    // part of it lights up the entire column to advertise that.
+    gridEl.addEventListener('click', (e) => {
+      if (e.target.closest('.mx-addcol')) openLibraryModal('add');
+    });
+    gridEl.addEventListener('mouseover', (e) => {
+      const hot = !!e.target.closest('.mx-addcol');
+      addColCells.forEach((c) => c.classList.toggle('mx-addcol-hot', hot));
+    });
+    gridEl.addEventListener('mouseleave', () => {
+      addColCells.forEach((c) => c.classList.remove('mx-addcol-hot'));
+    });
 
     window.onMatrixState = syncMatrix;
 

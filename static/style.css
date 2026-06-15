@@ -1439,7 +1439,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
   --mx-col-w: 88px;
   --mx-row-h: 24px;
   --mx-add-w: 34px;
-  --mx-clip-row-h: 48px;
+  --mx-clip-row-h: 60px;
 }
 
 /* --- View switching (class-based; [hidden] is unreliable under display:grid) --- */
@@ -1600,39 +1600,30 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 /* --- Trailing add-layer column ---
    Rendered as one continuous gray strip (no internal horizontal borders) so it
-   reads as a distinct column, set apart from the layer columns by a left border. */
+   reads as a distinct column, set apart from the layer columns by a left border.
+   The entire column is a single click target (add a layer); hovering anywhere in
+   it lights up every cell (.mx-addcol-hot, toggled in JS) to signal that. */
 .mx-addcol {
   background: var(--surface-2);
   border-left: 1px solid var(--border);
+  cursor: pointer;
+}
+.mx-addcol.mx-addcol-hot {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
 }
 .mx-addcol-head {
   position: sticky;
   top: 0;
   z-index: 3;
-  background: var(--surface-2);
-  border-left: 1px solid var(--border);
   height: var(--mx-row-h);
   display: flex;
   align-items: center;
   justify-content: center;
-}
-.mx-add-layer {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 0;
+  color: var(--text-dim);
 }
-.mx-add-layer:hover { color: var(--accent); border-color: var(--accent); }
+.mx-addcol-head.mx-addcol-hot { color: var(--accent); }
 .mx-colhead {
   position: sticky;
   top: 0;
