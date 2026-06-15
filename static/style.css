@@ -1567,18 +1567,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-left: 1px solid var(--border);
 }
 .app:not(.master-open) .mx-master-panel { display: none; }
-/* Drag handle between the grid and the master panel — resizes the panel width
-   (writes --mx-master-w). Only present while the panel is open. */
-.mx-master-resize {
-  flex-shrink: 0;
-  width: 5px;
-  cursor: col-resize;
-  background: var(--border);
-  transition: background 0.1s;
-}
-.mx-master-resize:hover,
-.mx-master-resize.mx-dragging { background: var(--accent); }
-.app:not(.master-open) .mx-master-resize { display: none; }
 /* Collapse (hide) the panel; reopen via the topbar master toggle. */
 .mx-master-collapse {
   position: absolute;
@@ -1738,10 +1726,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
      when scrolled horizontally (mirrors .mx-corner over .mx-colhead). */
   z-index: 3;
 }
-/* Master panel group headers STACK as you scroll (accordion): each one pins at
-   an increasing offset (set inline in buildMasterPanel as a multiple of
-   --mx-row-h) so every header above the current section stays fixed, not just
-   the last. A fixed row height keeps those offsets flush. */
+/* Master panel group headers hand off like the main layer grid: they share the
+   base top (--mx-row-h, just under the MASTER head) so each section covers the
+   previous on scroll. A fixed row height keeps the pinned header flush under the
+   MASTER head and fully opaque over the rows scrolling beneath it. */
 #mx-master-grid .mx-group {
   height: var(--mx-row-h);
 }
