@@ -9,17 +9,9 @@
 <body>
   <div class="app view-classic">
     <header class="topbar">
-      <button class="topbar-hamburger" id="mx-sidebar-btn" title="Patches & Library"><i data-lucide="menu"></i></button>
+      <button class="topbar-hamburger" id="mx-sidebar-btn" title="Patches"><i data-lucide="menu"></i></button>
       <span class="topbar-brand">collide&middot;o&middot;scope</span>
-      <div class="view-toggle" id="view-toggle">
-        <button class="view-tab is-active" id="view-classic-btn" data-view="classic">Classic</button>
-        <button class="view-tab" id="view-matrix-btn" data-view="matrix">Matrix</button>
-      </div>
-      <div class="topbar-transport">
-        <button class="transport-btn" id="btn-play-all" title="Play All">&#x25B6;</button>
-        <button class="transport-btn" id="btn-stop" title="Reset FX">&#x21BA;</button>
-        <span class="ws-dot" id="ws-status" title="connecting..."></span>
-      </div>
+      <span class="ws-dot" id="ws-status" title="connecting..."></span>
       <button class="topbar-master-btn" id="mx-master-btn" title="Master FX"><i data-lucide="sliders-horizontal"></i></button>
     </header>
     <main class="columns" id="classic-view">
@@ -326,10 +318,6 @@
           </div>
           <div class="patches-list" id="mx-patches-list"></div>
         </section>
-        <section class="library-section">
-          <h3 class="panel-title">media library</h3>
-          <div class="library-grid" id="mx-library-grid"></div>
-        </section>
       </aside>
       <div class="mx-scroll" id="mx-scroll">
         <div class="matrix-grid" id="matrix-grid">
@@ -344,6 +332,17 @@
         </div>
       </aside>
     </section>
+
+    <!-- MEDIA LIBRARY (modal overlay) -->
+    <div class="lib-modal" id="library-modal" hidden>
+      <div class="lib-panel">
+        <div class="lib-head">
+          <span id="library-modal-title">Choose clip</span>
+          <button class="lib-close" id="library-modal-close" title="Close (Esc)">&times;</button>
+        </div>
+        <div class="library-grid" id="library-modal-grid"></div>
+      </div>
+    </div>
 
     <!-- AUTOMATION EDITOR (modal overlay) -->
     <div class="ae-modal" id="automation" hidden>

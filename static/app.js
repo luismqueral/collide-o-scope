@@ -38,7 +38,6 @@ function connect() {
         syncLayers(msg.layers);
         syncLibrary(msg.library);
         syncPatches(msg.patches || []);
-        syncTransport(msg.paused);
         syncExport(msg.export_progress, msg.export_error);
         syncTempo(msg.bpm, msg.beat);
         if (window.onMatrixState) window.onMatrixState(msg);
@@ -424,18 +423,6 @@ function flagVhsModified() {
   vhsModified = true;
   if (presetModifiedEl) presetModifiedEl.style.display = '';
 }
-
-// --- Transport buttons ---
-
-document.getElementById('btn-play-all').addEventListener('click', () => {
-  sendAction({ action: 'toggle_master_pause' });
-});
-
-// Reset FX resets every master param, so clear every master formula too.
-document.getElementById('btn-stop').addEventListener('click', () => {
-  clearFormulasIn(document.getElementById('master-fx'));
-  sendAction({ action: 'reset_fx' });
-});
 
 // --- Tap tempo + BPM readout ---
 //
@@ -1401,15 +1388,6 @@ document.getElementById('patch-name').addEventListener('keydown', (e) => {
     savePatch();
   }
 });
-
-// --- Sync transport ---
-
-function syncTransport(paused) {
-  const btn = document.getElementById('btn-play-all');
-  btn.textContent = paused ? '\u25B6' : '\u23F8';
-  btn.title = paused ? 'Play All' : 'Pause All';
-}
-
 
 // --- Export / Render ---
 

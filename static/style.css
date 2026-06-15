@@ -454,28 +454,12 @@ body {
   padding: 10px;
 }
 
-.transport-btn {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--text);
-  font-size: 16px;
-  width: 32px;
-  height: 28px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.transport-btn:hover { border-color: var(--accent); }
-
 .ws-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--text-dim);
-  margin-left: 8px;
+  margin-left: auto;
 }
 
 .ws-dot.connected { background: #4a4; }
@@ -995,6 +979,52 @@ input[type="range"]::-webkit-slider-thumb:hover {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 /* ===== Automation Editor (modal overlay) ===== */
+/* --- Media library modal (mirrors .ae-modal overlay) --- */
+.lib-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.lib-modal[hidden] { display: none; }
+.lib-panel {
+  width: min(720px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.lib-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.lib-head > span {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.lib-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.lib-close:hover { color: var(--text); }
+
 .ae-modal {
   position: fixed;
   inset: 0;
@@ -1450,32 +1480,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   background: var(--accent);
   transition: width 0.1s linear;
 }
-.view-toggle {
-  display: flex;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  overflow: hidden;
-}
-.view-tab {
-  background: transparent;
-  color: var(--text-dim);
-  border: none;
-  padding: 4px 14px;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-.view-tab:hover { color: var(--text); }
-.view-tab.is-active {
-  background: var(--accent);
-  color: #fff;
-}
-.topbar-transport {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
 .topbar-hamburger {
   display: flex;
   align-items: center;
@@ -1545,11 +1549,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-right: 1px solid var(--border);
 }
 .app:not(.sidebar-open) .mx-sidebar { display: none; }
-.mx-sidebar .library-section .panel-title {
-  padding: 8px 10px 6px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
 
 /* --- Master FX panel (single-column matrix; slideout on the right) --- */
 .mx-master-panel {
@@ -1586,7 +1585,22 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   height: var(--mx-row-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+.mx-add-layer {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.mx-add-layer:hover { color: var(--accent); border-color: var(--accent); }
 .mx-colhead {
   position: sticky;
   top: 0;
@@ -1639,9 +1653,9 @@ input[type="range"]::-webkit-slider-thumb:hover {
   height: var(--mx-row-h);
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  text-align: left;
-  padding: 0 8px;
+  justify-content: flex-end;
+  text-align: right;
+  padding: 0 10px 0 8px;
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
@@ -1750,12 +1764,14 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .mx-clip {
   color: var(--text);
   font-size: 10px;
-  cursor: default;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
 }
+/* The clip cell is clickable — it opens the library modal to swap the source. */
+.mx-clip-cell { cursor: pointer; }
+.mx-clip-cell:hover { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 
 /* color swatch */
 .mx-color {

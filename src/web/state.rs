@@ -312,6 +312,9 @@ pub enum WebAction {
     /// Add a layer from the library by filename
     #[serde(rename = "add_layer")]
     AddLayer { filename: String },
+    /// Swap a layer's source clip in place (keeps FX, opacity, blend, position)
+    #[serde(rename = "set_layer_clip")]
+    SetLayerClip { index: usize, filename: String },
     /// Remove a layer by index
     #[serde(rename = "remove_layer")]
     RemoveLayer { index: usize },

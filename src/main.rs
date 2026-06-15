@@ -228,6 +228,41 @@ impl App {
                     self.add_layer(&path_str);
                 }
             }
+            WebAction::SetLayerClip { index, filename } => {
+                // Swap a layer's source video in place, preserving its FX, opacity,
+                // blend, transport, and automation. Only the decoder/texture/dims
+                // (and the resolution-dependent uniform) come from the new clip.
+                if index < self.layers.len() {
+                    let path_str = self
+                        .library_files
+                        .iter()
+                        .find(|p| {
+                            p.file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .as_deref()
+                                == Some(&filename)
+                        })
+                        .map(|p| p.to_string_lossy().to_string());
+                    if let Some(path_str) = path_str {
+                        let renderer = self.renderer.as_ref().unwrap();
+                        match Layer::new(&path_str, &renderer.device) {
+                            Ok(fresh) => {
+                                let layer = &mut self.layers[index];
+                                layer.decoder = fresh.decoder;
+                                layer.texture = fresh.texture;
+                                layer.texture_view = fresh.texture_view;
+                                layer.width = fresh.width;
+                                layer.height = fresh.height;
+                                layer.filename = fresh.filename;
+                                layer.effects.resolution =
+                                    [fresh.width as f32, fresh.height as f32];
+                                layer.frame_accumulator = 0.0;
+                            }
+                            Err(e) => eprintln!("Failed to open video: {e}"),
+                        }
+                    }
+                }
+            }
             WebAction::RemoveLayer { index } => {
                 if index < self.layers.len() {
                     self.layers.remove(index);
@@ -2127,7 +2162,11 @@ fn main() {
         return;
     }
 
-    let arg = args.get(1).cloned();
+    // Launch the matrix view by default when `--matrix` is passed.
+    let matrix = args.iter().any(|a| a == "--matrix");
+
+    // First non-flag argument after the binary name is the video/library path.
+    let arg = args.iter().skip(1).find(|a| !a.starts_with("--")).cloned();
 
     // Detect if arg is a folder (library) or a file (single layer)
     let (initial_video, library_folder) = match arg {
@@ -2156,7 +2195,12 @@ fn main() {
     let web_state = WebState::new();
     let url = web::server::spawn(web_state.clone(), 3030);
     log::info!("Opening control panel: {}", url);
-    let _ = open::that(&url);
+    let open_url = if matrix {
+        format!("{url}?view=matrix")
+    } else {
+        url.clone()
+    };
+    let _ = open::that(&open_url);
 
     let event_loop = EventLoop::new().unwrap();
     let mut app = App::new(initial_video, library_folder, web_state);

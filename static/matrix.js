@@ -127,10 +127,17 @@
     gridEl.innerHTML = '';
     gridEl.style.setProperty('--mx-cols', columns.length);
 
-    // Header row: corner + column heads
+    // Header row: corner + column heads. The corner doubles as the "add layer"
+    // entry point now that the library is modal-only.
     const corner = document.createElement('div');
     corner.className = 'mx-corner';
-    corner.textContent = '';
+    const addBtn = document.createElement('button');
+    addBtn.className = 'mx-add-layer';
+    addBtn.type = 'button';
+    addBtn.textContent = '+ layer';
+    addBtn.title = 'Add a layer';
+    addBtn.addEventListener('click', () => openLibraryModal('add'));
+    corner.appendChild(addBtn);
     gridEl.appendChild(corner);
     columns.forEach((col) => {
       const h = document.createElement('div');
@@ -342,6 +349,11 @@
       val.className = 'mx-val mx-clip';
       el.appendChild(val);
       info.valEl = val;
+
+      // Click the clip cell to swap this layer's source video in place.
+      el.classList.add('mx-clip-cell');
+      el.title = 'Click to choose a different clip';
+      el.addEventListener('click', () => openLibraryModal('swap', col.index));
     }
 
     el.addEventListener('mousedown', () => focusCell(info));
@@ -752,6 +764,13 @@
 
   function onKey(e) {
     if (view !== 'matrix') return;
+    // Esc closes the library modal (handle before the input/focus guards so it
+    // works even while the modal is the visual focus).
+    const libModal = document.getElementById('library-modal');
+    if (libModal && !libModal.hidden) {
+      if (e.key === 'Escape') { closeLibraryModal(); e.preventDefault(); }
+      return;
+    }
     // Let live inputs/selects handle their own keys.
     const ae = document.activeElement;
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA')) return;
@@ -810,8 +829,6 @@
     view = next;
     app.classList.toggle('view-matrix', next === 'matrix');
     app.classList.toggle('view-classic', next === 'classic');
-    document.getElementById('view-classic-btn').classList.toggle('is-active', next === 'classic');
-    document.getElementById('view-matrix-btn').classList.toggle('is-active', next === 'matrix');
     if (next === 'matrix' && lastMsg) {
       ensureBuilt(lastMsg);
       updateCells(lastMsg);
@@ -836,7 +853,6 @@
 
   function renderSidebar(msg) {
     renderPatches(msg.patches || []);
-    renderLibrary(msg.library || []);
   }
 
   function renderPatches(patches) {
@@ -876,8 +892,30 @@
     });
   }
 
+  // The media library lives in a modal now. `libMode` is 'swap' (replace the
+  // clip on libIndex's layer in place) or 'add' (append a new layer). The grid
+  // is rebuilt each time the modal opens because the click target differs.
+  let libMode = 'add';
+  let libIndex = -1;
+
+  function openLibraryModal(mode, index) {
+    libMode = mode;
+    libIndex = (typeof index === 'number') ? index : -1;
+    const title = document.getElementById('library-modal-title');
+    if (title) title.textContent = mode === 'swap' ? 'Swap clip' : 'Add layer';
+    const grid = document.getElementById('library-modal-grid');
+    if (grid) grid.dataset.sig = '';   // force re-render (handler depends on mode)
+    renderLibrary((lastMsg && lastMsg.library) || []);
+    document.getElementById('library-modal').hidden = false;
+  }
+
+  function closeLibraryModal() {
+    document.getElementById('library-modal').hidden = true;
+  }
+
   function renderLibrary(library) {
-    const grid = document.getElementById('mx-library-grid');
+    const grid = document.getElementById('library-modal-grid');
+    if (!grid) return;
     const sig = library.join('\u0001');
     if (grid.dataset.sig === sig) return;
     grid.dataset.sig = sig;
@@ -941,7 +979,14 @@
       label.textContent = filename.replace(/\.[^.]+$/, '');
       item.appendChild(label);
 
-      item.addEventListener('dblclick', () => sendAction({ action: 'add_layer', filename }));
+      item.addEventListener('click', () => {
+        if (libMode === 'swap' && libIndex >= 0) {
+          sendAction({ action: 'set_layer_clip', index: libIndex, filename });
+        } else {
+          sendAction({ action: 'add_layer', filename });
+        }
+        closeLibraryModal();
+      });
       grid.appendChild(item);
     });
   }
@@ -950,12 +995,18 @@
   // Wiring
   // =====================================================================
   function init() {
-    document.getElementById('view-classic-btn').addEventListener('click', () => setView('classic'));
-    document.getElementById('view-matrix-btn').addEventListener('click', () => setView('matrix'));
     const sb = document.getElementById('mx-sidebar-btn');
     if (sb) sb.addEventListener('click', toggleSidebar);
     const mb = document.getElementById('mx-master-btn');
     if (mb) mb.addEventListener('click', toggleMaster);
+
+    // Library modal dismissal: close button, backdrop click, Esc (in onKey).
+    const libClose = document.getElementById('library-modal-close');
+    if (libClose) libClose.addEventListener('click', closeLibraryModal);
+    const libModal = document.getElementById('library-modal');
+    if (libModal) libModal.addEventListener('click', (e) => {
+      if (e.target === libModal) closeLibraryModal();
+    });
 
     const saveBtn = document.getElementById('mx-patch-save');
     if (saveBtn) saveBtn.addEventListener('click', () => {
@@ -974,6 +1025,10 @@
     gridEl.addEventListener('mouseleave', () => setHoverRow(null));
 
     window.onMatrixState = syncMatrix;
+
+    // Boot directly into the matrix view when launched with `--matrix`
+    // (main.rs opens the panel at `?view=matrix`).
+    if (new URLSearchParams(location.search).get('view') === 'matrix') setView('matrix');
   }
 
   let hoverRow = null;
