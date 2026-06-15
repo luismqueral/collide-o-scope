@@ -45,8 +45,9 @@
   // =====================================================================
   function buildColumns(msg) {
     const layers = msg.layers || [];
-    // Null state: with no layers, show a single empty L1 whose clip cell prompts
-    // "select clip". Picking one creates the first layer (add mode).
+    // Null state: with no layers, render a single placeholder L1 column whose
+    // clip cell prompts "select clip" (opens the library in add mode -> creates
+    // the first layer). Other cells are inert blanks, never value-synced.
     if (layers.length === 0) {
       return [{ key: 'placeholder', kind: 'placeholder', label: 'L1', index: 0, placeholder: true }];
     }

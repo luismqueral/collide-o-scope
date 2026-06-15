@@ -1439,8 +1439,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
   --mx-col-w: 88px;
   --mx-row-h: 24px;
   --mx-add-w: 34px;
+  --mx-add-max-w: 48px;
   --mx-clip-row-h: 60px;
   --mx-master-w: 280px;
+  --mx-col-max-w: 160px;
 }
 
 /* --- View switching (class-based; [hidden] is unreliable under display:grid) --- */
@@ -1612,12 +1614,15 @@ input[type="range"]::-webkit-slider-thumb:hover {
   align-content: start;
   min-width: max-content;
 }
-/* The layer grid (not the master panel) carries a trailing skinny add column. */
+/* The layer grid (not the master panel) carries a trailing add column.
+   Layer columns grow to fill the available width but cap at --mx-col-max-w so a
+   handful of layers don't stretch into absurdly wide tracks. The add column
+   grows up to --mx-add-max-w then stops; any width beyond is left empty. */
 #matrix-grid {
   grid-template-columns:
     var(--mx-label-w)
-    repeat(var(--mx-cols, 1), minmax(var(--mx-col-w), 1fr))
-    var(--mx-add-w);
+    repeat(var(--mx-cols, 1), minmax(var(--mx-col-w), var(--mx-col-max-w)))
+    minmax(var(--mx-add-w), var(--mx-add-max-w));
 }
 
 /* --- Header row --- */
