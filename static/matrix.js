@@ -17,14 +17,21 @@
   const app = document.querySelector('.app');
   const gridEl = document.getElementById('matrix-grid');
   const scrollEl = document.getElementById('mx-scroll');
+  const masterGridEl = document.getElementById('mx-master-grid');
+
+  // MASTER is its own single-column panel (a right-side slideout), not an inline
+  // grid column. The main grid holds only layer columns.
+  const MASTER_COL = { key: 'master', kind: 'master', label: 'MASTER' };
 
   // --- State ---
   let view = 'classic';
   let built = false;
+  let masterBuilt = false;
   let colSig = '';
   let lastMsg = null;
-  let columns = [];                 // [{ key, kind, label, index? }]
+  let columns = [];                 // layer columns only: [{ key, kind, label, index }]
   let rows = [];                    // [{ group, def, cells: [cellInfo|null] }]
+  let masterRows = [];              // [{ group, def, cell }] for the master panel
   const cellIndex = new Map();      // "<colKey>|<paramKey>" -> cellInfo
   const collapsed = new Set();      // collapsed group names
   let navRows = [];                 // rows visible for keyboard nav
@@ -36,13 +43,17 @@
   // Column model
   // =====================================================================
   function buildColumns(msg) {
-    const cols = [
-      { key: 'master', kind: 'master', label: 'MASTER' },
-    ];
-    (msg.layers || []).forEach((l, i) => {
-      cols.push({ key: 'layer:' + l.id, kind: 'layer', label: 'L' + (i + 1), index: i, id: l.id, filename: l.filename });
-    });
-    return cols;
+    return (msg.layers || []).map((l, i) => ({
+      key: 'layer:' + l.id, kind: 'layer', label: 'L' + (i + 1),
+      index: i, id: l.id, filename: l.filename,
+    }));
+  }
+
+  // Does any param in this group apply to the given column kind? Used to drop
+  // empty groups (e.g. ANALOG/MOTION have no layer params, so they never appear
+  // in the layer grid; LAYER/WARP/etc. have no master params).
+  function groupApplies(group, kind) {
+    return group.params.some((def) => applies(def, kind));
   }
 
   function computeSig(msg) {
@@ -128,12 +139,24 @@
       if (col.filename) h.title = col.filename;
       col.headEl = h;
       // Layer columns are draggable to reorder; MASTER stays pinned first.
-      if (col.kind === 'layer') attachColumnDrag(h, col);
+      // They also carry a clip-timing progress bar beneath the title.
+      if (col.kind === 'layer') {
+        attachColumnDrag(h, col);
+        const prog = document.createElement('div');
+        prog.className = 'mx-colhead-prog';
+        const fill = document.createElement('div');
+        fill.className = 'mx-colhead-prog-fill';
+        prog.appendChild(fill);
+        h.appendChild(prog);
+        col.progFill = fill;
+      }
       gridEl.appendChild(h);
     });
 
-    // Group + param rows
+    // Group + param rows (layer params only — master params live in the panel)
     groups.forEach((group) => {
+      if (!groupApplies(group, 'layer')) return;
+
       // Group header row (spans all columns, click toggles collapse)
       const gh = document.createElement('div');
       gh.className = 'mx-group';
@@ -143,11 +166,14 @@
       gridEl.appendChild(gh);
 
       group.params.forEach((def) => {
+        if (!applies(def, 'layer')) return;
         const rowObj = { group: group.name, def, cells: [] };
+        const rowIndex = rows.length;
 
         const label = document.createElement('div');
         label.className = 'mx-label';
         label.dataset.group = group.name;
+        label.dataset.mxrow = String(rowIndex);
         label.textContent = def.label;
         gridEl.appendChild(label);
         rowObj.labelEl = label;
@@ -157,12 +183,14 @@
             const na = document.createElement('div');
             na.className = 'mx-cell mx-na';
             na.dataset.group = group.name;
+            na.dataset.mxrow = String(rowIndex);
             na.textContent = '\u2014';
             gridEl.appendChild(na);
             rowObj.cells[c] = null;
             return;
           }
           const info = buildCell(def, col, group.name);
+          info.el.dataset.mxrow = String(rowIndex);
           gridEl.appendChild(info.el);
           rowObj.cells[c] = info;
           cellIndex.set(col.key + '|' + def.key, info);
@@ -177,6 +205,59 @@
 
     built = true;
     rebuildNav();
+  }
+
+  // Master FX panel — a single-column matrix (label + MASTER) in the right
+  // slideout. Independent of layers, so it's built once. Shows only the groups
+  // that have master/global params (COLOR, DIGITAL, ANALOG, MOTION, VHS/NTSC).
+  function buildMasterPanel() {
+    masterRows = [];
+    masterGridEl.innerHTML = '';
+    masterGridEl.style.setProperty('--mx-cols', 1);
+
+    const corner = document.createElement('div');
+    corner.className = 'mx-corner';
+    masterGridEl.appendChild(corner);
+
+    const h = document.createElement('div');
+    h.className = 'mx-colhead mx-col-master';
+    h.textContent = 'MASTER';
+    masterGridEl.appendChild(h);
+
+    groups.forEach((group) => {
+      if (!groupApplies(group, 'master')) return;
+
+      const gh = document.createElement('div');
+      gh.className = 'mx-group';
+      gh.dataset.group = group.name;
+      gh.innerHTML = '<span class="mx-chevron">\u25BC</span><span class="mx-group-label">' + group.name + '</span>';
+      gh.addEventListener('click', () => toggleGroup(group.name));
+      masterGridEl.appendChild(gh);
+
+      group.params.forEach((def) => {
+        if (!applies(def, 'master')) return;
+
+        const label = document.createElement('div');
+        label.className = 'mx-label';
+        label.dataset.group = group.name;
+        label.textContent = def.label;
+        masterGridEl.appendChild(label);
+
+        const info = buildCell(def, MASTER_COL, group.name);
+        masterGridEl.appendChild(info.el);
+        cellIndex.set(MASTER_COL.key + '|' + def.key, info);
+        masterRows.push({ group: group.name, def, cell: info });
+      });
+    });
+
+    masterBuilt = true;
+    collapsed.forEach((name) => applyCollapse(name, true));
+  }
+
+  function updateMasterPanel(msg) {
+    if (!masterBuilt) return;
+    const [autos, errors] = readAutos(msg, MASTER_COL);
+    masterRows.forEach((r) => updateCell(r.cell, msg, autos, errors));
   }
 
   function buildCell(def, col, groupName) {
@@ -230,7 +311,7 @@
     } else if (def.ptype === 'bool') {
       const val = document.createElement('span');
       val.className = 'mx-val mx-bool';
-      val.textContent = '\u25CB';
+      val.textContent = 'OFF';
       el.appendChild(val);
       info.valEl = val;
       el.addEventListener('click', () => toggleBool(info));
@@ -251,6 +332,12 @@
       info.colorInput = input;
       info.valEl = input;
     } else if (def.ptype === 'clip') {
+      const thumb = document.createElement('img');
+      thumb.className = 'mx-clip-thumb';
+      thumb.alt = '';
+      el.appendChild(thumb);
+      info.thumbEl = thumb;
+
       const val = document.createElement('span');
       val.className = 'mx-val mx-clip';
       el.appendChild(val);
@@ -393,10 +480,24 @@
     if (view !== 'matrix') return;
     ensureBuilt(msg);
     updateCells(msg);
+    updateMasterPanel(msg);
+    syncClipProgress(msg);
     if (sidebarOpen) renderSidebar(msg);
   }
 
+  // Clip-timing bar beneath each layer column header (L1, L2, …).
+  function syncClipProgress(msg) {
+    const layers = msg.layers || [];
+    for (const col of columns) {
+      if (col.kind !== 'layer' || !col.progFill) continue;
+      const layer = layers[col.index];
+      const p = layer ? Math.max(0, Math.min(1, layer.progress || 0)) : 0;
+      col.progFill.style.width = (p * 100).toFixed(1) + '%';
+    }
+  }
+
   function ensureBuilt(msg) {
+    if (!masterBuilt) buildMasterPanel();
     const sig = computeSig(msg);
     if (!built || sig !== colSig) {
       const keepFocus = { r: focus.r, c: focus.c };
@@ -452,7 +553,7 @@
       markChanged(info, !nearlyEqual(num, def.def));
     } else if (def.ptype === 'bool') {
       const on = !!v;
-      valEl.textContent = on ? '\u25CF' : '\u25CB';
+      valEl.textContent = on ? 'ON' : 'OFF';
       info.el.classList.toggle('mx-on', on);
       markChanged(info, on !== def.def);
     } else if (def.ptype === 'enum') {
@@ -466,6 +567,14 @@
       const name = typeof v === 'string' ? v.replace(/\.[^.]+$/, '') : '';
       valEl.textContent = name;
       valEl.title = v || '';
+      if (info.thumbEl) {
+        const want = v ? '/thumb/' + encodeURIComponent(v) : '';
+        if (info.thumbEl.dataset.file !== (v || '')) {
+          info.thumbEl.dataset.file = v || '';
+          info.thumbEl.src = want;
+          info.thumbEl.style.display = want ? '' : 'none';
+        }
+      }
     }
 
     applyMatrixAutoState(info, autos, errors);
@@ -678,12 +787,15 @@
   }
 
   function applyCollapse(name, isCollapsed) {
-    gridEl.querySelectorAll('[data-group="' + cssEscape(name) + '"]').forEach((el) => {
-      if (el.classList.contains('mx-group')) {
-        el.classList.toggle('mx-collapsed', isCollapsed);
-      } else {
-        el.style.display = isCollapsed ? 'none' : '';
-      }
+    const sel = '[data-group="' + cssEscape(name) + '"]';
+    [gridEl, masterGridEl].forEach((root) => {
+      root.querySelectorAll(sel).forEach((el) => {
+        if (el.classList.contains('mx-group')) {
+          el.classList.toggle('mx-collapsed', isCollapsed);
+        } else {
+          el.style.display = isCollapsed ? 'none' : '';
+        }
+      });
     });
   }
 
@@ -703,6 +815,7 @@
     if (next === 'matrix' && lastMsg) {
       ensureBuilt(lastMsg);
       updateCells(lastMsg);
+      updateMasterPanel(lastMsg);
       if (sidebarOpen) renderSidebar(lastMsg);
     }
   }
@@ -712,6 +825,13 @@
     sidebarOpen = !sidebarOpen;
     app.classList.toggle('sidebar-open', sidebarOpen);
     if (sidebarOpen && lastMsg) renderSidebar(lastMsg);
+  }
+
+  let masterOpen = false;
+  function toggleMaster() {
+    masterOpen = !masterOpen;
+    app.classList.toggle('master-open', masterOpen);
+    if (masterOpen && lastMsg) updateMasterPanel(lastMsg);
   }
 
   function renderSidebar(msg) {
@@ -725,21 +845,33 @@
     if (list.dataset.sig === sig) return;
     list.dataset.sig = sig;
     list.innerHTML = '';
+
+    if (!patches.length) {
+      list.innerHTML = '<p class="dim" style="padding:6px 8px;">No saved patches</p>';
+      return;
+    }
+
     patches.forEach((name) => {
       const row = document.createElement('div');
-      row.className = 'mx-patch-row';
-      const load = document.createElement('button');
-      load.className = 'mx-patch-load';
-      load.textContent = name;
-      load.title = 'Load patch';
-      load.addEventListener('click', () => sendAction({ action: 'load_patch', name }));
+      row.className = 'patch-row';
+
+      const label = document.createElement('span');
+      label.className = 'patch-name';
+      label.textContent = name;
+      label.title = 'Load "' + name + '"';
+      label.addEventListener('click', () => sendAction({ action: 'load_patch', name }));
+      row.appendChild(label);
+
       const del = document.createElement('button');
-      del.className = 'mx-patch-del';
+      del.className = 'patch-del';
       del.textContent = '\u00D7';
-      del.title = 'Delete patch';
-      del.addEventListener('click', () => sendAction({ action: 'delete_patch', name }));
-      row.appendChild(load);
+      del.title = 'Delete "' + name + '"';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm('Delete patch "' + name + '"?')) sendAction({ action: 'delete_patch', name });
+      });
       row.appendChild(del);
+
       list.appendChild(row);
     });
   }
@@ -750,11 +882,65 @@
     if (grid.dataset.sig === sig) return;
     grid.dataset.sig = sig;
     grid.innerHTML = '';
+
+    if (!library.length) {
+      grid.innerHTML = '<p class="dim" style="grid-column:1/-1;text-align:center;padding:12px;">No media files</p>';
+      return;
+    }
+
     library.forEach((filename) => {
       const item = document.createElement('div');
-      item.className = 'mx-lib-item';
-      item.textContent = filename.replace(/\.[^.]+$/, '');
-      item.title = filename + ' (double-click to add)';
+      item.className = 'library-item';
+      item.title = filename;
+
+      // Server thumbnail; retry a few times while it is still being generated.
+      const img = document.createElement('img');
+      img.dataset.retries = '0';
+      const thumbUrl = '/thumb/' + encodeURIComponent(filename);
+      img.src = thumbUrl;
+      img.onerror = () => {
+        const retries = parseInt(img.dataset.retries, 10);
+        if (retries < 5) {
+          img.dataset.retries = String(retries + 1);
+          setTimeout(() => { img.src = thumbUrl + '?r=' + (retries + 1); }, 1500 * (retries + 1));
+        } else {
+          img.style.display = 'none';
+          const placeholder = document.createElement('span');
+          placeholder.className = 'lib-placeholder';
+          placeholder.textContent = filename.replace(/\.[^.]+$/, '');
+          item.appendChild(placeholder);
+        }
+      };
+      item.appendChild(img);
+
+      // Hover preview animation (only cycles for clips that have /preview frames).
+      let hoverInterval = null;
+      let hovering = false;
+      item.addEventListener('mouseenter', () => {
+        hovering = true;
+        const enc = encodeURIComponent(filename);
+        const probe = new Image();
+        probe.onload = () => {
+          if (!hovering) return;
+          let frame = 0;
+          hoverInterval = setInterval(() => {
+            frame = (frame + 1) % 8;
+            img.src = '/preview/' + enc + '/' + frame;
+          }, 250);
+        };
+        probe.src = '/preview/' + enc + '/0';
+      });
+      item.addEventListener('mouseleave', () => {
+        hovering = false;
+        if (hoverInterval) { clearInterval(hoverInterval); hoverInterval = null; }
+        img.src = thumbUrl;
+      });
+
+      const label = document.createElement('span');
+      label.className = 'lib-label';
+      label.textContent = filename.replace(/\.[^.]+$/, '');
+      item.appendChild(label);
+
       item.addEventListener('dblclick', () => sendAction({ action: 'add_layer', filename }));
       grid.appendChild(item);
     });
@@ -768,6 +954,8 @@
     document.getElementById('view-matrix-btn').addEventListener('click', () => setView('matrix'));
     const sb = document.getElementById('mx-sidebar-btn');
     if (sb) sb.addEventListener('click', toggleSidebar);
+    const mb = document.getElementById('mx-master-btn');
+    if (mb) mb.addEventListener('click', toggleMaster);
 
     const saveBtn = document.getElementById('mx-patch-save');
     if (saveBtn) saveBtn.addEventListener('click', () => {
@@ -778,7 +966,28 @@
 
     document.addEventListener('keydown', onKey);
 
+    // Row hover: highlight the whole row (label + every cell) the pointer is over.
+    gridEl.addEventListener('mouseover', (e) => {
+      const el = e.target.closest('[data-mxrow]');
+      setHoverRow(el ? el.dataset.mxrow : null);
+    });
+    gridEl.addEventListener('mouseleave', () => setHoverRow(null));
+
     window.onMatrixState = syncMatrix;
+  }
+
+  let hoverRow = null;
+  function setHoverRow(idx) {
+    if (hoverRow === idx) return;
+    if (hoverRow !== null) {
+      gridEl.querySelectorAll('[data-mxrow="' + hoverRow + '"]')
+        .forEach((e) => e.classList.remove('mx-row-hover'));
+    }
+    hoverRow = idx;
+    if (hoverRow !== null) {
+      gridEl.querySelectorAll('[data-mxrow="' + hoverRow + '"]')
+        .forEach((e) => e.classList.add('mx-row-hover'));
+    }
   }
 
   if (document.readyState === 'loading') {

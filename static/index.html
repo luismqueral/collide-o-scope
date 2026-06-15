@@ -20,6 +20,7 @@
         <button class="transport-btn" id="btn-stop" title="Reset FX">&#x21BA;</button>
         <span class="ws-dot" id="ws-status" title="connecting..."></span>
       </div>
+      <button class="topbar-master-btn" id="mx-master-btn" title="Master FX"><i data-lucide="sliders-horizontal"></i></button>
     </header>
     <main class="columns" id="classic-view">
       <!-- LEFT: Patches + Media Library -->
@@ -335,6 +336,13 @@
           <!-- built by matrix.js -->
         </div>
       </div>
+      <aside class="mx-master-panel" id="mx-master-panel">
+        <div class="mx-master-scroll" id="mx-master-scroll">
+          <div class="matrix-grid" id="mx-master-grid">
+            <!-- master FX column, built by matrix.js -->
+          </div>
+        </div>
+      </aside>
     </section>
 
     <!-- AUTOMATION EDITOR (modal overlay) -->
