@@ -355,12 +355,18 @@
     h.textContent = 'MASTER';
     masterGridEl.appendChild(h);
 
+    // Stacked sticky headers: each successive group header pins one row lower
+    // than the last (the MASTER head occupies the first row), so every header
+    // above the current section stays fixed instead of overlapping at one spot.
+    let headerSlot = 0;
     groups.forEach((group) => {
       if (!groupApplies(group, 'master')) return;
 
       const gh = document.createElement('div');
       gh.className = 'mx-group';
       gh.dataset.group = group.name;
+      gh.style.top = 'calc(var(--mx-row-h) * ' + (headerSlot + 1) + ')';
+      headerSlot += 1;
       gh.innerHTML = '<span class="mx-chevron">\u25BC</span><span class="mx-group-label">' + group.name + '</span>';
       gh.addEventListener('click', () => toggleGroup(group.name));
       masterGridEl.appendChild(gh);
@@ -1141,6 +1147,36 @@
     if (sb) sb.addEventListener('click', toggleSidebar);
     const mb = document.getElementById('mx-master-btn');
     if (mb) mb.addEventListener('click', toggleMaster);
+
+    // Master panel: in-panel collapse button (reopen via the topbar toggle) and
+    // a drag handle on its left edge that resizes the panel by writing the
+    // --mx-master-w custom property.
+    const collapseBtn = document.getElementById('mx-master-collapse');
+    if (collapseBtn) collapseBtn.addEventListener('click', toggleMaster);
+    const resizer = document.getElementById('mx-master-resize');
+    const masterPanel = document.getElementById('mx-master-panel');
+    if (resizer && masterPanel) {
+      let startX = 0;
+      let startW = 0;
+      const onMove = (e) => {
+        // Dragging left (toward the grid) widens the panel; right narrows it.
+        const w = Math.max(200, Math.min(640, startW + (startX - e.clientX)));
+        document.documentElement.style.setProperty('--mx-master-w', w + 'px');
+      };
+      const onUp = () => {
+        resizer.classList.remove('mx-dragging');
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      };
+      resizer.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        startX = e.clientX;
+        startW = masterPanel.getBoundingClientRect().width;
+        resizer.classList.add('mx-dragging');
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+      });
+    }
 
     // Library modal dismissal: close button, backdrop click, Esc (in onKey).
     const libClose = document.getElementById('library-modal-close');

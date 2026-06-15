@@ -1440,6 +1440,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
   --mx-row-h: 24px;
   --mx-add-w: 34px;
   --mx-clip-row-h: 60px;
+  --mx-master-w: 280px;
 }
 
 /* --- View switching (class-based; [hidden] is unreliable under display:grid) --- */
@@ -1554,7 +1555,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 /* --- Master FX panel (single-column matrix; slideout on the right) --- */
 .mx-master-panel {
-  width: 280px;
+  position: relative;
+  width: var(--mx-master-w);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -1563,6 +1565,40 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-left: 1px solid var(--border);
 }
 .app:not(.master-open) .mx-master-panel { display: none; }
+/* Drag handle between the grid and the master panel — resizes the panel width
+   (writes --mx-master-w). Only present while the panel is open. */
+.mx-master-resize {
+  flex-shrink: 0;
+  width: 5px;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 0.1s;
+}
+.mx-master-resize:hover,
+.mx-master-resize.mx-dragging { background: var(--accent); }
+.app:not(.master-open) .mx-master-resize { display: none; }
+/* Collapse (hide) the panel; reopen via the topbar master toggle. */
+.mx-master-collapse {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  z-index: 5;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.1s, color 0.1s;
+}
+.mx-master-collapse:hover { opacity: 1; color: var(--accent); }
+.mx-master-collapse svg { width: 13px; height: 13px; }
 .mx-master-scroll {
   position: relative;
   flex: 1;
@@ -1697,6 +1733,13 @@ input[type="range"]::-webkit-slider-thumb:hover {
      when scrolled horizontally (mirrors .mx-corner over .mx-colhead). */
   z-index: 3;
 }
+/* Master panel group headers STACK as you scroll (accordion): each one pins at
+   an increasing offset (set inline in buildMasterPanel as a multiple of
+   --mx-row-h) so every header above the current section stays fixed, not just
+   the last. A fixed row height keeps those offsets flush. */
+#mx-master-grid .mx-group {
+  height: var(--mx-row-h);
+}
 /* Per-column control cells share the group band's top-sticky behavior so the
    whole band (label + dice/reset buttons) stays pinned together on scroll. */
 .mx-group-ctl {
@@ -1715,6 +1758,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .mx-group-ctl.mx-addcol {
   background: var(--surface-2);
   border-bottom: none;
+}
+/* Higher specificity than the base .mx-group-ctl.mx-addcol so the group-band
+   fillers also light up with the rest of the add column on hover. */
+.mx-group-ctl.mx-addcol.mx-addcol-hot {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
 }
 .mx-grp-btn {
   background: transparent;
