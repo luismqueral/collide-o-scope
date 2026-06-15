@@ -127,17 +127,9 @@
     gridEl.innerHTML = '';
     gridEl.style.setProperty('--mx-cols', columns.length);
 
-    // Header row: corner + column heads. The corner doubles as the "add layer"
-    // entry point now that the library is modal-only.
+    // Header row: corner + column heads + a trailing skinny "add layer" column.
     const corner = document.createElement('div');
     corner.className = 'mx-corner';
-    const addBtn = document.createElement('button');
-    addBtn.className = 'mx-add-layer';
-    addBtn.type = 'button';
-    addBtn.textContent = '+ layer';
-    addBtn.title = 'Add a layer';
-    addBtn.addEventListener('click', () => openLibraryModal('add'));
-    corner.appendChild(addBtn);
     gridEl.appendChild(corner);
     columns.forEach((col) => {
       const h = document.createElement('div');
@@ -159,18 +151,67 @@
       }
       gridEl.appendChild(h);
     });
+    // Trailing add-layer column header (its own narrow column, right of L-last).
+    const addHead = document.createElement('div');
+    addHead.className = 'mx-addcol mx-addcol-head';
+    const addBtn = document.createElement('button');
+    addBtn.className = 'mx-add-layer';
+    addBtn.type = 'button';
+    addBtn.textContent = '+';
+    addBtn.title = 'Add a layer';
+    addBtn.addEventListener('click', () => openLibraryModal('add'));
+    addHead.appendChild(addBtn);
+    gridEl.appendChild(addHead);
 
     // Group + param rows (layer params only — master params live in the panel)
     groups.forEach((group) => {
       if (!groupApplies(group, 'layer')) return;
 
-      // Group header row (spans all columns, click toggles collapse)
+      // Group header band. The label cell (chevron + name) toggles collapse;
+      // each layer column gets its own control cell with per-layer reset +
+      // randomize. These control cells stay visible when the group collapses
+      // (see applyCollapse) so the band always exposes the buttons.
       const gh = document.createElement('div');
-      gh.className = 'mx-group';
+      gh.className = 'mx-group mx-group-head';
       gh.dataset.group = group.name;
       gh.innerHTML = '<span class="mx-chevron">\u25BC</span><span class="mx-group-label">' + group.name + '</span>';
       gh.addEventListener('click', () => toggleGroup(group.name));
       gridEl.appendChild(gh);
+
+      columns.forEach((col) => {
+        const ctl = document.createElement('div');
+        ctl.className = 'mx-group-ctl';
+        ctl.dataset.group = group.name;
+        if (col.kind === 'layer') {
+          const rnd = document.createElement('button');
+          rnd.className = 'mx-grp-btn';
+          rnd.type = 'button';
+          rnd.title = 'Randomize ' + group.name + ' on ' + col.label;
+          rnd.innerHTML = '<i data-lucide="dices"></i>';
+          rnd.addEventListener('click', (e) => {
+            e.stopPropagation();
+            randomizeLayerGroup(group.name, col.index);
+          });
+          ctl.appendChild(rnd);
+
+          const rst = document.createElement('button');
+          rst.className = 'mx-grp-btn';
+          rst.type = 'button';
+          rst.title = 'Reset ' + group.name + ' on ' + col.label;
+          rst.innerHTML = '<i data-lucide="rotate-ccw"></i>';
+          rst.addEventListener('click', (e) => {
+            e.stopPropagation();
+            resetLayerGroup(group.name, col.index);
+          });
+          ctl.appendChild(rst);
+        }
+        gridEl.appendChild(ctl);
+      });
+      // Trailing filler so the header band fills the add column too.
+      const ghTail = document.createElement('div');
+      ghTail.className = 'mx-group-ctl mx-addcol';
+      ghTail.dataset.group = group.name;
+      gridEl.appendChild(ghTail);
 
       group.params.forEach((def) => {
         if (!applies(def, 'layer')) return;
@@ -202,6 +243,12 @@
           rowObj.cells[c] = info;
           cellIndex.set(col.key + '|' + def.key, info);
         });
+        // Trailing filler for the add column (kept aligned with the row).
+        const pad = document.createElement('div');
+        pad.className = 'mx-addcol';
+        pad.dataset.group = group.name;
+        pad.dataset.mxrow = String(rowIndex);
+        gridEl.appendChild(pad);
 
         rows.push(rowObj);
       });
@@ -210,8 +257,33 @@
     // Re-apply any collapsed groups to the freshly built cells.
     collapsed.forEach((name) => applyCollapse(name, true));
 
+    // Render the Lucide glyphs in the freshly built group-control buttons.
+    if (window.lucide) window.lucide.createIcons();
+
     built = true;
     rebuildNav();
+  }
+
+  // Matrix group name -> reset_layer_group key (LAYER is stored as "blend").
+  function resetGroupKey(name) {
+    return name === 'LAYER' ? 'blend' : name.toLowerCase();
+  }
+
+  function resetLayerGroup(groupName, index) {
+    sendAction({ action: 'reset_layer_group', index, group: resetGroupKey(groupName) });
+  }
+
+  // Client-side randomize (mirrors classic): only numeric (float/bipolar) layer
+  // params get a fresh in-range value; toggles/enums/colors/clips are skipped.
+  function randomizeLayerGroup(groupName, index) {
+    const group = groups.find((g) => g.name === groupName);
+    if (!group) return;
+    group.params.forEach((def) => {
+      if (!applies(def, 'layer')) return;
+      if (def.ptype !== 'float' && def.ptype !== 'bipolar') return;
+      const v = randInRange(def.min, def.max, def.step || 0.01);
+      sendAction({ action: 'set_layer_param', index, param: def.key, value: v });
+    });
   }
 
   // Master FX panel — a single-column matrix (label + MASTER) in the right
@@ -222,12 +294,10 @@
     masterGridEl.innerHTML = '';
     masterGridEl.style.setProperty('--mx-cols', 1);
 
-    const corner = document.createElement('div');
-    corner.className = 'mx-corner';
-    masterGridEl.appendChild(corner);
-
+    // Single header spanning both columns (label + value), styled like the
+    // layer column heads (gray), not the accent color.
     const h = document.createElement('div');
-    h.className = 'mx-colhead mx-col-master';
+    h.className = 'mx-master-head';
     h.textContent = 'MASTER';
     masterGridEl.appendChild(h);
 
@@ -809,7 +879,9 @@
     const sel = '[data-group="' + cssEscape(name) + '"]';
     [gridEl, masterGridEl].forEach((root) => {
       root.querySelectorAll(sel).forEach((el) => {
-        if (el.classList.contains('mx-group')) {
+        // The header band (group label + per-layer control cells) stays visible
+        // when collapsed — only the param rows hide.
+        if (el.classList.contains('mx-group') || el.classList.contains('mx-group-ctl')) {
           el.classList.toggle('mx-collapsed', isCollapsed);
         } else {
           el.style.display = isCollapsed ? 'none' : '';
