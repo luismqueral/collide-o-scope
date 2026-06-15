@@ -44,7 +44,13 @@
   // Column model
   // =====================================================================
   function buildColumns(msg) {
-    return (msg.layers || []).map((l, i) => ({
+    const layers = msg.layers || [];
+    // Null state: with no layers, show a single empty L1 whose clip cell prompts
+    // "select clip". Picking one creates the first layer (add mode).
+    if (layers.length === 0) {
+      return [{ key: 'placeholder', kind: 'placeholder', label: 'L1', index: 0, placeholder: true }];
+    }
+    return layers.map((l, i) => ({
       key: 'layer:' + l.id, kind: 'layer', label: 'L' + (i + 1),
       index: i, id: l.id, filename: l.filename,
     }));
@@ -244,6 +250,27 @@
         rowObj.labelEl = label;
 
         columns.forEach((col, c) => {
+          // Null-state placeholder column: the clip row shows a clickable
+          // "select clip" prompt (opens the library in add mode -> creates the
+          // first layer); every other row is an inert blank. These cells are
+          // never value-synced (cells[c] = null), so updateCell won't wipe the
+          // prompt.
+          if (col.placeholder) {
+            const ph = document.createElement('div');
+            ph.dataset.group = group.name;
+            ph.dataset.mxrow = String(rowIndex);
+            if (def.ptype === 'clip') {
+              ph.className = 'mx-cell mx-ptype-clip mx-clip-cell mx-clip-prompt'
+                + (tall ? ' mx-row-tall' : '');
+              ph.innerHTML = '<span class="mx-val mx-clip">select clip</span>';
+              ph.addEventListener('click', () => openLibraryModal('add'));
+            } else {
+              ph.className = 'mx-cell mx-cell-empty' + (tall ? ' mx-row-tall' : '');
+            }
+            gridEl.appendChild(ph);
+            rowObj.cells[c] = null;
+            return;
+          }
           if (!applies(def, col.kind)) {
             const na = document.createElement('div');
             na.className = 'mx-cell mx-na' + (tall ? ' mx-row-tall' : '');

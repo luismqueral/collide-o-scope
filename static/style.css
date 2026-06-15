@@ -1642,6 +1642,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* Null-state placeholder column head ("L1" before any layer exists). */
+.mx-colhead.mx-col-placeholder { color: var(--border); font-style: italic; }
 /* Master panel header — spans both columns, gray like the layer column heads. */
 .mx-master-head {
   grid-column: 1 / -1;
@@ -1860,6 +1862,23 @@ input[type="range"]::-webkit-slider-thumb:hover {
 /* The clip cell is clickable — it opens the library modal to swap the source. */
 .mx-clip-cell { cursor: pointer; }
 .mx-clip-cell:hover { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+
+/* Null-state placeholder column (no layers yet). The clip cell prompts
+   "select clip" (dashed, accent-tinted to read as an action); every other cell
+   in the column is an inert blank so the grid stays aligned. */
+.mx-clip-prompt {
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 3px;
+}
+.mx-clip-prompt .mx-clip {
+  color: var(--accent);
+  font-style: italic;
+}
+.mx-clip-prompt:hover { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.mx-cell-empty {
+  background: rgba(255, 255, 255, 0.01);
+  cursor: default;
+}
 
 /* --- Tall clip row ---
    The clip row gets its own (taller) track so the thumbnail can be large and
