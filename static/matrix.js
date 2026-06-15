@@ -138,9 +138,24 @@
       if (col.filename) h.title = col.filename;
       col.headEl = h;
       // Layer columns are draggable to reorder; MASTER stays pinned first.
-      // They also carry a clip-timing progress bar beneath the title.
+      // They also carry a clip-timing progress bar beneath the title and a
+      // remove (×) button to drop the layer.
       if (col.kind === 'layer') {
         attachColumnDrag(h, col);
+
+        const rm = document.createElement('button');
+        rm.className = 'mx-col-remove';
+        rm.type = 'button';
+        rm.title = 'Remove ' + col.label;
+        rm.innerHTML = '<i data-lucide="x"></i>';
+        // Swallow the pointerdown so it never starts a column drag.
+        rm.addEventListener('pointerdown', (e) => e.stopPropagation());
+        rm.addEventListener('click', (e) => {
+          e.stopPropagation();
+          sendAction({ action: 'remove_layer', index: col.index });
+        });
+        h.appendChild(rm);
+
         const prog = document.createElement('div');
         prog.className = 'mx-colhead-prog';
         const fill = document.createElement('div');
@@ -217,9 +232,11 @@
         if (!applies(def, 'layer')) return;
         const rowObj = { group: group.name, def, cells: [] };
         const rowIndex = rows.length;
+        // The clip row is taller so its thumbnail is large and legible.
+        const tall = def.ptype === 'clip';
 
         const label = document.createElement('div');
-        label.className = 'mx-label';
+        label.className = 'mx-label' + (tall ? ' mx-row-tall' : '');
         label.dataset.group = group.name;
         label.dataset.mxrow = String(rowIndex);
         label.textContent = def.label;
@@ -229,7 +246,7 @@
         columns.forEach((col, c) => {
           if (!applies(def, col.kind)) {
             const na = document.createElement('div');
-            na.className = 'mx-cell mx-na';
+            na.className = 'mx-cell mx-na' + (tall ? ' mx-row-tall' : '');
             na.dataset.group = group.name;
             na.dataset.mxrow = String(rowIndex);
             na.textContent = '\u2014';
@@ -239,13 +256,14 @@
           }
           const info = buildCell(def, col, group.name);
           info.el.dataset.mxrow = String(rowIndex);
+          if (tall) info.el.classList.add('mx-row-tall');
           gridEl.appendChild(info.el);
           rowObj.cells[c] = info;
           cellIndex.set(col.key + '|' + def.key, info);
         });
         // Trailing filler for the add column (kept aligned with the row).
         const pad = document.createElement('div');
-        pad.className = 'mx-addcol';
+        pad.className = 'mx-addcol' + (tall ? ' mx-row-tall' : '');
         pad.dataset.group = group.name;
         pad.dataset.mxrow = String(rowIndex);
         gridEl.appendChild(pad);
@@ -286,6 +304,14 @@
     });
   }
 
+  // Swap a layer's clip to a random library entry (in place, keeps FX).
+  function randomClip(index) {
+    const lib = (lastMsg && lastMsg.library) || [];
+    if (!lib.length) return;
+    const filename = lib[Math.floor(Math.random() * lib.length)];
+    sendAction({ action: 'set_layer_clip', index, filename });
+  }
+
   // Master FX panel — a single-column matrix (label + MASTER) in the right
   // slideout. Independent of layers, so it's built once. Shows only the groups
   // that have master/global params (COLOR, DIGITAL, ANALOG, MOTION, VHS/NTSC).
@@ -314,13 +340,17 @@
       group.params.forEach((def) => {
         if (!applies(def, 'master')) return;
 
+        const mIdx = masterRows.length;
+
         const label = document.createElement('div');
         label.className = 'mx-label';
         label.dataset.group = group.name;
+        label.dataset.mxrow = String(mIdx);
         label.textContent = def.label;
         masterGridEl.appendChild(label);
 
         const info = buildCell(def, MASTER_COL, group.name);
+        info.el.dataset.mxrow = String(mIdx);
         masterGridEl.appendChild(info.el);
         cellIndex.set(MASTER_COL.key + '|' + def.key, info);
         masterRows.push({ group: group.name, def, cell: info });
@@ -419,6 +449,18 @@
       val.className = 'mx-val mx-clip';
       el.appendChild(val);
       info.valEl = val;
+
+      // Dice: swap to a random library clip without opening the modal.
+      const dice = document.createElement('button');
+      dice.className = 'mx-clip-rand';
+      dice.type = 'button';
+      dice.title = 'Random clip';
+      dice.innerHTML = '<i data-lucide="dices"></i>';
+      dice.addEventListener('click', (e) => {
+        e.stopPropagation();
+        randomClip(col.index);
+      });
+      el.appendChild(dice);
 
       // Click the clip cell to swap this layer's source video in place.
       el.classList.add('mx-clip-cell');
@@ -1090,11 +1132,10 @@
     document.addEventListener('keydown', onKey);
 
     // Row hover: highlight the whole row (label + every cell) the pointer is over.
-    gridEl.addEventListener('mouseover', (e) => {
-      const el = e.target.closest('[data-mxrow]');
-      setHoverRow(el ? el.dataset.mxrow : null);
-    });
-    gridEl.addEventListener('mouseleave', () => setHoverRow(null));
+    // Wired independently on the layer grid and the master panel; each keeps its
+    // own row index space and scopes its queries to its own root.
+    attachRowHover(gridEl);
+    attachRowHover(masterGridEl);
 
     window.onMatrixState = syncMatrix;
 
@@ -1103,18 +1144,29 @@
     if (new URLSearchParams(location.search).get('view') === 'matrix') setView('matrix');
   }
 
-  let hoverRow = null;
-  function setHoverRow(idx) {
-    if (hoverRow === idx) return;
-    if (hoverRow !== null) {
-      gridEl.querySelectorAll('[data-mxrow="' + hoverRow + '"]')
-        .forEach((e) => e.classList.remove('mx-row-hover'));
-    }
-    hoverRow = idx;
-    if (hoverRow !== null) {
-      gridEl.querySelectorAll('[data-mxrow="' + hoverRow + '"]')
-        .forEach((e) => e.classList.add('mx-row-hover'));
-    }
+  // Per-root row-hover: each grid (layer grid + master panel) tracks its own
+  // hovered row index and only toggles `.mx-row-hover` on its own descendants,
+  // so the two grids' index spaces never collide.
+  function attachRowHover(root) {
+    if (!root) return;
+    let hoverRow = null;
+    const setHoverRow = (idx) => {
+      if (hoverRow === idx) return;
+      if (hoverRow !== null) {
+        root.querySelectorAll('[data-mxrow="' + hoverRow + '"]')
+          .forEach((e) => e.classList.remove('mx-row-hover'));
+      }
+      hoverRow = idx;
+      if (hoverRow !== null) {
+        root.querySelectorAll('[data-mxrow="' + hoverRow + '"]')
+          .forEach((e) => e.classList.add('mx-row-hover'));
+      }
+    };
+    root.addEventListener('mouseover', (e) => {
+      const el = e.target.closest('[data-mxrow]');
+      setHoverRow(el ? el.dataset.mxrow : null);
+    });
+    root.addEventListener('mouseleave', () => setHoverRow(null));
   }
 
   if (document.readyState === 'loading') {

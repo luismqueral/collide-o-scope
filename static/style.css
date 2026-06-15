@@ -1439,6 +1439,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
   --mx-col-w: 88px;
   --mx-row-h: 24px;
   --mx-add-w: 34px;
+  --mx-clip-row-h: 48px;
 }
 
 /* --- View switching (class-based; [hidden] is unreliable under display:grid) --- */
@@ -1597,9 +1598,12 @@ input[type="range"]::-webkit-slider-thumb:hover {
   align-items: center;
   justify-content: center;
 }
-/* --- Trailing add-layer column --- */
+/* --- Trailing add-layer column ---
+   Rendered as one continuous gray strip (no internal horizontal borders) so it
+   reads as a distinct column, set apart from the layer columns by a left border. */
 .mx-addcol {
-  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  border-left: 1px solid var(--border);
 }
 .mx-addcol-head {
   position: sticky;
@@ -1664,11 +1668,18 @@ input[type="range"]::-webkit-slider-thumb:hover {
   color: var(--text-dim);
 }
 
-/* --- Group header rows --- */
+/* --- Group header rows ---
+   Sticky on BOTH axes: pinned left (so the label stays in view when scrolling
+   columns) and pinned top just below the column-header row (`--mx-row-h`) so the
+   group heading stays fixed while you scroll through its params. Later groups
+   scroll up and overlap the previous one (DOM order), giving a section-header
+   hand-off. */
 .mx-group {
   grid-column: 1 / -1;
   position: sticky;
   left: 0;
+  top: var(--mx-row-h);
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1689,9 +1700,16 @@ input[type="range"]::-webkit-slider-thumb:hover {
    label column (sticky-left) and each layer column gets its own control cell. */
 .mx-group.mx-group-head {
   grid-column: auto;
-  z-index: 2;
+  /* Above the per-column control cells so the pinned label covers the corner
+     when scrolled horizontally (mirrors .mx-corner over .mx-colhead). */
+  z-index: 3;
 }
+/* Per-column control cells share the group band's top-sticky behavior so the
+   whole band (label + dice/reset buttons) stays pinned together on scroll. */
 .mx-group-ctl {
+  position: sticky;
+  top: var(--mx-row-h);
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1699,6 +1717,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   border-left: 1px solid var(--border);
+}
+/* The band's filler in the trailing add column stays part of the gray strip. */
+.mx-group-ctl.mx-addcol {
+  background: var(--surface-2);
+  border-bottom: none;
 }
 .mx-grp-btn {
   background: transparent;
@@ -1847,6 +1870,48 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .mx-clip-cell { cursor: pointer; }
 .mx-clip-cell:hover { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 
+/* --- Tall clip row ---
+   The clip row gets its own (taller) track so the thumbnail can be large and
+   legible. Every element in the row carries .mx-row-tall so the grid track
+   grows uniformly (label, cells, na, and the add-column filler). */
+.mx-row-tall { height: var(--mx-clip-row-h); }
+.mx-cell.mx-row-tall { height: var(--mx-clip-row-h); }
+.mx-label.mx-row-tall { height: var(--mx-clip-row-h); }
+.mx-addcol.mx-row-tall { height: var(--mx-clip-row-h); }
+/* In the tall row the clip cell stacks: big thumbnail on top, filename below. */
+.mx-cell.mx-ptype-clip.mx-row-tall {
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 5px 4px;
+}
+.mx-cell.mx-ptype-clip.mx-row-tall .mx-clip-thumb {
+  height: 30px;
+  width: 100%;
+  max-width: 64px;
+}
+/* Dice — swap to a random clip. Pinned top-right, revealed on cell hover. */
+.mx-clip-rand {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--surface) 75%, transparent);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+}
+.mx-clip-cell:hover .mx-clip-rand { opacity: 0.75; }
+.mx-clip-rand:hover { opacity: 1; color: var(--accent); }
+.mx-clip-rand svg { width: 12px; height: 12px; }
+
 /* color swatch */
 .mx-color {
   width: 26px;
@@ -1894,6 +1959,30 @@ input[type="range"]::-webkit-slider-thumb:hover {
   z-index: 1;
 }
 .mx-flash { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+
+/* --- Remove-layer (×) button on the column head ---
+   Pinned to the head's top-right, revealed on hover. Its pointerdown is swallowed
+   in JS so it never starts a column drag. */
+.mx-col-remove {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+}
+.mx-colhead:hover .mx-col-remove { opacity: 0.6; }
+.mx-col-remove:hover { opacity: 1; color: #d66; }
+.mx-col-remove svg { width: 11px; height: 11px; }
 
 /* --- Layer column reordering (drag the column header) --- */
 .mx-colhead.mx-col-layer { cursor: grab; }
