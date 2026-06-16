@@ -19,8 +19,13 @@ implementation.
   clip on a landscape canvas no longer has to squash.
 - **Analog/VHS simulation** — film grain, vignette, color drift, breathing, plus a
   full NTSC/VHS signal pass (head switching, tracking noise, snow, chroma loss…).
-- **Web control panel** — all parameters live in the browser; the wgpu window just
-  shows the output.
+- **Web control panel** — all parameters live in the browser (a transposed parameter
+  *matrix* by default, or the legacy "classic" panel via `--classic`); the wgpu window
+  just shows the output.
+- **Parameter automation** — bind any continuous param to a live math expression
+  (oscillators, deterministic noise, beat-synced `sin(beat*tau)`…), evaluated every
+  frame so the live preview and the exported video match exactly.
+- **Tap tempo** — tap (or type) a BPM so beat-synced automations lock to the music.
 - **Patches** — save/load the whole state (master + every layer + VHS) as YAML.
 - **Offline render** — export the current composition to MP4, live or fully headless.
 - **Library browser** — thumbnails + hover-scrub previews; drag-and-drop files/folders.
@@ -32,15 +37,17 @@ Two halves share state and run concurrently:
 1. **Render engine** (`winit` + `wgpu`) — owns the window, decodes video, runs the
    effect/composite shaders on the GPU, and drives frame timing (~30 FPS).
 2. **Web control panel** (`axum` + `tokio` WebSocket on `127.0.0.1:3030`) — the
-   browser sends `WebAction` commands; the render loop drains them each frame and
-   broadcasts an `AppSnapshot` back so the UI stays in sync.
+   browser sends `WebAction` commands; the render loop drains them each frame,
+   evaluates any parameter automations, and broadcasts an `AppSnapshot` back so the
+   UI stays in sync.
 
 ```
 src/
 ├── main.rs            — winit event loop, app state, frame timing, action handling, CLI
 ├── renderer/state.rs  — wgpu setup, pipelines (effects + composite), texture upload
 ├── video/decoder.rs   — ffmpeg frame extraction, YUV→RGBA, looping
-├── effects/params.rs  — EffectUniforms (the GPU uniform buffer; 14 × vec4 = 224 bytes)
+├── effects/params.rs  — EffectUniforms (the GPU uniform buffer; 17 × vec4 = 272 bytes)
+├── automation.rs      — compiled math-expression params (fasteval), evaluated per frame
 ├── layers/mod.rs      — Layer struct, BlendMode, supported-format check
 ├── ntsc/              — ntsc-rs VHS post-processing (CPU)
 ├── patch/             — save/load state as YAML + in-window YAML editor
@@ -72,8 +79,9 @@ drift, breathing (scale/rotation/position).
 
 **Per-layer** — color (hue/sat/bright/contrast), digital (pixelate/RGB
 split/posterize/invert), warp (wave, swirl, bulge), chroma key (threshold,
-smoothness, spill), pixel-shift/glitch (slice, block, jitter, chroma shift,
-datamosh), and transform (position, scale, **fit mode**).
+smoothness, spill, optional solid-color background fill), pixel-shift/glitch
+(slice, block, jitter, chroma shift, datamosh), feedback (persistence, zoom,
+rotate, luma key, chroma, additive), and transform (position, scale, **fit mode**).
 
 **NTSC/VHS** — tape speed, chroma loss, edge wave, head switching, tracking noise,
 snow, composite/luma/chroma noise, luma smear, composite sharpening.
@@ -112,6 +120,23 @@ Library scanning is **single-level** (not recursive). Supported inputs: `mp4`,
 Save/load the full state as YAML. Patches live in a `patches/` folder next to the
 library folder (i.e. the project root when running `cargo run -- videos/`), falling
 back to `./patches`. Manage them from the control panel or the in-window YAML editor.
+
+## Automation
+
+Any continuous parameter can be driven by a math expression instead of a fixed
+value. Expressions are compiled once ([`fasteval`](https://crates.io/crates/fasteval))
+and evaluated every frame against the same clock the exporter uses, so live preview
+and rendered output stay identical. Available vocabulary (see `src/automation.rs`):
+
+- **Time / tempo** — `t` (elapsed seconds), `beat` (beats since the last tap
+  downbeat), `bpm`, plus `pi` / `tau`.
+- **Oscillators** (1 Hz, output −1..1) — `tri`, `saw`, `square`, `pulse`.
+- **Procedural** (deterministic value-noise, not true randomness) — `fbm`, `hold`,
+  `wiggle(freq, amp)`, `noise(seed)`.
+- **Shaping** — `clamp`, `lerp`, `smoothstep`, plus fasteval built-ins (`sin`, `cos`,
+  `abs`, `min`, `max`, `floor`, `sqrt`, `^` for power, …).
+
+Example: `0.5 + 0.5*sin(beat*tau)` pulses a 0..1 param once per beat.
 
 ## Headless render
 
@@ -155,8 +180,14 @@ shortcuts.
 ## Known gotchas
 
 - `ffmpeg-next` must match the system ffmpeg version (v8 for ffmpeg 8.1).
-- `EffectUniforms` is tightly packed at 224 bytes (14 × vec4); the Rust struct and
+- `EffectUniforms` is tightly packed at 272 bytes (17 × vec4); the Rust struct and
   the WGSL `Uniforms` must stay field-for-field identical or bytemuck `Pod` fails.
+- Static panel assets (`static/*.js`, `*.css`, `*.html`) are embedded into the binary
+  at compile time via `include_str!`, so editing them requires a `cargo build` +
+  restart + hard browser reload — there is no separate web dev server.
+- A param is only automatable if it has an arm in `EffectUniforms::set_by_name`
+  (`effects/params.rs`); that match is the single write path the per-frame automation
+  eval uses, so a missing key silently no-ops.
 - NTSC/VHS runs on the CPU, so it processes at half resolution in the live preview
   (full resolution on export) to keep frame time down.
 - The `block` crate emits future-incompat warnings (upstream, harmless).
