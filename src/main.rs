@@ -2162,8 +2162,9 @@ fn main() {
         return;
     }
 
-    // Launch the matrix view by default when `--matrix` is passed.
-    let matrix = args.iter().any(|a| a == "--matrix");
+    // The matrix view is the default panel. `--classic` opens the legacy
+    // ("classic") panel instead — kept around for posterity.
+    let classic = args.iter().any(|a| a == "--classic");
 
     // First non-flag argument after the binary name is the video/library path.
     let arg = args.iter().skip(1).find(|a| !a.starts_with("--")).cloned();
@@ -2195,8 +2196,8 @@ fn main() {
     let web_state = WebState::new();
     let url = web::server::spawn(web_state.clone(), 3030);
     log::info!("Opening control panel: {}", url);
-    let open_url = if matrix {
-        format!("{url}?view=matrix")
+    let open_url = if classic {
+        format!("{url}?view=classic")
     } else {
         url.clone()
     };

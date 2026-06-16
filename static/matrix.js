@@ -24,7 +24,7 @@
   const MASTER_COL = { key: 'master', kind: 'master', label: 'MASTER' };
 
   // --- State ---
-  let view = 'classic';
+  let view = 'matrix'; // default panel; `?view=classic` boots the legacy view
   let built = false;
   let masterBuilt = false;
   let colSig = '';
@@ -1378,9 +1378,10 @@
 
     window.onMatrixState = syncMatrix;
 
-    // Boot directly into the matrix view when launched with `--matrix`
-    // (main.rs opens the panel at `?view=matrix`).
-    if (new URLSearchParams(location.search).get('view') === 'matrix') setView('matrix');
+    // Matrix is the default view. Boot into the legacy classic panel only when
+    // explicitly requested via `?view=classic` (main.rs `--classic` flag).
+    const bootView = new URLSearchParams(location.search).get('view');
+    setView(bootView === 'classic' ? 'classic' : 'matrix');
   }
 
   // Per-root row-hover: each grid (layer grid + master panel) tracks its own
