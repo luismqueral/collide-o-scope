@@ -910,6 +910,14 @@ impl App {
                 }
                 self.patch_files = scan_patches(&dir);
             }
+            WebAction::FocusWindow => {
+                // Bring the native preview (render output) window to the front;
+                // un-minimize first in case it was minimized.
+                if let Some(window) = &self.window {
+                    window.set_minimized(false);
+                    window.focus_window();
+                }
+            }
         }
     }
 

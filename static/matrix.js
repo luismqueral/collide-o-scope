@@ -341,7 +341,7 @@
     // layer column heads (gray), not the accent color.
     const h = document.createElement('div');
     h.className = 'mx-master-head';
-    h.textContent = 'MASTER';
+    h.textContent = 'MAIN';
     masterGridEl.appendChild(h);
 
     // OUTPUT section — global render settings (dimensions + framerate). These
@@ -1338,6 +1338,8 @@
     if (sb) sb.addEventListener('click', toggleSidebar);
     const mb = document.getElementById('mx-master-btn');
     if (mb) mb.addEventListener('click', toggleMaster);
+    const showWin = document.getElementById('mx-show-window-btn');
+    if (showWin) showWin.addEventListener('click', () => sendAction({ action: 'focus_window' }));
 
     // Library modal dismissal: close button, backdrop click, Esc (in onKey).
     const libClose = document.getElementById('library-modal-close');

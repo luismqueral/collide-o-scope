@@ -384,6 +384,9 @@ pub enum WebAction {
     /// Delete a named patch from the patches folder
     #[serde(rename = "delete_patch")]
     DeletePatch { name: String },
+    /// Raise the native preview (render output) window and bring it to the front
+    #[serde(rename = "focus_window")]
+    FocusWindow,
 }
 
 impl EffectsSnapshot {
