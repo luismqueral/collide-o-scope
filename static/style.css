@@ -1448,27 +1448,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 /* --- View switching (class-based; [hidden] is unreliable under display:grid) --- */
 .app.view-classic #matrix-view { display: none; }
 .app.view-matrix #classic-view { display: none; }
-/* Sidebar/hamburger belong to the matrix view only; classic keeps its own
-   always-on left column. */
-.app.view-classic .topbar-hamburger { display: none; }
 
-/* --- Top bar --- */
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 38px;
-  padding: 0 12px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.topbar-brand {
-  font-size: 12px;
-  letter-spacing: 1px;
-  color: var(--text-dim);
-  text-transform: lowercase;
-}
 /* Per-layer clip-timing bar pinned to the bottom of each layer column header. */
 .mx-colhead-prog {
   position: absolute;
@@ -1485,11 +1465,24 @@ input[type="range"]::-webkit-slider-thumb:hover {
   background: var(--accent);
   transition: width 0.1s linear;
 }
-.topbar-hamburger {
+/* --- Top bar (Ableton-style panel toggles; no project title) --- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 38px;
+  padding: 0 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+/* Left = toggle patches sidebar (panel-left); right = toggle main panel
+   (panel-right). Same pattern mirrored across the bar. */
+.topbar-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
+  width: 30px;
   height: 24px;
   background: transparent;
   color: var(--text-dim);
@@ -1497,35 +1490,18 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-radius: 4px;
   cursor: pointer;
   padding: 0;
+  transition: color 0.1s, border-color 0.1s;
 }
-.topbar-hamburger:hover { color: var(--text); }
-.topbar-hamburger svg { width: 15px; height: 15px; }
-.app.sidebar-open .topbar-hamburger {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-/* Right-edge toggle for the Master FX slideout (matrix view only). */
-.topbar-master-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 24px;
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  cursor: pointer;
-  padding: 0;
-}
-.topbar-master-btn:hover { color: var(--text); }
-.topbar-master-btn svg { width: 15px; height: 15px; }
-.app.master-open .topbar-master-btn {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.app.view-classic .topbar-master-btn { display: none; }
+.topbar-btn:hover { color: var(--text); }
+.topbar-btn svg { width: 16px; height: 16px; }
+/* Highlight a toggle (Ableton-style) while its panel is open. */
+.app.sidebar-open #mx-sidebar-btn { color: var(--accent); border-color: var(--accent); }
+.app.master-open  #mx-master-btn  { color: var(--accent); border-color: var(--accent); }
+/* Push the connection dot + main toggle to the right edge of the bar. */
+#ws-status { margin-left: auto; }
+/* Sidebar/main toggles drive matrix-only panels; hide them in classic view. */
+.app.view-classic #mx-sidebar-btn,
+.app.view-classic #mx-master-btn { display: none; }
 
 /* --- Matrix container --- */
 /* Flex row: optional sidebar (left) pushes the scrollable grid; nothing
@@ -1567,28 +1543,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-left: 1px solid var(--border);
 }
 .app:not(.master-open) .mx-master-panel { display: none; }
-/* Collapse (hide) the panel; reopen via the topbar master toggle. */
-.mx-master-collapse {
-  position: absolute;
-  top: 3px;
-  right: 4px;
-  z-index: 5;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 0.1s, color 0.1s;
-}
-.mx-master-collapse:hover { opacity: 1; color: var(--accent); }
-.mx-master-collapse svg { width: 13px; height: 13px; }
 .mx-master-scroll {
   position: relative;
   flex: 1;
@@ -1610,6 +1564,16 @@ input[type="range"]::-webkit-slider-thumb:hover {
   grid-template-columns:
     var(--mx-label-w)
     repeat(var(--mx-cols, 1), minmax(var(--mx-col-w), var(--mx-col-max-w)))
+    minmax(var(--mx-add-w), var(--mx-add-max-w));
+}
+/* Null state (no layers): --mx-cols is 0, which would make the repeat() above
+   `repeat(0, …)` — invalid CSS that voids the whole template and collapses the
+   grid. Override with an explicit 2-track template (labels + add) so the "+"
+   renders as a skinny full-height column right after the labels, exactly like a
+   populated layout minus the layer columns. */
+#matrix-grid.mx-empty {
+  grid-template-columns:
+    var(--mx-label-w)
     minmax(var(--mx-add-w), var(--mx-add-max-w));
 }
 
@@ -1848,6 +1812,9 @@ input[type="range"]::-webkit-slider-thumb:hover {
 /* row hover — subtle accent wash across the whole row (label + cells) */
 .mx-cell.mx-row-hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .mx-label.mx-row-hover { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); color: var(--text); }
+/* Startup view (no layers): there are no value cells, so the row-hover wash
+   would only light up the lone label column — pointless flicker. Suppress it. */
+#matrix-grid.mx-empty .mx-label.mx-row-hover { background: var(--surface); color: var(--text-dim); }
 .mx-bar {
   position: relative;
   flex: 1 1 auto;

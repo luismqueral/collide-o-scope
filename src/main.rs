@@ -2200,11 +2200,46 @@ fn main() {
     } else {
         url.clone()
     };
-    let _ = open::that(&open_url);
+    open_control_panel(&open_url);
 
     let event_loop = EventLoop::new().unwrap();
     let mut app = App::new(initial_video, library_folder, web_state);
     event_loop.run_app(&mut app).unwrap();
+}
+
+/// Open the control panel in a chromeless "app mode" window if a Chromium-based
+/// browser (Chrome / Edge / Brave) is installed, falling back to the system
+/// default browser otherwise. App mode (`--app=<url>`) gives a standalone window
+/// with no tabs or address bar, so the panel reads like a native app.
+fn open_control_panel(url: &str) {
+    // macOS app bundles must be launched via their inner binary to pass flags
+    // reliably (`open -a … --args --app=…` is dropped when an instance is up).
+    #[cfg(target_os = "macos")]
+    let candidates: &[&str] = &[
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    ];
+    #[cfg(not(target_os = "macos"))]
+    let candidates: &[&str] = &["google-chrome", "chromium", "microsoft-edge", "brave"];
+
+    for bin in candidates {
+        // On macOS the candidates are absolute paths; skip ones that aren't present.
+        #[cfg(target_os = "macos")]
+        if !std::path::Path::new(bin).exists() {
+            continue;
+        }
+        if std::process::Command::new(bin)
+            .arg(format!("--app={url}"))
+            .spawn()
+            .is_ok()
+        {
+            return;
+        }
+    }
+
+    // No Chromium browser available (or launch failed): use the default browser.
+    let _ = open::that(url);
 }
 
 /// Headless `render` subcommand: load a patch YAML and render it to an MP4.

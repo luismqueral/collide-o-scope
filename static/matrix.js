@@ -48,12 +48,8 @@
   // =====================================================================
   function buildColumns(msg) {
     const layers = msg.layers || [];
-    // Null state: with no layers, render a single placeholder L1 column whose
-    // clip cell prompts "select clip" (opens the library in add mode -> creates
-    // the first layer). Other cells are inert blanks, never value-synced.
-    if (layers.length === 0) {
-      return [{ key: 'placeholder', kind: 'placeholder', label: 'L1', index: 0, placeholder: true }];
-    }
+    // Null state: no layer columns at all. The trailing "+" add column is the
+    // entry point for creating the first layer (opens the library in add mode).
     return layers.map((l, i) => ({
       key: 'layer:' + l.id, kind: 'layer', label: 'L' + (i + 1),
       index: i, id: l.id, filename: l.filename,
@@ -138,6 +134,12 @@
     cellIndex.clear();
     gridEl.innerHTML = '';
     gridEl.style.setProperty('--mx-cols', columns.length);
+    // Null state (no layer columns): --mx-cols becomes 0, which would make the
+    // grid template's repeat() `repeat(0, …)` (invalid CSS, voids the template).
+    // The .mx-empty class swaps in an explicit 2-track template so the trailing
+    // "+" add column renders right after the labels — the populated layout minus
+    // the layer columns. See #matrix-grid.mx-empty in style.css.
+    gridEl.classList.toggle('mx-empty', columns.length === 0);
 
     // Header row: corner + column heads + a trailing skinny "add layer" column.
     const corner = document.createElement('div');
@@ -254,27 +256,6 @@
         rowObj.labelEl = label;
 
         columns.forEach((col, c) => {
-          // Null-state placeholder column: the clip row shows a clickable
-          // "select clip" prompt (opens the library in add mode -> creates the
-          // first layer); every other row is an inert blank. These cells are
-          // never value-synced (cells[c] = null), so updateCell won't wipe the
-          // prompt.
-          if (col.placeholder) {
-            const ph = document.createElement('div');
-            ph.dataset.group = group.name;
-            ph.dataset.mxrow = String(rowIndex);
-            if (def.ptype === 'clip') {
-              ph.className = 'mx-cell mx-ptype-clip mx-clip-cell mx-clip-prompt'
-                + (tall ? ' mx-row-tall' : '');
-              ph.innerHTML = '<span class="mx-val mx-clip">select clip</span>';
-              ph.addEventListener('click', () => openLibraryModal('add'));
-            } else {
-              ph.className = 'mx-cell mx-cell-empty' + (tall ? ' mx-row-tall' : '');
-            }
-            gridEl.appendChild(ph);
-            rowObj.cells[c] = null;
-            return;
-          }
           if (!applies(def, col.kind)) {
             const na = document.createElement('div');
             na.className = 'mx-cell mx-na' + (tall ? ' mx-row-tall' : '');
@@ -1199,7 +1180,7 @@
     if (sidebarOpen && lastMsg) renderSidebar(lastMsg);
   }
 
-  let masterOpen = false;
+  let masterOpen = true;
   function toggleMaster() {
     masterOpen = !masterOpen;
     app.classList.toggle('master-open', masterOpen);
@@ -1350,14 +1331,13 @@
   // Wiring
   // =====================================================================
   function init() {
+    // Main (master) panel open by default; the right edge chevron collapses it.
+    app.classList.add('master-open');
+
     const sb = document.getElementById('mx-sidebar-btn');
     if (sb) sb.addEventListener('click', toggleSidebar);
     const mb = document.getElementById('mx-master-btn');
     if (mb) mb.addEventListener('click', toggleMaster);
-
-    // Master panel: in-panel collapse button (reopen via the topbar toggle).
-    const collapseBtn = document.getElementById('mx-master-collapse');
-    if (collapseBtn) collapseBtn.addEventListener('click', toggleMaster);
 
     // Library modal dismissal: close button, backdrop click, Esc (in onKey).
     const libClose = document.getElementById('library-modal-close');
