@@ -207,6 +207,42 @@ impl EffectUniforms {
             "breathe_scale" => self.breathe_scale = v.clamp(0.0, 0.05),
             "breathe_rotation" => self.breathe_rotation = v.clamp(0.0, 2.0),
             "breathe_position" => self.breathe_position = v.clamp(0.0, 0.02),
+            // Warp (clamps mirror the SetLayerParam handler in main.rs)
+            "wave_amp" => self.wave_amp = v.clamp(0.0, 0.1),
+            "wave_freq" => self.wave_freq = v.clamp(0.0, 50.0),
+            "wave_speed" => self.wave_speed = v.clamp(0.0, 10.0),
+            "swirl_angle" => self.swirl_angle = v.clamp(-720.0, 720.0),
+            "swirl_radius" => self.swirl_radius = v.clamp(0.0, 1.0),
+            "bulge_strength" => self.bulge_strength = v.clamp(-1.0, 1.0),
+            "bulge_radius" => self.bulge_radius = v.clamp(0.05, 1.0),
+            // Chroma key
+            "chroma_threshold" => self.chroma_threshold = v.clamp(0.0, 1.0),
+            "chroma_smoothness" => self.chroma_smoothness = v.clamp(0.0, 1.0),
+            "chroma_spill" => self.chroma_spill = v.clamp(0.0, 1.0),
+            // Shift / glitch
+            "slice_intensity" => self.slice_intensity = v.clamp(0.0, 1.0),
+            "slice_height" => self.slice_height = v.clamp(1.0, 128.0),
+            "slice_prob" => self.slice_prob = v.clamp(0.0, 1.0),
+            "slice_speed" => self.slice_speed = v.clamp(0.0, 30.0),
+            "block_size" => self.block_size = v.clamp(4.0, 128.0),
+            "block_intensity" => self.block_intensity = v.clamp(0.0, 1.0),
+            "block_prob" => self.block_prob = v.clamp(0.0, 1.0),
+            "block_speed" => self.block_speed = v.clamp(0.0, 30.0),
+            "shift_chroma" => self.shift_chroma = v.clamp(0.0, 1.0),
+            "jitter_amount" => self.jitter_amount = v.clamp(0.0, 1.0),
+            "jitter_speed" => self.jitter_speed = v.clamp(0.0, 30.0),
+            "datamosh" => self.datamosh = v.clamp(0.0, 1.0),
+            // Feedback
+            "feedback_persistence" => self.feedback_persistence = v.clamp(0.0, 1.0),
+            "feedback_zoom" => self.feedback_zoom = v.clamp(0.8, 1.2),
+            "feedback_rotate" => self.feedback_rotate = v.clamp(-30.0, 30.0),
+            "feedback_luma_key" => self.feedback_luma_key = v.clamp(0.0, 1.0),
+            "feedback_chroma" => self.feedback_chroma = v.clamp(0.0, 1.0),
+            "feedback_additive" => self.feedback_additive = v.clamp(0.0, 1.0),
+            // Transform
+            "layer_x" => self.layer_x = v.clamp(-1.0, 1.0),
+            "layer_y" => self.layer_y = v.clamp(-1.0, 1.0),
+            "layer_scale" => self.layer_scale = v.clamp(0.1, 4.0),
             _ => {}
         }
     }
