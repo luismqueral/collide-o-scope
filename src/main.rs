@@ -1,6 +1,20 @@
 #![allow(deprecated)] // egui 0.34 deprecation warnings for panel API renames
 #![allow(dead_code)] // Old egui UI code kept as reference during web UI migration
 
+//! Application entry point and the winit event loop.
+//!
+//! This file owns the top-level `App` state (layers, master effects, transport,
+//! tempo, library, export job, …) and drives everything per frame. The flow:
+//! `main()` parses CLI args, starts the web control-panel server, and hands an
+//! `App` to winit's event loop. winit then calls back into our
+//! `ApplicationHandler` impl: `resumed()` once to build the window + GPU, and
+//! `window_event()` for every input/redraw. The real work happens in the
+//! `RedrawRequested` arm, which runs the whole per-frame pipeline (drain web
+//! actions → advance video → evaluate automation → render → present).
+//!
+//! `mod foo;` declares a submodule — Rust pulls in `foo.rs` (or `foo/mod.rs`).
+//! These lines wire the other source files into this binary's module tree.
+
 mod automation;
 mod effects;
 mod input;
@@ -66,6 +80,14 @@ pub fn fit_scale(mode: f32, sw: f32, sh: f32, dw: f32, dh: f32) -> (f32, f32) {
     }
 }
 
+/// All top-level application state, held for the lifetime of the program.
+///
+/// Several fields are `Option<...>` because they can't be built until winit
+/// hands us a window: `window`, `renderer`, and the three `egui_*` handles all
+/// start `None` and are filled in lazily inside `resumed()` (see the
+/// `ApplicationHandler` impl below). Everything else is initialised up-front in
+/// `App::new`. This struct is effectively the single source of truth the
+/// per-frame `RedrawRequested` pipeline reads from and writes to.
 struct App {
     initial_video: Option<String>,
     window: Option<Arc<Window>>,
@@ -922,6 +944,14 @@ impl App {
     }
 
     /// Push full app state to the web UI via broadcast.
+    /// Broadcast a full snapshot of engine state to the browser, once per frame.
+    /// This is the "back" half of the browser↔engine contract: the browser sends
+    /// `WebAction`s in (drained in the frame loop), and we send this `AppSnapshot`
+    /// out so every connected client repaints to match. We build the snapshot by
+    /// copying current values out of `self` (layers, master FX, transport, tempo,
+    /// export progress), then publish it two ways — store the latest in
+    /// `web_state.app` (so newly-connected clients get an immediate paint) and
+    /// `tx.send` it to all live WebSocket subscribers.
     fn push_web_state(&self) {
         use web::state::{AppSnapshot, EffectsSnapshot, LayerSnapshot, NtscSnapshot};
 
@@ -1030,7 +1060,11 @@ impl App {
                 * self.tap_bpm / 60.0,
         };
 
-        // Non-blocking: try to write + broadcast
+        // Both publishes are best-effort and never block the render loop:
+        // `try_write` skips the cached-snapshot update if a reader holds the lock,
+        // and `tx.send`'s result is ignored (it errors only when no clients are
+        // connected, which is fine). A dropped snapshot just means clients wait
+        // one more frame — they're full snapshots, so nothing accumulates.
         if let Ok(mut app) = self.web_state.app.try_write() {
             *app = snapshot.clone();
         }
@@ -1253,7 +1287,17 @@ fn generate_thumbnails(files: &[PathBuf], web_state: Arc<web::state::WebState>) 
         .ok();
 }
 
+// winit drives the app through this trait: instead of us owning the main loop,
+// winit owns it and calls these methods back when things happen. `resumed` fires
+// when the app becomes active (once at startup on desktop, but it can fire again
+// after suspend on mobile), and `window_event` fires for every window message
+// (input, resize, redraw request). This inversion-of-control is why all our
+// per-frame work lives inside `window_event`'s `RedrawRequested` arm.
 impl ApplicationHandler for App {
+    // Build the window + GPU here, NOT in `App::new`. winit only hands us an
+    // `ActiveEventLoop` (the thing that can create a window) at this point, and
+    // the renderer/egui need a live window to attach to. The early-return guards
+    // against re-running this if `resumed` fires more than once.
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -1316,6 +1360,9 @@ impl ApplicationHandler for App {
         }
     }
 
+    // Called for every window message. We give egui first dibs on the event
+    // (so clicks/keystrokes over the YAML editor go to the UI, not the app); if
+    // egui `consumed` it, we bail early. Otherwise we `match` the event ourselves.
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -1447,7 +1494,14 @@ impl ApplicationHandler for App {
                 }
             }
 
+            // THE per-frame pipeline. winit asks us to redraw; we run the whole
+            // chain here: frame-rate gate → advance video → drain web actions →
+            // build the egui frame → evaluate automation → render layers + master
+            // FX → optional NTSC → composite egui → present → ask for the next
+            // redraw. Everything that makes a frame happen lives in this arm.
             WindowEvent::RedrawRequested => {
+                // Skip work while the window is minimised (zero-size surface would
+                // fail to render); just re-arm a redraw and bail.
                 let win_size = self.window.as_ref().unwrap().inner_size();
                 if win_size.width == 0 || win_size.height == 0 {
                     if let Some(w) = &self.window {
@@ -1456,6 +1510,10 @@ impl ApplicationHandler for App {
                     return;
                 }
 
+                // Frame-rate gate: redraws can fire faster than 30fps, so we only
+                // do real work once at least FRAME_DURATION has passed. `content_tick`
+                // counts the frames that pass the gate (wrapping_add avoids overflow
+                // panic when it eventually wraps around the u64 max).
                 let now = Instant::now();
                 if now - self.last_frame_time >= FRAME_DURATION {
                     self.last_frame_time = now;
@@ -1488,7 +1546,12 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    // Process actions from web UI
+                    // Drain the web UI's action queue. The browser pushes
+                    // `WebAction`s onto this shared Mutex<Vec> from the server
+                    // thread; we `try_lock` (non-blocking — never stall the render
+                    // loop on the lock) and `drain(..)` everything queued since last
+                    // frame into a local Vec, releasing the lock before we apply
+                    // them. `unwrap_or_default()` = "empty list if the lock is busy".
                     let pending_actions: Vec<_> = self.web_state.actions
                         .try_lock()
                         .map(|mut a| a.drain(..).collect())
@@ -1580,6 +1643,11 @@ impl ApplicationHandler for App {
                         self.master_effects.set_by_name(param, expr.eval(elapsed, beat, bpm));
                     }
 
+                    // A command encoder records GPU commands into a buffer; nothing
+                    // executes until we `queue.submit(encoder.finish())`. We record
+                    // the layer compositing pass and the master-FX pass into one
+                    // encoder, then (below) either submit immediately or, if NTSC is
+                    // on, submit early so the CPU can read the pixels back.
                     let renderer = self.renderer.as_mut().unwrap();
                     let mut encoder = renderer.device.create_command_encoder(
                         &wgpu::CommandEncoderDescriptor {
@@ -1638,6 +1706,12 @@ impl ApplicationHandler for App {
                         &screen_desc,
                     );
 
+                    // Acquire the swapchain image we'll draw the final frame into.
+                    // This can fail in normal situations: `Outdated`/`Lost` mean the
+                    // surface config is stale (usually a resize or GPU reset), so we
+                    // reconfigure and bail this frame — the re-armed redraw will retry
+                    // with a fresh surface. The catch-all `_` arm (e.g. `Timeout`)
+                    // likewise just skips this frame rather than crashing.
                     let surface_texture = match renderer.surface.get_current_texture() {
                         wgpu::CurrentSurfaceTexture::Success(t)
                         | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -1698,10 +1772,15 @@ impl ApplicationHandler for App {
                         egui_renderer.free_texture(id);
                     }
 
+                    // Submit all recorded commands to the GPU, then `present()` hands
+                    // the finished image to the compositor for display on screen.
                     renderer.queue.submit(std::iter::once(encoder.finish()));
                     surface_texture.present();
                 }
 
+                // Always ask winit for another redraw, even if the frame gate above
+                // skipped the work this time — this keeps the render loop running
+                // continuously (a "render on every vsync" style loop).
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -2161,9 +2240,17 @@ fn configure_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+/// Process entry point. Parses CLI args, routes to the headless `render`
+/// subcommand if requested, otherwise: starts the web control-panel server,
+/// opens the browser panel, builds the `App`, and hands it to winit's event
+/// loop (which blocks here until the window closes). The `App`'s window + GPU
+/// aren't created yet at this point — that happens later in `resumed()`.
 fn main() {
+    // env_logger reads the RUST_LOG env var to decide what log levels to print
+    // (e.g. `RUST_LOG=info cargo run`). Without it, `log::info!` calls are no-ops.
     env_logger::init();
 
+    // `std::env::args()` yields the program name as [0], then the CLI arguments.
     let args: Vec<String> = std::env::args().collect();
 
     // Headless subcommands bail out before any window / web server is created.

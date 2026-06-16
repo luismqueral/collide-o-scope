@@ -38,6 +38,12 @@ pub struct ExportConfig {
 }
 
 /// Shared state for progress/cancellation between the render thread and the UI.
+///
+/// Wrapped in an `Arc` and shared across two threads, so every field is an
+/// atomic (or a Mutex): `Atomic*` types allow lock-free reads/writes from either
+/// thread without data races. `Ordering::Relaxed` everywhere is fine here because
+/// these values are independent counters/flags — we don't need them ordered
+/// relative to other memory, just individually thread-safe.
 pub struct ExportProgress {
     /// 0..10000 representing 0.0%..100.0%
     pub progress: AtomicU32,
@@ -71,7 +77,12 @@ pub struct ExportJob {
 }
 
 impl ExportJob {
-    /// Start an export job on a background thread.
+    /// Start an export job on a background thread (used by the live app, so the
+    /// render window stays responsive while the MP4 encodes). We `clone()` the
+    /// `Arc` before the `move` closure captures it: the closure owns `prog`, while
+    /// the original `progress` stays here in the returned `ExportJob` so the UI
+    /// can poll it. Both point at the same `ExportProgress`. The `done` flag is
+    /// set in a `finally`-style way after `run_export` returns, success or error.
     pub fn start(patch: PatchState, config: ExportConfig, library_folder: &str) -> Self {
         let progress = Arc::new(ExportProgress::new());
         let prog = progress.clone();
@@ -147,6 +158,10 @@ fn run_export(
     library_folder: &str,
 ) -> Result<(), String> {
     // --- Create headless wgpu device ---
+    // Same instance→adapter→device handshake as the live renderer, but
+    // `compatible_surface: None` because there's no window here — we render into
+    // an offscreen texture and read the pixels back. `pollster::block_on` runs
+    // these async requests to completion on this (already background) thread.
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
@@ -169,6 +184,11 @@ fn run_export(
     let h = config.height;
 
     // --- Build pipelines (same as renderer/state.rs) ---
+    // The whole pipeline/bind-group setup below is a deliberate duplicate of the
+    // live renderer in renderer/state.rs (see the detailed wgpu comments there).
+    // It's copied rather than shared because the export path runs on its own
+    // headless device with full-res NTSC and a different output sink (ffmpeg).
+    // Keeping it parallel is what guarantees live/offline visual parity.
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
@@ -519,6 +539,12 @@ fn run_export(
         std::fs::create_dir_all(parent).ok();
     }
 
+    // Launch ffmpeg as a child process and stream raw frames into its stdin
+    // rather than writing a huge intermediate file. The input args describe the
+    // pixels we'll feed it (`rawvideo`, `rgba`, size, fps from `pipe:0` = stdin);
+    // the output args are the H.264 encode settings (`crf 18` ≈ visually lossless,
+    // `yuv420p` for broad player compatibility). `stdin(piped())` gives us a
+    // handle to push bytes; stderr is captured so we can report ffmpeg's error.
     let mut ffmpeg = Command::new("ffmpeg")
         .args([
             "-y",
@@ -539,16 +565,25 @@ fn run_export(
         .spawn()
         .map_err(|e| format!("Failed to spawn ffmpeg: {e}"))?;
 
+    // `take()` moves the stdin handle out of the child so we own it here; we'll
+    // `write_all` each frame into it, and `drop` it later to signal end-of-input.
     let mut ffmpeg_stdin = ffmpeg.stdin.take().unwrap();
 
     // --- Frame loop ---
+    // The offline analogue of main.rs's RedrawRequested pipeline, but driven by a
+    // deterministic frame counter instead of a wall clock — no frame gate, no
+    // dropped frames, every frame rendered exactly once. `time` is computed as
+    // `frame_num * frame_interval` (perfect, fixed timesteps), which is the key to
+    // live/offline parity: automations are evaluated at the same `t` values.
     let total_frames = (config.fps as f32 * config.duration_secs) as u64;
     let frame_interval = 1.0 / config.fps as f32;
 
-    // Track per-layer frame timing (accumulator-based)
+    // Per-layer time debt, drained in the inner `while` below — mirrors the live
+    // `frame_accumulator` so each layer decodes at its own speed/fps.
     let mut layer_accumulators: Vec<f32> = vec![0.0; layers.len()];
 
     for frame_num in 0..total_frames {
+        // Cooperative cancellation: the UI thread can flip this flag to stop us.
         if progress.cancel.load(Ordering::Relaxed) {
             break;
         }
@@ -672,7 +707,9 @@ fn run_export(
         );
     }
 
-    // Close ffmpeg
+    // Closing stdin (by dropping the handle) tells ffmpeg "no more frames" — it
+    // then flushes and finalises the MP4. `wait_with_output` blocks until the
+    // child exits and collects its captured stderr for the error check below.
     drop(ffmpeg_stdin);
     let output = ffmpeg.wait_with_output().map_err(|e| format!("ffmpeg wait: {e}"))?;
     if !output.status.success() && !progress.cancel.load(Ordering::Relaxed) {

@@ -1,9 +1,19 @@
+//! In-window keyboard shortcuts.
+//!
+//! This covers only the quick render-window shortcuts (pixelate, RGB split,
+//! reset, pause, fullscreen, quit). Other keys (Ctrl+E/S/O for the YAML editor
+//! and patch save/load) are handled directly in `main.rs`'s event loop, not
+//! here. The flow is: `map_key` turns a raw key event into an `Action`, then
+//! `apply_action` performs it and returns a `ControlFlow` telling the caller
+//! whether it needs to do something window-level (pause/fullscreen/quit).
 use winit::event::ElementState;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 use crate::effects::EffectUniforms;
 
-/// Actions that can be triggered by keyboard input.
+/// Actions that can be triggered by keyboard input. `None` is the explicit
+/// "key we don't handle" case — Rust enums must cover every possibility, so
+/// there's no implicit null.
 pub enum Action {
     IncreasePixelate,
     DecreasePixelate,
@@ -17,11 +27,17 @@ pub enum Action {
 }
 
 /// Map a physical key press to an action. Shift modifies direction.
+///
+/// We only act on key-*down* (`Pressed`); key-up events return `None` so an
+/// action doesn't fire twice per physical press. "Physical" key means the
+/// position on the keyboard regardless of layout/locale.
 pub fn map_key(key: PhysicalKey, state: ElementState, shift: bool) -> Action {
     if state != ElementState::Pressed {
         return Action::None;
     }
 
+    // `match` is Rust's exhaustive switch. Each `=>` arm returns an `Action`;
+    // the final `_` arm catches every other key.
     match key {
         PhysicalKey::Code(KeyCode::KeyP) => {
             if shift {
@@ -45,7 +61,10 @@ pub fn map_key(key: PhysicalKey, state: ElementState, shift: bool) -> Action {
     }
 }
 
-/// Apply an action to effect uniforms. Returns control flags.
+/// Apply an action to effect uniforms. Returns a `ControlFlow` so the caller
+/// (the winit event loop) can react to window-level actions it owns — uniforms
+/// are mutated here in place (`&mut`), but pausing/fullscreen/quit need the
+/// window, which lives in `main.rs`.
 pub fn apply_action(action: Action, uniforms: &mut EffectUniforms) -> ControlFlow {
     match action {
         Action::IncreasePixelate => uniforms.increase_pixelate(),
@@ -61,6 +80,8 @@ pub fn apply_action(action: Action, uniforms: &mut EffectUniforms) -> ControlFlo
     ControlFlow::Continue
 }
 
+/// What the caller should do after an action runs. `Continue` means "nothing
+/// special, keep going"; the others ask the event loop to touch window state.
 pub enum ControlFlow {
     Continue,
     TogglePause,

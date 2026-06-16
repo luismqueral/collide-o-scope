@@ -1,9 +1,23 @@
+//! A single compositing layer: one video clip + its own effect chain.
+//!
+//! The app holds a stack of `Layer`s. Each owns its decoder and a GPU texture
+//! it uploads frames into; the renderer composites them bottom-to-top using each
+//! layer's `blend_mode` and `opacity`.
+//!
+//! `crate::` paths refer to other modules in this same binary (the crate root),
+//! the way `./` refers to the current package in JS imports.
 use std::collections::HashMap;
 
 use crate::automation::Expr;
 use crate::effects::EffectUniforms;
 use crate::video::VideoDecoder;
 
+/// How a layer is mixed with everything beneath it. Same maths as Photoshop
+/// blend modes / the WebGL version this project migrated from.
+///
+/// `#[derive(...)]` auto-generates trait implementations: `Copy`/`Clone` make
+/// it a trivially-copied value (no ownership juggling), `PartialEq` enables
+/// `==` comparisons, `Debug` enables `{:?}` printing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BlendMode {
     Normal,
@@ -12,7 +26,11 @@ pub enum BlendMode {
     Difference,
 }
 
+// An `impl` block hangs methods/constants off a type. These convert the enum
+// to the various forms the rest of the app needs: a number for the shader, a
+// pretty label for the UI, and a lowercase id for the WebSocket wire format.
 impl BlendMode {
+    /// Every variant, in UI order — handy for building dropdowns / cycling.
     pub const ALL: &[BlendMode] = &[
         BlendMode::Normal,
         BlendMode::Screen,
@@ -20,6 +38,7 @@ impl BlendMode {
         BlendMode::Difference,
     ];
 
+    /// Numeric code handed to the WGSL shader (which has no enums, only ints).
     pub fn as_u32(self) -> u32 {
         match self {
             BlendMode::Normal => 0,
@@ -53,6 +72,8 @@ impl BlendMode {
 /// slow VHS tick) from fast-forwarding the footage on the next tick.
 const MAX_CATCHUP_FRAMES: u32 = 4;
 
+/// One clip in the stack, bundling its decoder, GPU texture, transport state,
+/// per-layer effects, and any parameter automations.
 pub struct Layer {
     /// Stable identifier assigned by `App::add_layer`, used by the web UI to
     /// track cards across reorders. Survives MoveLayer/RemoveLayer.
@@ -86,6 +107,11 @@ impl Layer {
         let width = decoder.width;
         let height = decoder.height;
 
+        // Allocate the GPU texture decoded frames get copied into each tick.
+        // wgpu uses "descriptor" structs (a settings bag) for resource creation.
+        // `COPY_DST` = we'll write CPU pixels into it; `TEXTURE_BINDING` = the
+        // shader can sample it. `Rgba8UnormSrgb` matches the decoder's RGBA8
+        // output and applies sRGB gamma correctly when sampled.
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Layer Texture"),
             size: wgpu::Extent3d {
@@ -100,9 +126,15 @@ impl Layer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        // A "view" is the handle shaders actually bind to (it can reinterpret a
+        // texture's format/mips); the default view is the whole texture as-is.
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Extract just the filename from the path
+        // Extract just the filename from the path (for display in the UI).
+        // `file_name()` returns an `Option` (a path could end in `..`), so we
+        // `map` the success case and `unwrap_or_else` to fall back to the full
+        // path if there's no final component. `to_string_lossy` handles paths
+        // that aren't valid UTF-8 by substituting replacement characters.
         let filename = std::path::Path::new(path)
             .file_name()
             .map(|f| f.to_string_lossy().to_string())
@@ -164,6 +196,9 @@ impl Layer {
         }
     }
 
+    /// Copy a decoded RGBA frame from CPU memory up to this layer's GPU texture.
+    /// `bytes_per_row = 4 * width` because RGBA8 is 4 bytes per pixel; wgpu needs
+    /// the row stride to interpret the flat byte slice as a 2D image.
     pub fn upload_frame(&self, queue: &wgpu::Queue, rgba_data: &[u8]) {
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {

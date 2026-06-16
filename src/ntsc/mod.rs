@@ -71,7 +71,11 @@ impl Default for NtscParams {
     }
 }
 
-/// Holds ntsc-rs processing state.
+/// Holds ntsc-rs processing state. We keep two parallel things: `params` is our
+/// own small, web-facing settings struct (what the UI edits), and `effect` is
+/// ntsc-rs's much larger native config — `sync_effect_from_params` copies the
+/// former into the latter before each render. `frame_num` advances every frame
+/// so time-varying artifacts (snow, head-switching) animate instead of freezing.
 pub struct NtscState {
     ctx: Context,
     effect: NtscEffect,
@@ -104,7 +108,13 @@ impl NtscState {
         let half_w = w / 2;
         let half_h = h / 2;
 
-        // Downscale 2x with box filter (average 2x2 blocks)
+        // This is a *fully CPU* half-res path (it does its own downscale/upscale),
+        // separate from the GPU-assisted half-res path the live loop in main.rs
+        // uses. NTSC is expensive, so we run it on a quarter of the pixels.
+        // Box filter = average each source 2×2 block into one destination pixel.
+        // Indices are flat byte offsets: `(row * width + col) * 4` because the
+        // buffer is row-major RGBA (4 bytes/pixel). `as u16` before summing avoids
+        // overflowing a u8 when adding four 0..255 values together.
         let mut small = vec![0u8; half_w * half_h * 4];
         for sy in 0..half_h {
             for sx in 0..half_w {
@@ -169,7 +179,11 @@ impl NtscState {
         true
     }
 
-    /// Sync the ntsc-rs NtscEffect struct from our user-facing params.
+    /// Sync the ntsc-rs NtscEffect struct from our user-facing params. ntsc-rs
+    /// nests its settings deeply (e.g. `vhs_settings.settings.edge_wave.settings`),
+    /// so this is mostly plumbing: copy each flat `params` field into its home in
+    /// the native tree. The `*_noise.enabled = intensity > 0.0` lines are a small
+    /// nicety — a zero-intensity noise layer is just turned off rather than run.
     fn sync_effect_from_params(&mut self) {
         let p = &self.params;
 
@@ -214,7 +228,11 @@ impl NtscState {
         self.effect.composite_sharpening = p.composite_sharpening;
     }
 
-    /// Apply a named parameter from a JSON value.
+    /// Apply a named parameter from a JSON value (one `SetNtscParam` web action).
+    /// Each arm matches a param name, reads the value as the right JSON type
+    /// (`as_bool`/`as_u64`/`as_f64`, all returning `Option`), and only writes if
+    /// the type matched — a malformed value silently no-ops rather than erroring.
+    /// Unknown param names fall through the `_ => {}` arm and are ignored.
     pub fn set_param(&mut self, param: &str, value: &serde_json::Value) {
         match param {
             "enabled" => {

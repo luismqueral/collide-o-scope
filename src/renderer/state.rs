@@ -1,3 +1,19 @@
+//! GPU rendering with wgpu.
+//!
+//! `Renderer` owns the GPU device and all the long-lived rendering objects, and
+//! exposes a handful of methods the main loop calls each frame. A few wgpu terms
+//! used throughout:
+//! - **device/queue**: the GPU connection. `device` creates resources; `queue`
+//!   submits work and uploads data.
+//! - **surface**: the swapchain tied to the OS window — what actually gets shown.
+//! - **pipeline**: a compiled (vertex + fragment shader + state) program.
+//! - **bind group**: the set of textures/samplers/uniform buffers a pipeline
+//!   reads, described up front by a matching *bind group layout*.
+//! - **render pass**: one "draw into this target texture" operation.
+//!
+//! Compositing uses a ping-pong of three textures (`composite_textures`): accumulate
+//! the result in `[0]`, render the next layer into `[1]`, blend `[0]+[1]` into `[2]`,
+//! then copy `[2]` back to `[0]`. See `render_layers` for the full dance.
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -5,7 +21,10 @@ use winit::window::Window;
 use crate::effects::EffectUniforms;
 use crate::layers::Layer;
 
-/// Uniforms for the composite shader.
+/// Per-layer settings handed to the composite shader. `#[repr(C)]` forces a
+/// predictable C-style memory layout, and the bytemuck derives let us reinterpret
+/// the struct as raw bytes for upload. `_pad` rounds the size up to 16 bytes,
+/// the alignment GPUs require for uniform buffers.
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CompositeUniforms {
@@ -66,8 +85,15 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    /// Build the whole GPU stack: connect to a GPU, configure the window
+    /// surface, compile the three shader pipelines, and allocate the working
+    /// textures. Called once at startup. Returns `Self` (the fully-built renderer).
     pub fn new(window: Arc<Window>, output_width: u32, output_height: u32) -> Self {
         let size = window.inner_size();
+        // wgpu's startup handshake: instance → surface → adapter (a physical GPU)
+        // → device + queue (our logical handle to it). The `request_*` calls are
+        // async; `pollster::block_on` runs them to completion on this thread since
+        // startup doesn't need to stay non-blocking.
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window).unwrap();
 
@@ -88,6 +114,9 @@ impl Renderer {
         ))
         .expect("Failed to create device");
 
+        // Pick an sRGB surface format if the GPU offers one (correct gamma),
+        // else fall back to whatever's first. `iter().find(...)` scans the list;
+        // `.copied()` turns the `&format` reference into an owned value.
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
@@ -96,6 +125,8 @@ impl Renderer {
             .copied()
             .unwrap_or(surface_caps.formats[0]);
 
+        // How the swapchain behaves. `Fifo` = vsync (cap to refresh rate, no
+        // tearing); `RENDER_ATTACHMENT` = we draw directly into it.
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -115,6 +146,11 @@ impl Renderer {
         });
 
         // --- Effects pipeline (single texture + uniforms → render target) ---
+        // A bind group *layout* declares the shape of resources a shader expects
+        // (here: binding 0 = the layer texture, 1 = the sampler, 2 = the previous
+        // frame for datamosh feedback). The actual textures are bound per-frame
+        // via matching "bind groups". `visibility: FRAGMENT` = only the fragment
+        // shader reads these.
         let effects_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Effects Texture BGL"),
@@ -165,6 +201,11 @@ impl Renderer {
             });
 
 
+        // Shaders are compiled from WGSL source. `include_str!` embeds the file
+        // contents into the binary at *compile* time (so there's no runtime file
+        // read). One vertex shader is shared by all three pipelines: it emits a
+        // single triangle big enough to cover the screen, so the fragment shader
+        // runs once per output pixel.
         let vertex_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Vertex Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/fullscreen.wgsl").into()),
@@ -185,6 +226,10 @@ impl Renderer {
                 immediate_size: 0,
             });
 
+        // A render pipeline ties together the shaders + fixed-function state into
+        // one compiled GPU program. `buffers: &[]` = no vertex buffer (the shader
+        // generates the triangle from `vertex_index`); `blend: REPLACE` (below)
+        // = overwrite the target, since blending is done in our own shader maths.
         let effects_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Effects Pipeline"),
             layout: Some(&effects_pipeline_layout),
@@ -374,6 +419,12 @@ impl Renderer {
         });
 
         // --- Three composite textures ---
+        // All four usage flags because these textures play every role: drawn
+        // into (RENDER_ATTACHMENT), sampled by shaders (TEXTURE_BINDING), and
+        // copied both directions (COPY_SRC/COPY_DST) for the ping-pong + NTSC
+        // readback. `std::array::from_fn(|i| ...)` builds the `[T; 3]` array by
+        // calling the closure once per index — handy when each element needs
+        // its own GPU allocation (you can't `Copy` a texture).
         let tex_usage =
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST;
 
@@ -617,6 +668,10 @@ impl Renderer {
         // first layer (index 0, "Layer 1" in UI) ends up on top.
         let visible_layers: Vec<&Layer> = layers.iter().filter(|l| l.visible).rev().collect();
 
+        // Each layer is handled in two steps: (1) run its effect shader into the
+        // scratch texture [1], then (2) blend [1] over the accumulator [0]. The
+        // very first (bottom) layer skips the blend and is copied straight into
+        // [0] as the starting canvas; every later layer composites on top.
         for (i, layer) in visible_layers.iter().enumerate() {
             let uniforms = layer.effects;
 
@@ -881,7 +936,10 @@ impl Renderer {
     /// Submits a copy to the GPU and blocks until it completes. Uses a persistent
     /// staging buffer (auto-grows) to avoid per-frame allocation.
     fn readback_texture(&mut self, tex: &wgpu::Texture, w: u32, h: u32) -> Vec<u8> {
-        // Row must be aligned to 256 bytes for wgpu buffer copy
+        // wgpu requires each row in a texture→buffer copy to start on a 256-byte
+        // boundary. `(n + 255) & !255` is the standard "round up to a multiple of
+        // 256" trick: add 255 then mask off the low 8 bits. The padding is
+        // stripped back out below before the pixels are returned.
         let bytes_per_row = (w * 4 + 255) & !255;
         let buffer_size = (bytes_per_row * h) as u64;
 
@@ -925,7 +983,11 @@ impl Renderer {
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        // Map and read
+        // GPU memory isn't directly readable by the CPU — you have to "map" it
+        // first, and mapping is asynchronous. The standard blocking pattern:
+        // kick off `map_async` (which signals a channel when ready), then
+        // `poll(Wait)` to drive the GPU to completion, then `rx.recv()` blocks
+        // until the callback has fired. After that the bytes are safe to read.
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {

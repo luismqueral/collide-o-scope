@@ -11,6 +11,13 @@ use crate::layers::{BlendMode, Layer};
 use crate::ntsc::NtscParams;
 
 // --- Helpers for serde defaults ---
+//
+// serde fills a missing YAML field with the type's `Default` (0, false, ""),
+// but some fields need a non-zero default (opacity should default to 1.0, not
+// invisible). `#[serde(default = "one")]` tells serde to call this function when
+// the field is absent. They're tiny standalone fns because the attribute needs a
+// path to a zero-arg function. This is what lets old patch files keep loading
+// after we add new fields — the new field just gets its default.
 
 fn one() -> f32 {
     1.0
@@ -21,6 +28,10 @@ fn default_fps() -> f32 {
 
 // --- Parameter metadata for stepping & comments ---
 
+/// Per-parameter UI/validation metadata: the increment a keyboard nudge or
+/// slider uses (`step`), the clamp range (`min`/`max`), and a human description
+/// (also written as a comment into exported YAML). `&'static str` means the text
+/// lives in the binary for the whole program lifetime — no allocation, no owner.
 pub struct ParamMeta {
     pub step: f32,
     pub min: f32,
@@ -89,6 +100,12 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
 
 // --- Serializable patch state ---
 
+// The on-disk format for a saved performance. `#[derive(Serialize, Deserialize)]`
+// auto-generates the YAML↔struct conversion (via serde) — saving is "serialize
+// this struct", loading is "deserialize into this struct". These config structs
+// are deliberately separate from the live runtime types (Layer, EffectUniforms):
+// they hold only the persistable settings, not GPU handles or decoders, so the
+// file stays small and stable even as the runtime types change.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PatchState {
     pub master: EffectsConfig,
@@ -794,6 +811,10 @@ impl LayerConfig {
 // --- Full patch snapshot ---
 
 impl PatchState {
+    // `capture` and `apply` are inverses: `capture` snapshots live runtime state
+    // into the serializable config (for saving), and `apply` writes a loaded
+    // config back onto live state. Keeping them as a mirror pair is what makes
+    // save→load round-trip faithfully.
     pub fn capture(
         master: &EffectUniforms,
         master_automations: &HashMap<String, Expr>,
@@ -812,6 +833,9 @@ impl PatchState {
 
     pub fn apply(&self, master: &mut EffectUniforms, layers: &mut [Layer], ntsc_params: &mut NtscParams) {
         self.master.apply_to_uniforms(master);
+        // `zip` pairs each saved config with the matching live layer and stops at
+        // the shorter of the two — so extra live layers or extra saved configs are
+        // simply left untouched rather than erroring.
         for (config, layer) in self.layers.iter().zip(layers.iter_mut()) {
             config.apply_to_layer(layer);
         }
