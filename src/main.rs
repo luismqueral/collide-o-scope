@@ -1258,12 +1258,17 @@ impl ApplicationHandler for App {
 
         log::info!("Output: {}x{}", output_width, output_height);
 
-        let window_w = output_width;
-        let window_h = output_height;
+        // Preview window defaults to a small square, independent of the output
+        // resolution. The egui preview keeps the output aspect ratio via
+        // fit_to_area, so non-square output is letterboxed inside the square frame.
+        const PREVIEW_WINDOW_SIZE: u32 = 600;
 
         let window_attrs = WindowAttributes::default()
             .with_title("collide-o-scope")
-            .with_inner_size(winit::dpi::LogicalSize::new(window_w, window_h));
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                PREVIEW_WINDOW_SIZE,
+                PREVIEW_WINDOW_SIZE,
+            ));
 
         let window = Arc::new(event_loop.create_window(window_attrs).unwrap());
 
