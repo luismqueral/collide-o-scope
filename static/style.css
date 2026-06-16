@@ -1838,6 +1838,33 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .mx-changed .mx-bar-fill {
   background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
+/* Master output level meter — read-only live peak shown under the AUDIO group.
+   Modeled on .mx-bar but with a green→amber→red gradient and no value text. */
+.mx-meter-cell { padding: 0 6px; }
+.audio-meter {
+  position: relative;
+  flex: 1 1 auto;
+  align-self: stretch;
+  margin: 5px 0;
+  min-width: 0;
+  background: var(--value-bg);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.audio-meter-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 60%, transparent) 0%,
+    color-mix(in srgb, #e6c85a 70%, transparent) 78%,
+    color-mix(in srgb, #e65a5a 85%, transparent) 100%
+  );
+  transition: width 0.06s linear;
+}
 .mx-val {
   position: relative;
   z-index: 1;

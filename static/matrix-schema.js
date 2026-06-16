@@ -133,6 +133,23 @@ const MATRIX_GROUPS = [
     ],
   },
   {
+    name: 'AUDIO',
+    params: [
+      // Master bus: volume + brick-wall limiter. These read top-level snapshot
+      // fields (master_volume / master_limiter) and route through the dedicated
+      // set_master_audio_param action, NOT the generic set_param. `snap` overrides
+      // the snapshot key where it differs from the action param (limiter).
+      { key: 'master_volume', label: 'volume', ptype: 'float', min: -60, max: 6, step: 1, def: 0, automatable: false, noRandom: true, channels: 'master_audio' },
+      { key: 'limiter', label: 'limiter', ptype: 'bool', def: true, automatable: false, channels: 'master_audio', snap: 'master_limiter' },
+      // Per-layer: mute / volume (dB) / pan. Route through the standard
+      // set_layer_param path (keys match LayerSnapshot fields). noRandom keeps the
+      // dice button from blasting/scattering audio levels.
+      { key: 'mute', label: 'mute', ptype: 'bool', def: false, automatable: false, channels: 'layer' },
+      { key: 'volume', label: 'volume', ptype: 'float', min: -60, max: 6, step: 1, def: 0, automatable: false, noRandom: true, channels: 'layer' },
+      { key: 'pan', label: 'pan', ptype: 'bipolar', min: -1, max: 1, step: 0.05, def: 0, automatable: false, noRandom: true, channels: 'layer' },
+    ],
+  },
+  {
     name: 'VHS/NTSC',
     params: [
       { key: 'enabled', label: 'vhs on', ptype: 'bool', def: false, automatable: false, channels: 'ntsc' },
@@ -167,6 +184,8 @@ const MATRIX_GROUPS = [
 function CHANNEL_APPLIES(def, colKind) {
   if (def.channels === 'both') return colKind === 'master' || colKind === 'layer';
   if (def.channels === 'ntsc') return colKind === 'master';
+  // Master audio bus (volume/limiter) lives in the Master column like ntsc.
+  if (def.channels === 'master_audio') return colKind === 'master';
   return def.channels === colKind;
 }
 

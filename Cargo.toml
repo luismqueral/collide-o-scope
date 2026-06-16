@@ -26,6 +26,8 @@ open = "5"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 ntsc-rs = { git = "https://github.com/ntsc-rs/ntsc-rs", package = "ntsc-rs", features = ["rayon"] }
 fasteval = "0.2"
+cpal = "0.15"        # cross-platform audio output (macOS CoreAudio)
+rtrb = "0.3"         # lock-free SPSC ring buffer for the decode→callback boundary
 
 # ntsc-rs is CPU-intensive; always optimize it even in debug builds
 [profile.dev.package.ntsc-rs]

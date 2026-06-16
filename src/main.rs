@@ -15,6 +15,7 @@
 //! `mod foo;` declares a submodule — Rust pulls in `foo.rs` (or `foo/mod.rs`).
 //! These lines wire the other source files into this binary's module tree.
 
+mod audio;
 mod automation;
 mod effects;
 mod input;
@@ -101,6 +102,11 @@ struct App {
     // Master automation parse errors: param name → error message
     master_automation_errors: std::collections::HashMap<String, String>,
     master_paused: bool,
+    // Master audio bus. The engine holds the audible authority (callback
+    // atomics); these mirror it for snapshots/patches and survive when audio is
+    // disabled (no output device).
+    master_volume: f32, // dB, −60..+6 (0 = unity)
+    master_limiter: bool,
     last_frame_time: Instant,
     start_time: Instant,
     // Tap-tempo state. `tap_bpm` is the current tempo; `tap_downbeat` is the
@@ -136,6 +142,10 @@ struct App {
     web_state: Arc<WebState>,
     // Offline render export
     export_job: Option<render_export::ExportJob>,
+    // Audio output (Phase 1: per-layer mute/volume/pan + varispeed, mixed to a
+    // master volume/limiter/meter bus). None if no usable output device was
+    // found — the app then runs silently.
+    audio: Option<audio::AudioEngine>,
 }
 
 impl App {
@@ -150,6 +160,16 @@ impl App {
 
         let patch_files = scan_patches(&patches_dir(&library_folder));
 
+        // Build the audio engine up-front; if no output device is available we
+        // log and keep going silently rather than failing the whole app.
+        let audio = match audio::AudioEngine::new() {
+            Ok(engine) => Some(engine),
+            Err(e) => {
+                eprintln!("Audio disabled: {e}");
+                None
+            }
+        };
+
         Self {
             initial_video,
             window: None,
@@ -161,6 +181,8 @@ impl App {
             master_automations: std::collections::HashMap::new(),
             master_automation_errors: std::collections::HashMap::new(),
             master_paused: false,
+            master_volume: 0.0,
+            master_limiter: true,
             last_frame_time: Instant::now(),
             start_time: Instant::now(),
             tap_bpm: 120.0,
@@ -184,6 +206,7 @@ impl App {
             ntsc_state: ntsc::NtscState::new(),
             web_state,
             export_job: None,
+            audio,
         }
     }
 
@@ -191,10 +214,16 @@ impl App {
         let renderer = self.renderer.as_ref().unwrap();
         match Layer::new(path, &renderer.device) {
             Ok(mut layer) => {
-                layer.id = self.next_layer_id;
+                let id = self.next_layer_id;
+                layer.id = id;
                 self.next_layer_id += 1;
                 self.layers.push(layer);
                 self.selected_layer = Some(self.layers.len() - 1);
+                // Register this layer's audio track with the mixer, keyed by the
+                // stable layer id. Files with no audio stream stay silent.
+                if let Some(audio) = &self.audio {
+                    audio.add_source(id, path);
+                }
             }
             Err(e) => {
                 eprintln!("Failed to open video: {e}");
@@ -279,6 +308,12 @@ impl App {
                                 layer.effects.resolution =
                                     [fresh.width as f32, fresh.height as f32];
                                 layer.frame_accumulator = 0.0;
+                                // Swap the audio source in place too (keeps the
+                                // layer's mute/volume/pan/speed).
+                                let id = layer.id;
+                                if let Some(audio) = &self.audio {
+                                    audio.set_source_path(id, &path_str);
+                                }
                             }
                             Err(e) => eprintln!("Failed to open video: {e}"),
                         }
@@ -287,6 +322,10 @@ impl App {
             }
             WebAction::RemoveLayer { index } => {
                 if index < self.layers.len() {
+                    let id = self.layers[index].id;
+                    if let Some(audio) = &self.audio {
+                        audio.remove_source(id);
+                    }
                     self.layers.remove(index);
                     if self.layers.is_empty() {
                         self.selected_layer = None;
@@ -325,12 +364,20 @@ impl App {
             }
             WebAction::ToggleLayerPause { index } => {
                 if index < self.layers.len() {
-                    self.layers[index].paused = !self.layers[index].paused;
-                    log::info!("Layer {index} paused → {}", self.layers[index].paused);
+                    let paused = !self.layers[index].paused;
+                    self.layers[index].paused = paused;
+                    let id = self.layers[index].id;
+                    if let Some(audio) = &self.audio {
+                        audio.set_paused(id, paused);
+                    }
+                    log::info!("Layer {index} paused → {paused}");
                 }
             }
             WebAction::ToggleMasterPause => {
                 self.master_paused = !self.master_paused;
+                if let Some(audio) = &self.audio {
+                    audio.set_master_paused(self.master_paused);
+                }
             }
             WebAction::ResetFx => {
                 self.master_effects.reset();
@@ -394,6 +441,21 @@ impl App {
                                     "difference" => crate::layers::BlendMode::Difference,
                                     _ => crate::layers::BlendMode::Normal,
                                 };
+                            }
+                        }
+                        "mute" => {
+                            if let Some(b) = value.as_bool() {
+                                layer.audio.mute = b;
+                            }
+                        }
+                        "volume" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.audio.volume = (v as f32).clamp(-60.0, 6.0);
+                            }
+                        }
+                        "pan" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.audio.pan = (v as f32).clamp(-1.0, 1.0);
                             }
                         }
                         "hue_shift" => {
@@ -636,6 +698,19 @@ impl App {
                         }
                         _ => {}
                     }
+                    // Forward audio-relevant changes to the mixer. Done after the
+                    // `&mut layer` borrow above ends (NLL) so we can touch
+                    // `self.audio` + re-read the layer.
+                    if let Some(audio) = &self.audio {
+                        let id = self.layers[index].id;
+                        match param.as_str() {
+                            "mute" | "volume" | "pan" => {
+                                audio.set_params(id, self.layers[index].audio)
+                            }
+                            "speed" => audio.set_speed(id, self.layers[index].speed),
+                            _ => {}
+                        }
+                    }
                 }
             }
             WebAction::ResetLayerGroup { index, group } => {
@@ -647,6 +722,9 @@ impl App {
                             layer.speed = 1.0;
                             layer.fps = 30.0;
                             layer.blend_mode = crate::layers::BlendMode::Normal;
+                        }
+                        "audio" => {
+                            layer.audio = crate::audio::AudioParams::default();
                         }
                         "color" => {
                             layer.effects.hue_shift = d.hue_shift;
@@ -714,11 +792,41 @@ impl App {
                         }
                         _ => {}
                     }
+                    // Resync the mixer for groups that touch audio: "audio"
+                    // (mute/volume/pan) and "blend" (resets speed → varispeed).
+                    if let Some(audio) = &self.audio {
+                        let id = self.layers[index].id;
+                        match group.as_str() {
+                            "audio" => audio.set_params(id, self.layers[index].audio),
+                            "blend" => audio.set_speed(id, self.layers[index].speed),
+                            _ => {}
+                        }
+                    }
                 }
             }
             WebAction::SetNtscParam { param, value } => {
                 self.ntsc_state.set_param(&param, &value);
             }
+            WebAction::SetMasterAudioParam { param, value } => match param.as_str() {
+                "master_volume" => {
+                    if let Some(v) = value.as_f64() {
+                        let db = (v as f32).clamp(-60.0, 6.0);
+                        self.master_volume = db;
+                        if let Some(audio) = &self.audio {
+                            audio.set_master_volume(db);
+                        }
+                    }
+                }
+                "limiter" => {
+                    if let Some(b) = value.as_bool() {
+                        self.master_limiter = b;
+                        if let Some(audio) = &self.audio {
+                            audio.set_master_limiter(b);
+                        }
+                    }
+                }
+                _ => {}
+            },
             WebAction::StartExport { width, height, fps, duration_secs, match_preview } => {
                 if self.export_job.is_none() || self.export_job.as_ref().unwrap().is_done() {
                     let patch = patch::PatchState::capture(
@@ -726,6 +834,8 @@ impl App {
                         &self.master_automations,
                         &self.layers,
                         &self.ntsc_state.params,
+                        self.master_volume,
+                        self.master_limiter,
                     );
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -848,6 +958,8 @@ impl App {
                     &self.master_automations,
                     &self.layers,
                     &self.ntsc_state.params,
+                    self.master_volume,
+                    self.master_limiter,
                 );
                 match serde_yaml::to_string(&patch) {
                     Ok(yaml) => {
@@ -885,6 +997,11 @@ impl App {
                 };
                 // Rebuild layers from scratch: PatchState::apply only zips against
                 // existing layers, so we recreate decoders via add_layer here.
+                // Drop every mixer source first — clearing self.layers doesn't send
+                // remove commands, so stale sources would otherwise keep playing.
+                if let Some(audio) = &self.audio {
+                    audio.clear_sources();
+                }
                 self.layers.clear();
                 self.selected_layer = None;
                 for cfg in &patch.layers {
@@ -898,8 +1015,21 @@ impl App {
                         Some(p) => {
                             let path_str = p.to_string_lossy().to_string();
                             self.add_layer(&path_str);
-                            if let Some(layer) = self.layers.last_mut() {
+                            // Apply the saved config, then resync the resulting audio
+                            // params/transport to the mixer: add_layer registered the
+                            // source with engine defaults, and apply_to_layer only
+                            // touched the Layer mirror. Extract Copy values so the
+                            // `self.layers` borrow ends before we touch `self.audio`.
+                            let resync = self.layers.last_mut().map(|layer| {
                                 cfg.apply_to_layer(layer);
+                                (layer.id, layer.audio, layer.speed, layer.paused)
+                            });
+                            if let (Some((id, params, speed, paused)), Some(audio)) =
+                                (resync, &self.audio)
+                            {
+                                audio.set_params(id, params);
+                                audio.set_speed(id, speed);
+                                audio.set_paused(id, paused);
                             }
                         }
                         None => log::warn!(
@@ -909,6 +1039,15 @@ impl App {
                     }
                 }
                 patch.master.apply_to_uniforms(&mut self.master_effects);
+                // Restore the master audio bus onto both the App mirror and the
+                // live engine (instant, bypassing the mix-ring latency).
+                let (mv, ml) = patch.master_audio();
+                self.master_volume = mv;
+                self.master_limiter = ml;
+                if let Some(audio) = &self.audio {
+                    audio.set_master_volume(mv);
+                    audio.set_master_limiter(ml);
+                }
                 if let Some(n) = &patch.ntsc {
                     self.ntsc_state.params = n.to_params();
                 }
@@ -973,6 +1112,9 @@ impl App {
                     .map(|(k, v)| (k.clone(), v.source.clone()))
                     .collect(),
                 automation_errors: l.automation_errors.clone(),
+                mute: l.audio.mute,
+                volume: l.audio.volume,
+                pan: l.audio.pan,
                 hue_shift: l.effects.hue_shift,
                 saturation: l.effects.saturation,
                 brightness: l.effects.brightness,
@@ -1058,6 +1200,9 @@ impl App {
             bpm: self.tap_bpm,
             beat: (self.start_time.elapsed().as_secs_f32() - self.tap_downbeat)
                 * self.tap_bpm / 60.0,
+            master_volume: self.master_volume,
+            master_limiter: self.master_limiter,
+            meter: self.audio.as_ref().map(|a| a.meter()).unwrap_or(0.0),
         };
 
         // Both publishes are best-effort and never block the render loop:
@@ -1436,6 +1581,8 @@ impl ApplicationHandler for App {
                                 &self.master_automations,
                                 &self.layers,
                                 &self.ntsc_state.params,
+                                self.master_volume,
+                                self.master_limiter,
                             );
                             return;
                         }
@@ -2282,8 +2429,8 @@ fn main() {
             }
         }
         None => {
-            // Default: use ./videos/ if it exists
-            let default_lib = PathBuf::from("videos");
+            // Default: use ./library/ if it exists
+            let default_lib = PathBuf::from("library");
             if default_lib.is_dir() {
                 (None, Some(default_lib))
             } else {

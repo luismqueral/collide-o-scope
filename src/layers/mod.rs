@@ -96,6 +96,9 @@ pub struct Layer {
     // Parameter automation
     pub automations: HashMap<String, Expr>, // param name → compiled expression
     pub automation_errors: HashMap<String, String>, // param name → parse error
+    // Per-layer audio (mute/volume/pan); the mixer holds the playing source and
+    // is the audible authority — this mirror exists for snapshots/patches.
+    pub audio: crate::audio::AudioParams,
 }
 
 impl Layer {
@@ -161,6 +164,7 @@ impl Layer {
             frame_accumulator: 0.0,
             automations: HashMap::new(),
             automation_errors: HashMap::new(),
+            audio: crate::audio::AudioParams::default(),
         })
     }
 

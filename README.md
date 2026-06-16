@@ -107,7 +107,7 @@ cargo run -- path/to/clips/
 # Single file → also uses its parent folder as the library
 cargo run -- path/to/clip.mp4
 
-# No args → uses ./videos/ if present; otherwise drag-and-drop onto the window
+# No args → uses ./library/ if present; otherwise drag-and-drop onto the window
 cargo run
 ```
 
@@ -118,7 +118,7 @@ Library scanning is **single-level** (not recursive). Supported inputs: `mp4`,
 ## Patches
 
 Save/load the full state as YAML. Patches live in a `patches/` folder next to the
-library folder (i.e. the project root when running `cargo run -- videos/`), falling
+library folder (i.e. the project root when running `cargo run -- library/`), falling
 back to `./patches`. Manage them from the control panel or the in-window YAML editor.
 
 ## Automation
@@ -143,7 +143,7 @@ Example: `0.5 + 0.5*sin(beat*tau)` pulses a 0..1 param once per beat.
 Render a saved patch straight to MP4 with no window or web server:
 
 ```sh
-cargo run -- render --patch patches/my-patch.yaml --library videos/ \
+cargo run -- render --patch patches/my-patch.yaml --library library/ \
     [--out out.mp4] [--duration 10] [--fps 30] [--res 1280x720]
 ```
 

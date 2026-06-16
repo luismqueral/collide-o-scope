@@ -59,6 +59,8 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
         "opacity" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "layer transparency" }),
         "speed" => Some(ParamMeta { step: 0.25, min: 0.25, max: 4.0, desc: "playback multiplier" }),
         "fps" => Some(ParamMeta { step: 1.0, min: 1.0, max: 60.0, desc: "decode frame rate" }),
+        "volume" => Some(ParamMeta { step: 1.0, min: -60.0, max: 6.0, desc: "audio level dB (0=unity)" }),
+        "pan" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "stereo pan (-1=L 1=R)" }),
         "wave_amp" => Some(ParamMeta { step: 0.005, min: 0.0, max: 0.1, desc: "wave displacement" }),
         "wave_freq" => Some(ParamMeta { step: 1.0, min: 0.0, max: 50.0, desc: "wave cycles" }),
         "wave_speed" => Some(ParamMeta { step: 0.5, min: 0.0, max: 10.0, desc: "wave scroll speed" }),
@@ -115,6 +117,27 @@ pub struct PatchState {
     /// Master param automations: param name → expression text.
     #[serde(default)]
     pub master_automations: HashMap<String, String>,
+    /// Master audio bus (volume/limiter). `Option` so old patches without it
+    /// load fine and fall back to engine defaults (unity, limiter on).
+    #[serde(default)]
+    pub audio: Option<MasterAudioConfig>,
+}
+
+/// Serializable master audio bus settings for patch files.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MasterAudioConfig {
+    /// Master output level in dB (0 = unity).
+    #[serde(default)]
+    pub volume: f32,
+    /// Brick-wall clip guard.
+    #[serde(default = "default_true")]
+    pub limiter: bool,
+}
+
+impl Default for MasterAudioConfig {
+    fn default() -> Self {
+        Self { volume: 0.0, limiter: true }
+    }
 }
 
 /// Serializable NTSC/VHS effect parameters for patch files.
@@ -234,6 +257,14 @@ pub struct LayerConfig {
     /// Per-layer param automations: param name → expression text.
     #[serde(default)]
     pub automations: HashMap<String, String>,
+    // Per-layer audio. `volume` is dB (0 = unity); all default to the silent-of-
+    // effect values (not muted, unity, centered) so old patches load unchanged.
+    #[serde(default)]
+    pub mute: bool,
+    #[serde(default)]
+    pub volume: f32,
+    #[serde(default)]
+    pub pan: f32,
 }
 
 fn default_blend() -> String {
@@ -753,6 +784,9 @@ impl LayerConfig {
             automations: layer.automations.iter()
                 .map(|(k, v)| (k.clone(), v.source.clone()))
                 .collect(),
+            mute: layer.audio.mute,
+            volume: layer.audio.volume,
+            pan: layer.audio.pan,
         }
     }
 
@@ -769,6 +803,12 @@ impl LayerConfig {
         layer.paused = self.paused;
         layer.visible = self.visible;
         self.effects.apply_to_uniforms(&mut layer.effects);
+        // Per-layer audio: written onto the Layer mirror here; the caller is
+        // responsible for resyncing these to the audio engine (the engine is
+        // keyed by layer id and not reachable from this conversion).
+        layer.audio.mute = self.mute;
+        layer.audio.volume = self.volume.clamp(-60.0, 6.0);
+        layer.audio.pan = self.pan.clamp(-1.0, 1.0);
         // Recompile saved automation expressions into the layer.
         layer.automations.clear();
         layer.automation_errors.clear();
@@ -790,6 +830,9 @@ impl LayerConfig {
             ("fps", format!("{:.1}", self.fps)),
             ("paused", format!("{}", self.paused)),
             ("visible", format!("{}", self.visible)),
+            ("mute", format!("{}", self.mute)),
+            ("volume", format!("{:.1}", self.volume)),
+            ("pan", format!("{:.2}", self.pan)),
         ]
     }
 
@@ -802,6 +845,9 @@ impl LayerConfig {
             "fps" => { if let Ok(v) = value.parse() { self.fps = v; return true; } }
             "paused" => { if let Ok(v) = value.parse() { self.paused = v; return true; } }
             "visible" => { if let Ok(v) = value.parse() { self.visible = v; return true; } }
+            "mute" => { if let Ok(v) = value.parse() { self.mute = v; return true; } }
+            "volume" => { if let Ok(v) = value.parse() { self.volume = v; return true; } }
+            "pan" => { if let Ok(v) = value.parse() { self.pan = v; return true; } }
             _ => {}
         }
         false
@@ -820,6 +866,8 @@ impl PatchState {
         master_automations: &HashMap<String, Expr>,
         layers: &[Layer],
         ntsc_params: &NtscParams,
+        master_volume: f32,
+        master_limiter: bool,
     ) -> Self {
         Self {
             master: EffectsConfig::from_uniforms(master),
@@ -828,7 +876,19 @@ impl PatchState {
             master_automations: master_automations.iter()
                 .map(|(k, v)| (k.clone(), v.source.clone()))
                 .collect(),
+            audio: Some(MasterAudioConfig {
+                volume: master_volume,
+                limiter: master_limiter,
+            }),
         }
+    }
+
+    /// The saved master audio bus settings, or engine defaults (unity gain,
+    /// limiter on) for patches that predate the audio field. Callers apply
+    /// these to both their `App` mirror and the live audio engine.
+    pub fn master_audio(&self) -> (f32, bool) {
+        let a = self.audio.clone().unwrap_or_default();
+        (a.volume, a.limiter)
     }
 
     pub fn apply(&self, master: &mut EffectUniforms, layers: &mut [Layer], ntsc_params: &mut NtscParams) {

@@ -53,14 +53,14 @@ brew install ffmpeg
 cargo build
 
 # Folder → becomes the library; single file → uses its parent folder
-cargo run -- videos/
-cargo run -- videos/some-file.mp4
+cargo run -- library/
+cargo run -- library/some-file.mp4
 
 # Legacy "classic" control panel instead of the default matrix view
-cargo run -- --classic videos/
+cargo run -- --classic library/
 
 # Headless render of a saved patch straight to MP4 (no window / no web server)
-cargo run -- render --patch patches/my-patch.yaml --library videos/ \
+cargo run -- render --patch patches/my-patch.yaml --library library/ \
     [--out out.mp4] [--duration 10] [--fps 30] [--res 1280x720]
 ```
 

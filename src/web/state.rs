@@ -67,6 +67,19 @@ pub struct AppSnapshot {
     /// Beats elapsed since the last tap downbeat (drives the UI beat pulse).
     #[serde(default)]
     pub beat: f32,
+    /// Master audio volume in dB (−60..+6, 0 = unity).
+    #[serde(default)]
+    pub master_volume: f32,
+    /// Master limiter (brick-wall clip guard) on/off.
+    #[serde(default = "default_true")]
+    pub master_limiter: bool,
+    /// Live output peak level (0..1) for the master meter.
+    #[serde(default)]
+    pub meter: f32,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_framerate() -> f32 {
@@ -102,6 +115,9 @@ impl Default for AppSnapshot {
             automation_errors: HashMap::new(),
             bpm: 120.0,
             beat: 0.0,
+            master_volume: 0.0,
+            master_limiter: true,
+            meter: 0.0,
         }
     }
 }
@@ -246,6 +262,13 @@ pub struct LayerSnapshot {
     /// Per-layer automation parse errors: param name → error message.
     #[serde(default)]
     pub automation_errors: HashMap<String, String>,
+    // Per-layer audio
+    #[serde(default)]
+    pub mute: bool,
+    #[serde(default)]
+    pub volume: f32,
+    #[serde(default)]
+    pub pan: f32,
     // Per-layer effects (color)
     pub hue_shift: f32,
     pub saturation: f32,
@@ -351,6 +374,9 @@ pub enum WebAction {
     /// Set an NTSC/VHS effect parameter
     #[serde(rename = "set_ntsc_param")]
     SetNtscParam { param: String, value: serde_json::Value },
+    /// Set a master audio bus parameter (master_volume, limiter)
+    #[serde(rename = "set_master_audio_param")]
+    SetMasterAudioParam { param: String, value: serde_json::Value },
     /// Start an offline render export
     #[serde(rename = "start_export")]
     StartExport { width: u32, height: u32, fps: u32, duration_secs: f32, #[serde(default)] match_preview: bool },

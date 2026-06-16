@@ -414,8 +414,17 @@ pub fn save_patch(
     master_automations: &HashMap<String, Expr>,
     layers: &[Layer],
     ntsc_params: &NtscParams,
+    master_volume: f32,
+    master_limiter: bool,
 ) {
-    let patch = PatchState::capture(master, master_automations, layers, ntsc_params);
+    let patch = PatchState::capture(
+        master,
+        master_automations,
+        layers,
+        ntsc_params,
+        master_volume,
+        master_limiter,
+    );
     // unwrap_or_default: on the (unexpected) serialise error, fall back to ""
     // rather than panicking — the user just gets an empty/failed save.
     let yaml = serde_yaml::to_string(&patch).unwrap_or_default();

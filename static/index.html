@@ -181,6 +181,26 @@
             </div>
           </div>
 
+          <div class="fx-group" data-group="audio" id="audio-group">
+            <div class="fx-group-header">
+              <span class="chevron">&#x25BC;</span>
+              <span class="group-label">AUDIO</span>
+            </div>
+            <div class="fx-group-body">
+              <div class="param-row" data-master-audio="master_volume" data-min="-60" data-max="6" data-step="1">
+                <label>Volume</label><input type="range" min="-60" max="6" step="1" value="0"><span class="value">0</span>
+              </div>
+              <div class="param-row toggle-row" data-master-audio="limiter">
+                <label>Limiter</label>
+                <label class="toggle"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+              </div>
+              <div class="param-row meter-row">
+                <label>Meter</label>
+                <div class="audio-meter"><div class="audio-meter-fill" id="master-meter-fill"></div></div>
+              </div>
+            </div>
+          </div>
+
           <div class="fx-group" data-group="vhs" id="vhs-group">
             <div class="fx-group-header">
               <span class="chevron">&#x25BC;</span>

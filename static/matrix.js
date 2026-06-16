@@ -35,6 +35,7 @@
   let outputCells = [];             // [{ refresh }] OUTPUT-section cycle cells
   let vhsPresetName = null;         // currently applied VHS preset name (or null)
   let vhsPresetEls = null;          // { name, mod } spans on the VHS header
+  let masterMeterFill = null;       // master output level meter fill (live peak)
   let addColCells = [];             // every cell in the trailing add-layer column
   const cellIndex = new Map();      // "<colKey>|<paramKey>" -> cellInfo
   const collapsed = new Set();      // collapsed group names
@@ -71,6 +72,7 @@
   // Value access
   // =====================================================================
   function snapshotKey(def) {
+    if (def.snap) return def.snap; // explicit override (e.g. limiter → master_limiter)
     return def.key === 'clip' ? 'filename' : def.key;
   }
 
@@ -79,6 +81,9 @@
     if (col.kind === 'master') {
       // VHS params live under Master but read from the separate ntsc namespace.
       if (def.channels === 'ntsc') return msg.ntsc ? msg.ntsc[k] : undefined;
+      // Master audio bus reads top-level snapshot fields (master_volume /
+      // master_limiter), not the per-frame effects uniform block.
+      if (def.channels === 'master_audio') return msg[k];
       return msg.effects ? msg.effects[k] : undefined;
     }
     const layer = msg.layers && msg.layers[col.index];
@@ -100,6 +105,9 @@
   function setValueAction(col, def, value) {
     if (col.kind === 'master') {
       if (def.channels === 'ntsc') return { action: 'set_ntsc_param', param: def.key, value };
+      // Master volume/limiter have a dedicated action (App-level state, not the
+      // effects uniform), so they must NOT go through generic set_param.
+      if (def.channels === 'master_audio') return { action: 'set_master_audio_param', param: def.key, value };
       return { action: 'set_param', param: def.key, value };
     }
     return { action: 'set_layer_param', index: col.index, param: def.key, value };
@@ -313,6 +321,7 @@
     if (!group) return;
     group.params.forEach((def) => {
       if (!applies(def, 'layer')) return;
+      if (def.noRandom) return;
       if (def.ptype !== 'float' && def.ptype !== 'bipolar') return;
       const v = randInRange(def.min, def.max, def.step || 0.01);
       sendAction({ action: 'set_layer_param', index, param: def.key, value: v });
@@ -334,6 +343,7 @@
     masterRows = [];
     outputCells = [];
     vhsPresetEls = null;
+    masterMeterFill = null;
     masterGridEl.innerHTML = '';
     masterGridEl.style.setProperty('--mx-cols', 1);
 
@@ -405,6 +415,10 @@
         cellIndex.set(MASTER_COL.key + '|' + def.key, info);
         masterRows.push({ group: group.name, def, cell: info });
       });
+
+      // Live output level meter pinned under the AUDIO group (read-only peak,
+      // fed each frame from snapshot.meter — not an editable param row).
+      if (group.name === 'AUDIO') buildMasterMeterRow();
     });
 
     masterBuilt = true;
@@ -475,6 +489,26 @@
     outputCells.push({ refresh: () => { val.textContent = getText(); } });
   }
 
+  // Read-only master output meter: a label + a thin horizontal bar whose fill
+  // tracks the live peak level (0..1) broadcast in snapshot.meter.
+  function buildMasterMeterRow() {
+    const label = document.createElement('div');
+    label.className = 'mx-label';
+    label.textContent = 'meter';
+    masterGridEl.appendChild(label);
+
+    const cell = document.createElement('div');
+    cell.className = 'mx-cell mx-meter-cell';
+    const meter = document.createElement('div');
+    meter.className = 'audio-meter';
+    const fill = document.createElement('div');
+    fill.className = 'audio-meter-fill';
+    meter.appendChild(fill);
+    cell.appendChild(meter);
+    masterGridEl.appendChild(cell);
+    masterMeterFill = fill;
+  }
+
   // ---- Master group reset / randomize ---------------------------------------
   // Client-side, mirroring the layer band: reset writes each applicable master
   // param back to its schema default; randomize scatters numeric params in-range.
@@ -495,6 +529,7 @@
     if (!group) return;
     group.params.forEach((def) => {
       if (!applies(def, 'master')) return;
+      if (def.noRandom) return;
       if (def.ptype !== 'float' && def.ptype !== 'bipolar') return;
       const v = randInRange(def.min, def.max, def.step || 0.01);
       sendAction(setValueAction(MASTER_COL, def, v));
@@ -563,6 +598,10 @@
     const [autos, errors] = readAutos(msg, MASTER_COL);
     masterRows.forEach((r) => updateCell(r.cell, msg, autos, errors));
     outputCells.forEach((c) => c.refresh());
+    if (masterMeterFill) {
+      const m = Math.max(0, Math.min(1, msg.meter || 0));
+      masterMeterFill.style.width = (m * 100).toFixed(1) + '%';
+    }
     syncVhsModified(msg);
   }
 

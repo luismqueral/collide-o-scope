@@ -6,7 +6,7 @@ experiments/*/target
 /.claude/
 
 # Media + render output (large binaries, not source)
-/videos/
+/library/
 /renders/
 /test.mp4
 /experiments/headless-output/

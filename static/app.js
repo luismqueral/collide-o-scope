@@ -35,6 +35,7 @@ function connect() {
         syncNtsc(msg.ntsc);
         syncFramerate(msg.framerate);
         syncOutput(msg);
+        syncMasterAudio(msg);
         syncLayers(msg.layers);
         syncLibrary(msg.library);
         syncPatches(msg.patches || []);
@@ -226,6 +227,29 @@ const sendOutput = () => sendAction({
 ratioSel?.addEventListener('change', sendOutput);
 qualSel?.addEventListener('change', sendOutput);
 
+// --- Master audio bus (volume / limiter) ---
+// App-level state (NOT in the effects uniform block), so these route through
+// the dedicated set_master_audio_param action — never the generic set_param
+// loop above (which is why they use data-master-audio, not data-param).
+const masterVolRow = document.querySelector('[data-master-audio="master_volume"]');
+if (masterVolRow) {
+  const slider = masterVolRow.querySelector('input[type="range"]');
+  const valueEl = masterVolRow.querySelector('.value');
+  slider?.addEventListener('input', () => {
+    const v = parseFloat(slider.value);
+    if (valueEl) valueEl.textContent = formatValue(v, -60, 6, 1);
+    sendAction({ action: 'set_master_audio_param', param: 'master_volume', value: v });
+  });
+}
+const masterLimRow = document.querySelector('[data-master-audio="limiter"]');
+if (masterLimRow) {
+  const checkbox = masterLimRow.querySelector('input[type="checkbox"]');
+  checkbox?.addEventListener('change', () => {
+    sendAction({ action: 'set_master_audio_param', param: 'limiter', value: checkbox.checked });
+  });
+}
+const masterMeterFill = document.getElementById('master-meter-fill');
+
 // Idempotent sync from server. Skip a control while it's focused so we don't
 // fight the user mid-selection. Stores dims for the export modal.
 function syncOutput(msg) {
@@ -241,6 +265,27 @@ function syncOutput(msg) {
   const d = document.getElementById('export-resolution-display');
   if (d && msg.output_width && msg.output_height) {
     d.textContent = `${msg.output_width}×${msg.output_height}`;
+  }
+}
+
+// --- Sync master audio bus (volume / limiter / live meter) from server ---
+function syncMasterAudio(msg) {
+  if (!msg) return;
+  if (masterVolRow && msg.master_volume != null) {
+    const slider = masterVolRow.querySelector('input[type="range"]');
+    const valueEl = masterVolRow.querySelector('.value');
+    if (slider && document.activeElement !== slider) {
+      slider.value = msg.master_volume;
+      if (valueEl) valueEl.textContent = formatValue(msg.master_volume, -60, 6, 1);
+    }
+  }
+  if (masterLimRow && msg.master_limiter != null) {
+    const checkbox = masterLimRow.querySelector('input[type="checkbox"]');
+    if (checkbox) checkbox.checked = !!msg.master_limiter;
+  }
+  if (masterMeterFill) {
+    const m = Math.max(0, Math.min(1, msg.meter || 0));
+    masterMeterFill.style.width = (m * 100).toFixed(1) + '%';
   }
 }
 
@@ -826,6 +871,30 @@ function createLayerCard(layer, index) {
         </div>
       </div>
 
+      <div class="fx-group collapsed" data-layer-group="audio">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">AUDIO</span>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
+        </div>
+        <div class="fx-group-body">
+          <div class="param-row toggle-row" data-param="mute">
+            <label>Mute</label>
+            <label class="toggle"><input type="checkbox" ${layer.mute ? 'checked' : ''}><span class="toggle-slider"></span></label>
+          </div>
+          <div class="param-row" data-param="volume">
+            <label>Volume</label>
+            <input type="range" min="-60" max="6" step="1" value="${layer.volume}">
+            <span class="value">${formatValue(layer.volume, -60, 6, 1)}</span>
+          </div>
+          <div class="param-row" data-param="pan">
+            <label>Pan</label>
+            <input type="range" min="-1" max="1" step="0.05" value="${layer.pan}">
+            <span class="value">${formatValue(layer.pan, -1, 1, 0.05)}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="fx-group collapsed" data-layer-group="color">
         <div class="fx-group-header">
           <span class="chevron">&#x25BC;</span>
@@ -1147,6 +1216,10 @@ function createLayerCard(layer, index) {
     const slider = row.querySelector('input[type="range"]');
     const valueEl = row.querySelector('.value');
     if (!slider || !valueEl) return; // numeric rows only (skip selects/toggles/color)
+    // Audio levels (volume/pan) aren't automatable — the engine has no
+    // set_by_name arm for them — so skip the click-to-type editor + ƒ launcher.
+    // The slider stays live via the delegated input listener.
+    if (param === 'volume' || param === 'pan') return;
 
     const liveIndex = () => parseInt(card.dataset.index);
 
