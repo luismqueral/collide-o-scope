@@ -458,6 +458,36 @@ impl App {
                                 layer.audio.pan = (v as f32).clamp(-1.0, 1.0);
                             }
                         }
+                        "eq_low" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.audio.eq_low = (v as f32).clamp(-24.0, 12.0);
+                            }
+                        }
+                        "eq_mid" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.audio.eq_mid = (v as f32).clamp(-24.0, 12.0);
+                            }
+                        }
+                        "eq_high" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.audio.eq_high = (v as f32).clamp(-24.0, 12.0);
+                            }
+                        }
+                        "delay_time" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.audio.delay_time = (v as f32).clamp(0.0, 1000.0);
+                            }
+                        }
+                        "delay_feedback" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.audio.delay_feedback = (v as f32).clamp(0.0, 0.95);
+                            }
+                        }
+                        "delay_mix" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.audio.delay_mix = (v as f32).clamp(0.0, 1.0);
+                            }
+                        }
                         "hue_shift" => {
                             if let Some(v) = value.as_f64() {
                                 layer.effects.hue_shift = (v as f32).clamp(-180.0, 180.0);
@@ -704,7 +734,8 @@ impl App {
                     if let Some(audio) = &self.audio {
                         let id = self.layers[index].id;
                         match param.as_str() {
-                            "mute" | "volume" | "pan" => {
+                            "mute" | "volume" | "pan" | "eq_low" | "eq_mid" | "eq_high"
+                            | "delay_time" | "delay_feedback" | "delay_mix" => {
                                 audio.set_params(id, self.layers[index].audio)
                             }
                             "speed" => audio.set_speed(id, self.layers[index].speed),
@@ -724,7 +755,19 @@ impl App {
                             layer.blend_mode = crate::layers::BlendMode::Normal;
                         }
                         "audio" => {
-                            layer.audio = crate::audio::AudioParams::default();
+                            // Only the mixer-channel params; Audio FX (eq/delay)
+                            // is a separate group ("audiofx") so it survives.
+                            layer.audio.mute = false;
+                            layer.audio.volume = 0.0;
+                            layer.audio.pan = 0.0;
+                        }
+                        "audiofx" => {
+                            layer.audio.eq_low = 0.0;
+                            layer.audio.eq_mid = 0.0;
+                            layer.audio.eq_high = 0.0;
+                            layer.audio.delay_time = 0.0;
+                            layer.audio.delay_feedback = 0.0;
+                            layer.audio.delay_mix = 0.0;
                         }
                         "color" => {
                             layer.effects.hue_shift = d.hue_shift;
@@ -797,7 +840,9 @@ impl App {
                     if let Some(audio) = &self.audio {
                         let id = self.layers[index].id;
                         match group.as_str() {
-                            "audio" => audio.set_params(id, self.layers[index].audio),
+                            "audio" | "audiofx" => {
+                                audio.set_params(id, self.layers[index].audio)
+                            }
                             "blend" => audio.set_speed(id, self.layers[index].speed),
                             _ => {}
                         }
@@ -1115,6 +1160,12 @@ impl App {
                 mute: l.audio.mute,
                 volume: l.audio.volume,
                 pan: l.audio.pan,
+                eq_low: l.audio.eq_low,
+                eq_mid: l.audio.eq_mid,
+                eq_high: l.audio.eq_high,
+                delay_time: l.audio.delay_time,
+                delay_feedback: l.audio.delay_feedback,
+                delay_mix: l.audio.delay_mix,
                 hue_shift: l.effects.hue_shift,
                 saturation: l.effects.saturation,
                 brightness: l.effects.brightness,

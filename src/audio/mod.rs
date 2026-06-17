@@ -25,6 +25,7 @@
 //! standalone audio files (Phase 3) come later.
 
 mod decoder;
+mod dsp;
 mod output;
 
 use std::collections::VecDeque;
@@ -35,6 +36,7 @@ use std::thread;
 use std::time::Duration;
 
 use decoder::AudioDecoder;
+use dsp::LayerDsp;
 use output::MasterControls;
 
 /// dB floor: at or below this a layer (or the master) is fully silent rather
@@ -52,6 +54,14 @@ pub struct AudioParams {
     pub mute: bool,
     pub volume: f32, // dB, −60..+6 (0 = unity)
     pub pan: f32,    // −1 (L) .. 0 (C) .. +1 (R)
+    // Phase 2 — Audio FX. Fixed 3-band EQ (shelves + mid peak), dB gains.
+    pub eq_low: f32,  // −24..+12 dB (120 Hz low-shelf)
+    pub eq_mid: f32,  // −24..+12 dB (1 kHz peak)
+    pub eq_high: f32, // −24..+12 dB (6 kHz high-shelf)
+    // Tap delay.
+    pub delay_time: f32,     // 0..1000 ms (0 = bypass)
+    pub delay_feedback: f32, // 0..0.95
+    pub delay_mix: f32,      // 0..1 (dry↔wet)
 }
 
 impl Default for AudioParams {
@@ -60,6 +70,12 @@ impl Default for AudioParams {
             mute: false,
             volume: 0.0,
             pan: 0.0,
+            eq_low: 0.0,
+            eq_mid: 0.0,
+            eq_high: 0.0,
+            delay_time: 0.0,
+            delay_feedback: 0.0,
+            delay_mix: 0.0,
         }
     }
 }
@@ -115,6 +131,8 @@ struct LayerSource {
     /// Fractional read position in *frames*, normalised to [0, 1) each frame by
     /// dropping consumed frames off the FIFO front.
     read_pos: f64,
+    /// Per-layer Audio FX state (EQ + delay), one slot per output channel.
+    dsp: LayerDsp,
     /// Decoder hit an unrecoverable error — go silent but stay addressable so
     /// the layer can still be removed / clip-swapped by id.
     dead: bool,
@@ -167,6 +185,11 @@ impl LayerSource {
         let (lg, rg) = equal_power_pan(self.params.pan);
         let step = self.speed.max(0.0) as f64;
 
+        // Refresh EQ coefficients / delay settings once per block (cheap unless
+        // an EQ gain actually changed). DSP runs even when muted so the delay
+        // tail stays time-aligned; gain=0 is applied *after* it.
+        self.dsp.update_params(&self.params);
+
         for f in 0..frames {
             // Drop frames we've advanced past so read_pos stays in [0, 1) and
             // the FIFO front is always our interpolation base.
@@ -206,7 +229,9 @@ impl LayerSource {
                 } else {
                     s0 // last frame: hold rather than interpolate into nothing
                 };
-                let mut v = (s0 + (s1 - s0) * frac) * gain;
+                // interpolate → Audio FX (EQ + delay) → gain → pan
+                let interp = s0 + (s1 - s0) * frac;
+                let mut v = self.dsp.process(c, interp) * gain;
                 if ch >= 2 {
                     if c == 0 {
                         v *= lg;
@@ -403,6 +428,7 @@ fn apply_command(
                     paused: false,
                     fifo: VecDeque::new(),
                     read_pos: 0.0,
+                    dsp: LayerDsp::new(out_rate, out_channels),
                     dead: false,
                 }),
                 // No audio stream (image / silent clip) is normal — stay silent.
@@ -418,6 +444,7 @@ fn apply_command(
                         src.decoder = decoder;
                         src.fifo.clear();
                         src.read_pos = 0.0;
+                        src.dsp.reset();
                         src.dead = false;
                     }
                     Err(e) => {
@@ -425,6 +452,7 @@ fn apply_command(
                         eprintln!("audio: clip swap {path} has no audio: {e}");
                         src.fifo.clear();
                         src.read_pos = 0.0;
+                        src.dsp.reset();
                         src.dead = true;
                     }
                 }

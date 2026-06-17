@@ -305,9 +305,12 @@
     rebuildNav();
   }
 
-  // Matrix group name -> reset_layer_group key (LAYER is stored as "blend").
+  // Matrix group name -> reset_layer_group key (LAYER is stored as "blend",
+  // "AUDIO FX" as "audiofx" — the backend keys have no spaces).
   function resetGroupKey(name) {
-    return name === 'LAYER' ? 'blend' : name.toLowerCase();
+    if (name === 'LAYER') return 'blend';
+    if (name === 'AUDIO FX') return 'audiofx';
+    return name.toLowerCase();
   }
 
   function resetLayerGroup(groupName, index) {

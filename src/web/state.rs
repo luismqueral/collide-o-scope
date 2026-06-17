@@ -269,6 +269,19 @@ pub struct LayerSnapshot {
     pub volume: f32,
     #[serde(default)]
     pub pan: f32,
+    // Per-layer audio FX (3-band EQ + tap delay)
+    #[serde(default)]
+    pub eq_low: f32,
+    #[serde(default)]
+    pub eq_mid: f32,
+    #[serde(default)]
+    pub eq_high: f32,
+    #[serde(default)]
+    pub delay_time: f32,
+    #[serde(default)]
+    pub delay_feedback: f32,
+    #[serde(default)]
+    pub delay_mix: f32,
     // Per-layer effects (color)
     pub hue_shift: f32,
     pub saturation: f32,

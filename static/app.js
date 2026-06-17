@@ -895,6 +895,46 @@ function createLayerCard(layer, index) {
         </div>
       </div>
 
+      <div class="fx-group collapsed" data-layer-group="audiofx">
+        <div class="fx-group-header">
+          <span class="chevron">&#x25BC;</span>
+          <span class="group-label">AUDIO FX</span>
+          <button class="layer-fx-reset" title="Reset group">reset</button>
+        </div>
+        <div class="fx-group-body">
+          <div class="param-row" data-param="eq_low">
+            <label>EQ Low</label>
+            <input type="range" min="-24" max="12" step="1" value="${layer.eq_low}">
+            <span class="value">${formatValue(layer.eq_low, -24, 12, 1)}</span>
+          </div>
+          <div class="param-row" data-param="eq_mid">
+            <label>EQ Mid</label>
+            <input type="range" min="-24" max="12" step="1" value="${layer.eq_mid}">
+            <span class="value">${formatValue(layer.eq_mid, -24, 12, 1)}</span>
+          </div>
+          <div class="param-row" data-param="eq_high">
+            <label>EQ High</label>
+            <input type="range" min="-24" max="12" step="1" value="${layer.eq_high}">
+            <span class="value">${formatValue(layer.eq_high, -24, 12, 1)}</span>
+          </div>
+          <div class="param-row" data-param="delay_time">
+            <label>Delay</label>
+            <input type="range" min="0" max="1000" step="10" value="${layer.delay_time}">
+            <span class="value">${formatValue(layer.delay_time, 0, 1000, 10)}</span>
+          </div>
+          <div class="param-row" data-param="delay_feedback">
+            <label>Feedback</label>
+            <input type="range" min="0" max="0.95" step="0.05" value="${layer.delay_feedback}">
+            <span class="value">${formatValue(layer.delay_feedback, 0, 0.95, 0.05)}</span>
+          </div>
+          <div class="param-row" data-param="delay_mix">
+            <label>Mix</label>
+            <input type="range" min="0" max="1" step="0.05" value="${layer.delay_mix}">
+            <span class="value">${formatValue(layer.delay_mix, 0, 1, 0.05)}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="fx-group collapsed" data-layer-group="color">
         <div class="fx-group-header">
           <span class="chevron">&#x25BC;</span>
@@ -1216,10 +1256,12 @@ function createLayerCard(layer, index) {
     const slider = row.querySelector('input[type="range"]');
     const valueEl = row.querySelector('.value');
     if (!slider || !valueEl) return; // numeric rows only (skip selects/toggles/color)
-    // Audio levels (volume/pan) aren't automatable — the engine has no
-    // set_by_name arm for them — so skip the click-to-type editor + ƒ launcher.
-    // The slider stays live via the delegated input listener.
-    if (param === 'volume' || param === 'pan') return;
+    // Audio params (mixer levels + Audio FX) aren't automatable — the engine
+    // has no set_by_name arm for them — so skip the click-to-type editor + ƒ
+    // launcher. The slider stays live via the delegated input listener.
+    if (param === 'volume' || param === 'pan'
+      || param === 'eq_low' || param === 'eq_mid' || param === 'eq_high'
+      || param === 'delay_time' || param === 'delay_feedback' || param === 'delay_mix') return;
 
     const liveIndex = () => parseInt(card.dataset.index);
 

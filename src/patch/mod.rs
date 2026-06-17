@@ -61,6 +61,12 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
         "fps" => Some(ParamMeta { step: 1.0, min: 1.0, max: 60.0, desc: "decode frame rate" }),
         "volume" => Some(ParamMeta { step: 1.0, min: -60.0, max: 6.0, desc: "audio level dB (0=unity)" }),
         "pan" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "stereo pan (-1=L 1=R)" }),
+        "eq_low" => Some(ParamMeta { step: 1.0, min: -24.0, max: 12.0, desc: "low shelf dB (120Hz)" }),
+        "eq_mid" => Some(ParamMeta { step: 1.0, min: -24.0, max: 12.0, desc: "mid peak dB (1kHz)" }),
+        "eq_high" => Some(ParamMeta { step: 1.0, min: -24.0, max: 12.0, desc: "high shelf dB (6kHz)" }),
+        "delay_time" => Some(ParamMeta { step: 10.0, min: 0.0, max: 1000.0, desc: "delay time ms (0=off)" }),
+        "delay_feedback" => Some(ParamMeta { step: 0.05, min: 0.0, max: 0.95, desc: "delay regeneration" }),
+        "delay_mix" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "delay dry/wet" }),
         "wave_amp" => Some(ParamMeta { step: 0.005, min: 0.0, max: 0.1, desc: "wave displacement" }),
         "wave_freq" => Some(ParamMeta { step: 1.0, min: 0.0, max: 50.0, desc: "wave cycles" }),
         "wave_speed" => Some(ParamMeta { step: 0.5, min: 0.0, max: 10.0, desc: "wave scroll speed" }),
@@ -265,6 +271,20 @@ pub struct LayerConfig {
     pub volume: f32,
     #[serde(default)]
     pub pan: f32,
+    // Per-layer Audio FX (3-band EQ + tap delay); all default to 0 (no effect)
+    // so patches saved before Phase 2 load unchanged.
+    #[serde(default)]
+    pub eq_low: f32,
+    #[serde(default)]
+    pub eq_mid: f32,
+    #[serde(default)]
+    pub eq_high: f32,
+    #[serde(default)]
+    pub delay_time: f32,
+    #[serde(default)]
+    pub delay_feedback: f32,
+    #[serde(default)]
+    pub delay_mix: f32,
 }
 
 fn default_blend() -> String {
@@ -787,6 +807,12 @@ impl LayerConfig {
             mute: layer.audio.mute,
             volume: layer.audio.volume,
             pan: layer.audio.pan,
+            eq_low: layer.audio.eq_low,
+            eq_mid: layer.audio.eq_mid,
+            eq_high: layer.audio.eq_high,
+            delay_time: layer.audio.delay_time,
+            delay_feedback: layer.audio.delay_feedback,
+            delay_mix: layer.audio.delay_mix,
         }
     }
 
@@ -809,6 +835,12 @@ impl LayerConfig {
         layer.audio.mute = self.mute;
         layer.audio.volume = self.volume.clamp(-60.0, 6.0);
         layer.audio.pan = self.pan.clamp(-1.0, 1.0);
+        layer.audio.eq_low = self.eq_low.clamp(-24.0, 12.0);
+        layer.audio.eq_mid = self.eq_mid.clamp(-24.0, 12.0);
+        layer.audio.eq_high = self.eq_high.clamp(-24.0, 12.0);
+        layer.audio.delay_time = self.delay_time.clamp(0.0, 1000.0);
+        layer.audio.delay_feedback = self.delay_feedback.clamp(0.0, 0.95);
+        layer.audio.delay_mix = self.delay_mix.clamp(0.0, 1.0);
         // Recompile saved automation expressions into the layer.
         layer.automations.clear();
         layer.automation_errors.clear();
@@ -833,6 +865,12 @@ impl LayerConfig {
             ("mute", format!("{}", self.mute)),
             ("volume", format!("{:.1}", self.volume)),
             ("pan", format!("{:.2}", self.pan)),
+            ("eq_low", format!("{:.1}", self.eq_low)),
+            ("eq_mid", format!("{:.1}", self.eq_mid)),
+            ("eq_high", format!("{:.1}", self.eq_high)),
+            ("delay_time", format!("{:.0}", self.delay_time)),
+            ("delay_feedback", format!("{:.2}", self.delay_feedback)),
+            ("delay_mix", format!("{:.2}", self.delay_mix)),
         ]
     }
 
@@ -848,6 +886,12 @@ impl LayerConfig {
             "mute" => { if let Ok(v) = value.parse() { self.mute = v; return true; } }
             "volume" => { if let Ok(v) = value.parse() { self.volume = v; return true; } }
             "pan" => { if let Ok(v) = value.parse() { self.pan = v; return true; } }
+            "eq_low" => { if let Ok(v) = value.parse() { self.eq_low = v; return true; } }
+            "eq_mid" => { if let Ok(v) = value.parse() { self.eq_mid = v; return true; } }
+            "eq_high" => { if let Ok(v) = value.parse() { self.eq_high = v; return true; } }
+            "delay_time" => { if let Ok(v) = value.parse() { self.delay_time = v; return true; } }
+            "delay_feedback" => { if let Ok(v) = value.parse() { self.delay_feedback = v; return true; } }
+            "delay_mix" => { if let Ok(v) = value.parse() { self.delay_mix = v; return true; } }
             _ => {}
         }
         false

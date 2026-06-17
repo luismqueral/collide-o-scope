@@ -150,6 +150,20 @@ const MATRIX_GROUPS = [
     ],
   },
   {
+    name: 'AUDIO FX',
+    params: [
+      // Per-layer audio FX: fixed 3-band EQ (dB) + tap delay. Route through the
+      // standard set_layer_param path (keys match LayerSnapshot fields). Audio is
+      // not automatable and noRandom keeps the dice off it.
+      { key: 'eq_low', label: 'eq low', ptype: 'bipolar', min: -24, max: 12, step: 1, def: 0, automatable: false, noRandom: true, channels: 'layer' },
+      { key: 'eq_mid', label: 'eq mid', ptype: 'bipolar', min: -24, max: 12, step: 1, def: 0, automatable: false, noRandom: true, channels: 'layer' },
+      { key: 'eq_high', label: 'eq high', ptype: 'bipolar', min: -24, max: 12, step: 1, def: 0, automatable: false, noRandom: true, channels: 'layer' },
+      { key: 'delay_time', label: 'delay ms', ptype: 'float', min: 0, max: 1000, step: 10, def: 0, automatable: false, noRandom: true, channels: 'layer' },
+      { key: 'delay_feedback', label: 'delay fb', ptype: 'float', min: 0, max: 0.95, step: 0.05, def: 0, automatable: false, noRandom: true, channels: 'layer' },
+      { key: 'delay_mix', label: 'delay mix', ptype: 'float', min: 0, max: 1, step: 0.05, def: 0, automatable: false, noRandom: true, channels: 'layer' },
+    ],
+  },
+  {
     name: 'VHS/NTSC',
     params: [
       { key: 'enabled', label: 'vhs on', ptype: 'bool', def: false, automatable: false, channels: 'ntsc' },
