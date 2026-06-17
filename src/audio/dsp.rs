@@ -32,6 +32,12 @@ const MID_Q: f32 = 0.9;
 /// Shelf slope S (1.0 = max slope with no overshoot) for the RBJ shelves.
 const SHELF_S: f32 = 1.0;
 
+/// One-pole smoothing time-constants (seconds) for click-free delay moves.
+/// The tap length glides slowly (tape-style pitch slide when you sweep the
+/// time); the wet level ramps quickly (clean fade when enabling/disabling).
+const DELAY_GLIDE_SECS: f32 = 0.03;
+const WET_GLIDE_SECS: f32 = 0.008;
+
 /// Direct Form I biquad: `y = b0·x + b1·x1 + b2·x2 − a1·y1 − a2·y2`
 /// (coefficients pre-normalised by a0). History is kept across coefficient
 /// swaps so a live gain tweak doesn't click.
@@ -101,6 +107,11 @@ struct ChannelDsp {
     /// Delay ring buffer (device-rate samples, sized for `MAX_DELAY_MS`).
     delay: Vec<f32>,
     delay_pos: usize,
+    /// Smoothed read-tap length in samples (fractional); glides toward the
+    /// target so sweeping the time slides instead of jumping → no click.
+    delay_cur: f32,
+    /// Smoothed wet amount (ramps on/off and tracks mix) to avoid level pops.
+    wet_cur: f32,
 }
 
 impl ChannelDsp {
@@ -112,6 +123,8 @@ impl ChannelDsp {
             high: Biquad::identity(),
             delay: vec![0.0; max_samples.max(1)],
             delay_pos: 0,
+            delay_cur: 0.0,
+            wet_cur: 0.0,
         }
     }
 
@@ -123,6 +136,8 @@ impl ChannelDsp {
             *s = 0.0;
         }
         self.delay_pos = 0;
+        self.delay_cur = 0.0;
+        self.wet_cur = 0.0;
     }
 }
 
@@ -137,14 +152,19 @@ pub struct LayerDsp {
     cached_eq_high: f32,
     coeffs_ready: bool,
     // Cached delay params, refreshed every update_params (cheap to copy).
-    delay_samples: usize,
+    // `delay_target` is fractional samples; per-channel `delay_cur` glides to it.
+    delay_target: f32,
     delay_feedback: f32,
     delay_mix: f32,
+    // Per-sample one-pole glide coefficients (derived from the rate once).
+    delay_glide: f32,
+    wet_glide: f32,
 }
 
 impl LayerDsp {
     pub fn new(rate: u32, channels: u16) -> Self {
         let chans = channels.max(1) as usize;
+        let fs = rate as f32;
         Self {
             rate,
             channels: (0..chans).map(|_| ChannelDsp::new(rate)).collect(),
@@ -152,9 +172,11 @@ impl LayerDsp {
             cached_eq_mid: 0.0,
             cached_eq_high: 0.0,
             coeffs_ready: false,
-            delay_samples: 0,
+            delay_target: 0.0,
             delay_feedback: 0.0,
             delay_mix: 0.0,
+            delay_glide: 1.0 - (-1.0 / (DELAY_GLIDE_SECS * fs)).exp(),
+            wet_glide: 1.0 - (-1.0 / (WET_GLIDE_SECS * fs)).exp(),
         }
     }
 
@@ -182,7 +204,7 @@ impl LayerDsp {
         }
 
         let ms = p.delay_time.clamp(0.0, MAX_DELAY_MS);
-        self.delay_samples = ((ms / 1000.0) * self.rate as f32).round() as usize;
+        self.delay_target = (ms / 1000.0) * self.rate as f32;
         self.delay_feedback = p.delay_feedback.clamp(0.0, 0.95);
         self.delay_mix = p.delay_mix.clamp(0.0, 1.0);
     }
@@ -190,9 +212,11 @@ impl LayerDsp {
     /// Process one sample for `ch` through EQ then the tap delay.
     #[inline]
     pub fn process(&mut self, ch: usize, x: f32) -> f32 {
-        let delay_samples = self.delay_samples;
+        let target = self.delay_target;
         let feedback = self.delay_feedback;
         let mix = self.delay_mix;
+        let delay_glide = self.delay_glide;
+        let wet_glide = self.wet_glide;
 
         let c = &mut self.channels[ch];
         // EQ: cascade the three shelves/peak.
@@ -200,17 +224,34 @@ impl LayerDsp {
         s = c.mid.process(s);
         s = c.high.process(s);
 
-        // Tap delay. delay_samples == 0 means "no delay configured" → bypass
-        // entirely (and leave the ring alone). Whenever a time is set we keep the
-        // ring coherent even at mix 0 so the tail doesn't pop when it's raised.
-        if delay_samples == 0 {
+        // If we were fully dry (delay effectively off), jump the tap straight to
+        // the target so a fresh enable fades in *at* the chosen time instead of
+        // sweeping up from zero. Then glide the tap (tape-style) toward the
+        // target and ramp the wet level — both per-sample so moving the slider
+        // slides rather than clicks.
+        if c.wet_cur < 1.0e-4 {
+            c.delay_cur = target;
+        }
+        c.delay_cur += (target - c.delay_cur) * delay_glide;
+        let wet_target = if target > 0.0 { mix } else { 0.0 };
+        c.wet_cur += (wet_target - c.wet_cur) * wet_glide;
+
+        // Settled fully dry with no delay configured → bypass, leave ring idle.
+        if c.wet_cur < 1.0e-4 && target <= 0.0 {
             return s;
         }
+
+        // Fractional read tap: linear-interpolate between the two ring samples
+        // straddling `delay_cur` samples back from the write head.
         let len = c.delay.len();
-        let d = delay_samples.min(len - 1);
-        let read_idx = (c.delay_pos + len - d) % len;
-        let delayed = c.delay[read_idx];
-        let out = s * (1.0 - mix) + delayed * mix;
+        let d = c.delay_cur.clamp(1.0, (len - 1) as f32);
+        let di = d.floor();
+        let frac = d - di;
+        let i0 = (c.delay_pos + len - di as usize) % len; // newer neighbour
+        let i1 = (i0 + len - 1) % len; // one sample older
+        let delayed = c.delay[i0] + (c.delay[i1] - c.delay[i0]) * frac;
+
+        let out = s * (1.0 - c.wet_cur) + delayed * c.wet_cur;
         c.delay[c.delay_pos] = s + delayed * feedback;
         c.delay_pos = (c.delay_pos + 1) % len;
         out
