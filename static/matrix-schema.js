@@ -212,9 +212,9 @@ function CHANNEL_APPLIES(def, colKind) {
 //   - KEY → COLOR KEY. SHIFT split into SLICE / BLOCKS / GLITCH. shift_chroma → COLOR.
 const LAYER_GROUPS = [
   { name: 'SOURCE',    keys: ['clip', 'speed', 'fps', 'paused'] },
-  { name: 'BLEND',     keys: ['opacity', 'blend_mode', 'visible'] },
   { name: 'AUDIO',     keys: ['mute', 'volume', 'pan'] },
   { name: 'AUDIO FX',  keys: ['eq_low', 'eq_mid', 'eq_high', 'delay_time', 'delay_feedback', 'delay_mix'] },
+  { name: 'BLEND',     keys: ['opacity', 'blend_mode', 'visible'] },
   { name: 'TRANSFORM', keys: ['layer_x', 'layer_y', 'layer_scale', 'fit_mode'] },
   { name: 'WARP',      keys: ['wave_amp', 'wave_freq', 'wave_speed', 'wave_axis', 'swirl_angle', 'swirl_radius', 'bulge_strength', 'bulge_radius', 'pixelate'] },
   { name: 'COLOR',     keys: ['hue_shift', 'saturation', 'brightness', 'contrast', 'invert', 'posterize', 'shift_chroma', 'rgb_split'] },
