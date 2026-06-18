@@ -370,9 +370,7 @@ impl AudioEngine {
 
     /// Freeze/unfreeze the whole mix (master pause).
     pub fn set_master_paused(&self, paused: bool) {
-        let _ = self
-            .cmd_tx
-            .send(AudioCommand::SetMasterPaused { paused });
+        let _ = self.cmd_tx.send(AudioCommand::SetMasterPaused { paused });
     }
 
     /// Set master volume in dB (instant — written straight to the callback's
@@ -423,7 +421,13 @@ fn mixer_loop(
         // Drain all pending commands (non-blocking).
         loop {
             match cmd_rx.try_recv() {
-                Ok(cmd) => apply_command(cmd, &mut sources, &mut master_paused, out_rate, out_channels),
+                Ok(cmd) => apply_command(
+                    cmd,
+                    &mut sources,
+                    &mut master_paused,
+                    out_rate,
+                    out_channels,
+                ),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return, // engine dropped → exit
             }
@@ -520,5 +524,69 @@ fn apply_command(
             }
         }
         AudioCommand::SetMasterPaused { paused } => *master_paused = paused,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    #[test]
+    fn db_to_gain_reference_points() {
+        assert_abs_diff_eq!(db_to_gain(0.0), 1.0, epsilon = 1e-6); // unity
+        assert_abs_diff_eq!(db_to_gain(-6.0), 0.5012, epsilon = 1e-3); // ≈ half amplitude
+        assert_abs_diff_eq!(db_to_gain(6.0), 1.9953, epsilon = 1e-3); // ≈ +6 dB
+    }
+
+    #[test]
+    fn db_to_gain_floors_to_silence() {
+        // At or below the floor it is *exactly* zero, not a tiny trickle.
+        assert_eq!(db_to_gain(DB_FLOOR), 0.0);
+        assert_eq!(db_to_gain(-60.0), 0.0);
+        assert_eq!(db_to_gain(-120.0), 0.0);
+    }
+
+    #[test]
+    fn equal_power_pan_center_and_hard_sides() {
+        let (l, r) = equal_power_pan(0.0);
+        assert_abs_diff_eq!(l, std::f32::consts::FRAC_1_SQRT_2, epsilon = 1e-6);
+        assert_abs_diff_eq!(r, std::f32::consts::FRAC_1_SQRT_2, epsilon = 1e-6);
+
+        let (l, r) = equal_power_pan(-1.0); // hard left
+        assert_abs_diff_eq!(l, 1.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(r, 0.0, epsilon = 1e-6);
+
+        let (l, r) = equal_power_pan(1.0); // hard right
+        assert_abs_diff_eq!(l, 0.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(r, 1.0, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn equal_power_pan_clamps_and_conserves_power() {
+        // Out-of-range pan is clamped to the hard-side result.
+        assert_eq!(equal_power_pan(5.0), equal_power_pan(1.0));
+        assert_eq!(equal_power_pan(-5.0), equal_power_pan(-1.0));
+        // Equal-power: l² + r² ≈ 1 across the sweep (loudness preserved).
+        let mut p = -1.0f32;
+        while p <= 1.0 {
+            let (l, r) = equal_power_pan(p);
+            assert_abs_diff_eq!(l * l + r * r, 1.0, epsilon = 1e-5);
+            p += 0.1;
+        }
+    }
+
+    #[test]
+    fn audio_params_default_is_neutral() {
+        let p = AudioParams::default();
+        assert!(!p.mute);
+        assert_eq!(p.volume, 0.0);
+        assert_eq!(p.pan, 0.0);
+        assert_eq!(p.eq_low, 0.0);
+        assert_eq!(p.eq_mid, 0.0);
+        assert_eq!(p.eq_high, 0.0);
+        assert_eq!(p.delay_time, 0.0);
+        assert_eq!(p.delay_feedback, 0.0);
+        assert_eq!(p.delay_mix, 0.0);
     }
 }

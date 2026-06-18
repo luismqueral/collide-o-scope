@@ -27,6 +27,9 @@ mod renderer;
 mod video;
 mod web;
 
+#[cfg(test)]
+mod test_support;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -75,9 +78,21 @@ pub fn fit_scale(mode: f32, sw: f32, sh: f32, dw: f32, dh: f32) -> (f32, f32) {
     }
     let r = (sw / sh) / (dw / dh); // source aspect / canvas aspect
     match mode.round() as i32 {
-        1 => if r > 1.0 { (1.0, r) } else { (1.0 / r, 1.0) }, // contain
-        2 => if r > 1.0 { (1.0 / r, 1.0) } else { (1.0, r) }, // cover
-        _ => (1.0, 1.0),                                      // stretch
+        1 => {
+            if r > 1.0 {
+                (1.0, r)
+            } else {
+                (1.0 / r, 1.0)
+            }
+        } // contain
+        2 => {
+            if r > 1.0 {
+                (1.0 / r, 1.0)
+            } else {
+                (1.0, r)
+            }
+        } // cover
+        _ => (1.0, 1.0), // stretch
     }
 }
 
@@ -149,7 +164,11 @@ struct App {
 }
 
 impl App {
-    fn new(initial_video: Option<String>, library_folder: Option<PathBuf>, web_state: Arc<WebState>) -> Self {
+    fn new(
+        initial_video: Option<String>,
+        library_folder: Option<PathBuf>,
+        web_state: Arc<WebState>,
+    ) -> Self {
         let library_files = library_folder
             .as_ref()
             .map(|f| scan_folder(f))
@@ -273,7 +292,8 @@ impl App {
                 if let Some(path) = self.library_files.iter().find(|p| {
                     p.file_name()
                         .map(|n| n.to_string_lossy().to_string())
-                        .as_deref() == Some(&filename)
+                        .as_deref()
+                        == Some(&filename)
                 }) {
                     let path_str = path.to_string_lossy().to_string();
                     self.add_layer(&path_str);
@@ -415,7 +435,11 @@ impl App {
                     _ => {}
                 }
             }
-            WebAction::SetLayerParam { index, param, value } => {
+            WebAction::SetLayerParam {
+                index,
+                param,
+                value,
+            } => {
                 if index < self.layers.len() {
                     let layer = &mut self.layers[index];
                     match param.as_str() {
@@ -548,7 +572,8 @@ impl App {
                             if let Some(v) = value.as_f64() {
                                 layer.effects.wave_axis = (v as f32).clamp(0.0, 2.0);
                             } else if let Some(s) = value.as_str() {
-                                layer.effects.wave_axis = s.parse::<f32>().unwrap_or(0.0).clamp(0.0, 2.0);
+                                layer.effects.wave_axis =
+                                    s.parse::<f32>().unwrap_or(0.0).clamp(0.0, 2.0);
                             }
                         }
                         "swirl_angle" => {
@@ -854,9 +879,7 @@ impl App {
                     if let Some(audio) = &self.audio {
                         let id = self.layers[index].id;
                         match group.as_str() {
-                            "audio" | "audiofx" => {
-                                audio.set_params(id, self.layers[index].audio)
-                            }
+                            "audio" | "audiofx" => audio.set_params(id, self.layers[index].audio),
                             "source" => audio.set_speed(id, self.layers[index].speed),
                             _ => {}
                         }
@@ -886,7 +909,13 @@ impl App {
                 }
                 _ => {}
             },
-            WebAction::StartExport { width, height, fps, duration_secs, match_preview } => {
+            WebAction::StartExport {
+                width,
+                height,
+                fps,
+                duration_secs,
+                match_preview,
+            } => {
                 if self.export_job.is_none() || self.export_job.as_ref().unwrap().is_done() {
                     let patch = patch::PatchState::capture(
                         &self.master_effects,
@@ -901,7 +930,9 @@ impl App {
                         .unwrap_or_default()
                         .as_secs();
                     let timestamp = now;
-                    let output_dir = self.library_folder.as_ref()
+                    let output_dir = self
+                        .library_folder
+                        .as_ref()
                         .map(|f| f.parent().unwrap_or(f).join("renders"))
                         .unwrap_or_else(|| std::path::PathBuf::from("renders"));
                     let output_path = format!(
@@ -909,7 +940,9 @@ impl App {
                         output_dir.display(),
                         timestamp
                     );
-                    let lib_folder = self.library_folder.as_ref()
+                    let lib_folder = self
+                        .library_folder
+                        .as_ref()
                         .map(|f| f.to_string_lossy().to_string())
                         .unwrap_or_else(|| ".".to_string());
                     let config = render_export::ExportConfig {
@@ -921,7 +954,8 @@ impl App {
                         bpm: self.tap_bpm,
                         match_preview,
                     };
-                    self.export_job = Some(render_export::ExportJob::start(patch, config, &lib_folder));
+                    self.export_job =
+                        Some(render_export::ExportJob::start(patch, config, &lib_folder));
                     log::info!("Export started");
                 }
             }
@@ -930,18 +964,16 @@ impl App {
                     job.cancel();
                 }
             }
-            WebAction::SetAutomation { param, expr } => {
-                match automation::Expr::new(&expr) {
-                    Ok(compiled) => {
-                        self.master_automations.insert(param.clone(), compiled);
-                        self.master_automation_errors.remove(&param);
-                    }
-                    Err(e) => {
-                        self.master_automations.remove(&param);
-                        self.master_automation_errors.insert(param, e);
-                    }
+            WebAction::SetAutomation { param, expr } => match automation::Expr::new(&expr) {
+                Ok(compiled) => {
+                    self.master_automations.insert(param.clone(), compiled);
+                    self.master_automation_errors.remove(&param);
                 }
-            }
+                Err(e) => {
+                    self.master_automations.remove(&param);
+                    self.master_automation_errors.insert(param, e);
+                }
+            },
             WebAction::ClearAutomation { param } => {
                 self.master_automations.remove(&param);
                 self.master_automation_errors.remove(&param);
@@ -1157,89 +1189,101 @@ impl App {
             msg_type: "state".to_string(),
             effects: EffectsSnapshot::from_uniforms(&self.master_effects),
             ntsc: NtscSnapshot::from_params(&self.ntsc_state.params),
-            layers: self.layers.iter().map(|l| LayerSnapshot {
-                id: l.id,
-                filename: l.filename.clone(),
-                visible: l.visible,
-                paused: l.paused,
-                opacity: l.opacity,
-                speed: l.speed,
-                fps: l.fps,
-                blend_mode: l.blend_mode.as_str().to_string(),
-                progress: l.decoder.as_ref().map(|d| d.progress()).unwrap_or(0.0),
-                audio_only: l.audio_only,
-                automations: l.automations.iter()
-                    .map(|(k, v)| (k.clone(), v.source.clone()))
-                    .collect(),
-                automation_errors: l.automation_errors.clone(),
-                mute: l.audio.mute,
-                volume: l.audio.volume,
-                pan: l.audio.pan,
-                meter: self.audio.as_ref().map(|a| a.layer_meter(l.id)).unwrap_or(0.0),
-                eq_low: l.audio.eq_low,
-                eq_mid: l.audio.eq_mid,
-                eq_high: l.audio.eq_high,
-                delay_time: l.audio.delay_time,
-                delay_feedback: l.audio.delay_feedback,
-                delay_mix: l.audio.delay_mix,
-                hue_shift: l.effects.hue_shift,
-                saturation: l.effects.saturation,
-                brightness: l.effects.brightness,
-                contrast: l.effects.contrast,
-                pixelate: l.effects.pixelate_size,
-                rgb_split: l.effects.rgb_split,
-                posterize: l.effects.posterize,
-                invert: l.effects.invert > 0.5,
-                wave_amp: l.effects.wave_amp,
-                wave_freq: l.effects.wave_freq,
-                wave_speed: l.effects.wave_speed,
-                wave_axis: l.effects.wave_axis,
-                swirl_angle: l.effects.swirl_angle,
-                swirl_radius: l.effects.swirl_radius,
-                bulge_strength: l.effects.bulge_strength,
-                bulge_radius: l.effects.bulge_radius,
-                chroma_enable: l.effects.chroma_enable > 0.5,
-                chroma_threshold: l.effects.chroma_threshold,
-                chroma_smoothness: l.effects.chroma_smoothness,
-                chroma_spill: l.effects.chroma_spill,
-                chroma_color: rgb01_to_hex(
-                    l.effects.chroma_color_r,
-                    l.effects.chroma_color_g,
-                    l.effects.chroma_color_b,
-                ),
-                chroma_bg_enable: l.effects.chroma_bg_enable > 0.5,
-                chroma_bg_color: rgb01_to_hex(
-                    l.effects.chroma_bg_r,
-                    l.effects.chroma_bg_g,
-                    l.effects.chroma_bg_b,
-                ),
-                slice_intensity: l.effects.slice_intensity,
-                slice_height: l.effects.slice_height,
-                slice_prob: l.effects.slice_prob,
-                slice_speed: l.effects.slice_speed,
-                block_size: l.effects.block_size,
-                block_intensity: l.effects.block_intensity,
-                block_prob: l.effects.block_prob,
-                block_speed: l.effects.block_speed,
-                shift_chroma: l.effects.shift_chroma,
-                slice_axis: l.effects.slice_axis,
-                jitter_amount: l.effects.jitter_amount,
-                jitter_speed: l.effects.jitter_speed,
-                datamosh: l.effects.datamosh,
-                feedback_persistence: l.effects.feedback_persistence,
-                feedback_zoom: l.effects.feedback_zoom,
-                feedback_rotate: l.effects.feedback_rotate,
-                feedback_luma_key: l.effects.feedback_luma_key,
-                feedback_chroma: l.effects.feedback_chroma,
-                feedback_additive: l.effects.feedback_additive,
-                layer_x: l.effects.layer_x,
-                layer_y: l.effects.layer_y,
-                layer_scale: l.effects.layer_scale,
-                fit_mode: l.effects.fit_mode as u32,
-            }).collect(),
-            library: self.library_files.iter().filter_map(|p| {
-                p.file_name().map(|n| n.to_string_lossy().to_string())
-            }).collect(),
+            layers: self
+                .layers
+                .iter()
+                .map(|l| LayerSnapshot {
+                    id: l.id,
+                    filename: l.filename.clone(),
+                    visible: l.visible,
+                    paused: l.paused,
+                    opacity: l.opacity,
+                    speed: l.speed,
+                    fps: l.fps,
+                    blend_mode: l.blend_mode.as_str().to_string(),
+                    progress: l.decoder.as_ref().map(|d| d.progress()).unwrap_or(0.0),
+                    audio_only: l.audio_only,
+                    automations: l
+                        .automations
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.source.clone()))
+                        .collect(),
+                    automation_errors: l.automation_errors.clone(),
+                    mute: l.audio.mute,
+                    volume: l.audio.volume,
+                    pan: l.audio.pan,
+                    meter: self
+                        .audio
+                        .as_ref()
+                        .map(|a| a.layer_meter(l.id))
+                        .unwrap_or(0.0),
+                    eq_low: l.audio.eq_low,
+                    eq_mid: l.audio.eq_mid,
+                    eq_high: l.audio.eq_high,
+                    delay_time: l.audio.delay_time,
+                    delay_feedback: l.audio.delay_feedback,
+                    delay_mix: l.audio.delay_mix,
+                    hue_shift: l.effects.hue_shift,
+                    saturation: l.effects.saturation,
+                    brightness: l.effects.brightness,
+                    contrast: l.effects.contrast,
+                    pixelate: l.effects.pixelate_size,
+                    rgb_split: l.effects.rgb_split,
+                    posterize: l.effects.posterize,
+                    invert: l.effects.invert > 0.5,
+                    wave_amp: l.effects.wave_amp,
+                    wave_freq: l.effects.wave_freq,
+                    wave_speed: l.effects.wave_speed,
+                    wave_axis: l.effects.wave_axis,
+                    swirl_angle: l.effects.swirl_angle,
+                    swirl_radius: l.effects.swirl_radius,
+                    bulge_strength: l.effects.bulge_strength,
+                    bulge_radius: l.effects.bulge_radius,
+                    chroma_enable: l.effects.chroma_enable > 0.5,
+                    chroma_threshold: l.effects.chroma_threshold,
+                    chroma_smoothness: l.effects.chroma_smoothness,
+                    chroma_spill: l.effects.chroma_spill,
+                    chroma_color: rgb01_to_hex(
+                        l.effects.chroma_color_r,
+                        l.effects.chroma_color_g,
+                        l.effects.chroma_color_b,
+                    ),
+                    chroma_bg_enable: l.effects.chroma_bg_enable > 0.5,
+                    chroma_bg_color: rgb01_to_hex(
+                        l.effects.chroma_bg_r,
+                        l.effects.chroma_bg_g,
+                        l.effects.chroma_bg_b,
+                    ),
+                    slice_intensity: l.effects.slice_intensity,
+                    slice_height: l.effects.slice_height,
+                    slice_prob: l.effects.slice_prob,
+                    slice_speed: l.effects.slice_speed,
+                    block_size: l.effects.block_size,
+                    block_intensity: l.effects.block_intensity,
+                    block_prob: l.effects.block_prob,
+                    block_speed: l.effects.block_speed,
+                    shift_chroma: l.effects.shift_chroma,
+                    slice_axis: l.effects.slice_axis,
+                    jitter_amount: l.effects.jitter_amount,
+                    jitter_speed: l.effects.jitter_speed,
+                    datamosh: l.effects.datamosh,
+                    feedback_persistence: l.effects.feedback_persistence,
+                    feedback_zoom: l.effects.feedback_zoom,
+                    feedback_rotate: l.effects.feedback_rotate,
+                    feedback_luma_key: l.effects.feedback_luma_key,
+                    feedback_chroma: l.effects.feedback_chroma,
+                    feedback_additive: l.effects.feedback_additive,
+                    layer_x: l.effects.layer_x,
+                    layer_y: l.effects.layer_y,
+                    layer_scale: l.effects.layer_scale,
+                    fit_mode: l.effects.fit_mode as u32,
+                })
+                .collect(),
+            library: self
+                .library_files
+                .iter()
+                .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                .collect(),
             patches: self.patch_files.clone(),
             paused: self.master_paused,
             framerate: self.master_fps,
@@ -1247,26 +1291,42 @@ impl App {
             output_quality: self.output_quality,
             output_width: self.renderer.as_ref().map(|r| r.output_width).unwrap_or(0),
             output_height: self.renderer.as_ref().map(|r| r.output_height).unwrap_or(0),
-            export_progress: self.export_job.as_ref()
-                .map(|j| if j.is_done() { 1.0 } else { j.progress.progress_f32() })
+            export_progress: self
+                .export_job
+                .as_ref()
+                .map(|j| {
+                    if j.is_done() {
+                        1.0
+                    } else {
+                        j.progress.progress_f32()
+                    }
+                })
                 .unwrap_or(0.0),
-            export_error: self.export_job.as_ref()
+            export_error: self
+                .export_job
+                .as_ref()
                 .and_then(|j| {
                     if j.is_done() {
                         let err = j.progress.error.lock().unwrap();
-                        if err.is_empty() { None } else { Some(err.clone()) }
+                        if err.is_empty() {
+                            None
+                        } else {
+                            Some(err.clone())
+                        }
                     } else {
                         None
                     }
                 })
                 .unwrap_or_default(),
-            automations: self.master_automations.iter()
+            automations: self
+                .master_automations
+                .iter()
                 .map(|(k, v)| (k.clone(), v.source.clone()))
                 .collect(),
             automation_errors: self.master_automation_errors.clone(),
             bpm: self.tap_bpm,
-            beat: (self.start_time.elapsed().as_secs_f32() - self.tap_downbeat)
-                * self.tap_bpm / 60.0,
+            beat: (self.start_time.elapsed().as_secs_f32() - self.tap_downbeat) * self.tap_bpm
+                / 60.0,
             master_volume: self.master_volume,
             master_limiter: self.master_limiter,
             meter: self.audio.as_ref().map(|a| a.meter()).unwrap_or(0.0),
@@ -1280,7 +1340,10 @@ impl App {
         if let Ok(mut app) = self.web_state.app.try_write() {
             *app = snapshot.clone();
         }
-        let _ = self.web_state.tx.send(serde_json::to_string(&snapshot).unwrap_or_default());
+        let _ = self
+            .web_state
+            .tx
+            .send(serde_json::to_string(&snapshot).unwrap_or_default());
     }
 }
 
@@ -1305,7 +1368,6 @@ fn rgb01_to_hex(r: f32, g: f32, b: f32) -> String {
 }
 
 /// Scan a directory for video files, returning sorted list of paths.
-
 
 fn scan_folder(folder: &PathBuf) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(folder) else {
@@ -1353,7 +1415,13 @@ fn sanitize_patch_name(name: &str) -> String {
     let cleaned: String = name
         .trim()
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     cleaned.trim().chars().take(48).collect()
 }
@@ -1373,128 +1441,160 @@ fn generate_thumbnails(files: &[PathBuf], web_state: Arc<web::state::WebState>) 
 
             // Pass 1: Generate static thumbnails (fast, parallel batches of 8)
             for chunk in paths.chunks(8) {
-                let handles: Vec<_> = chunk.iter().map(|path| {
-                    let path = path.clone();
-                    let web_state = web_state.clone();
-                    let count = count.clone();
-                    std::thread::spawn(move || {
-                        let filename = match path.file_name() {
-                            Some(n) => n.to_string_lossy().to_string(),
-                            None => return,
-                        };
-
-                        let output = Command::new("ffmpeg")
-                            .args([
-                                "-i", &path.to_string_lossy(),
-                                "-vframes", "1",
-                                "-vf", "scale=180:-1",
-                                "-f", "image2pipe",
-                                "-vcodec", "mjpeg",
-                                "-q:v", "8",
-                                "-loglevel", "error",
-                                "pipe:1",
-                            ])
-                            .output();
-
-                        match output {
-                            Ok(result) if result.status.success() && !result.stdout.is_empty() => {
-                                if let Ok(mut cache) = web_state.thumbnails.write() {
-                                    cache.insert(filename, result.stdout);
-                                }
-                                count.fetch_add(1, Ordering::Relaxed);
-                            }
-                            Ok(result) => {
-                                let err = String::from_utf8_lossy(&result.stderr);
-                                log::warn!("Thumb: ffmpeg failed for {filename}: {err}");
-                            }
-                            Err(e) => {
-                                log::warn!("Thumb: can't run ffmpeg for {filename}: {e}");
-                            }
-                        }
-                    })
-                }).collect();
-
-                for h in handles {
-                    let _ = h.join();
-                }
-            }
-
-            log::info!("Generated {}/{total} thumbnails", count.load(Ordering::Relaxed));
-
-            // Pass 2: Generate preview frames (~8 per video, parallel batches of 4)
-            let preview_count = Arc::new(AtomicUsize::new(0));
-            for chunk in paths.chunks(4) {
-                let handles: Vec<_> = chunk.iter().map(|path| {
-                    let path = path.clone();
-                    let web_state = web_state.clone();
-                    let preview_count = preview_count.clone();
-                    std::thread::spawn(move || {
-                        let filename = match path.file_name() {
-                            Some(n) => n.to_string_lossy().to_string(),
-                            None => return,
-                        };
-
-                        // Get video duration with ffprobe
-                        let duration = Command::new("ffprobe")
-                            .args([
-                                "-v", "error",
-                                "-show_entries", "format=duration",
-                                "-of", "csv=p=0",
-                                &path.to_string_lossy(),
-                            ])
-                            .output()
-                            .ok()
-                            .and_then(|o| String::from_utf8(o.stdout).ok())
-                            .and_then(|s| s.trim().parse::<f64>().ok())
-                            .unwrap_or(0.0);
-
-                        if duration < 0.5 {
-                            return;
-                        }
-
-                        const NUM_FRAMES: usize = 8;
-                        let mut frames = Vec::with_capacity(NUM_FRAMES);
-
-                        for i in 0..NUM_FRAMES {
-                            let seek = duration * (i as f64) / (NUM_FRAMES as f64);
-                            let seek_str = format!("{:.2}", seek);
+                let handles: Vec<_> = chunk
+                    .iter()
+                    .map(|path| {
+                        let path = path.clone();
+                        let web_state = web_state.clone();
+                        let count = count.clone();
+                        std::thread::spawn(move || {
+                            let filename = match path.file_name() {
+                                Some(n) => n.to_string_lossy().to_string(),
+                                None => return,
+                            };
 
                             let output = Command::new("ffmpeg")
                                 .args([
-                                    "-ss", &seek_str,
-                                    "-i", &path.to_string_lossy(),
-                                    "-vframes", "1",
-                                    "-vf", "scale=180:-1",
-                                    "-f", "image2pipe",
-                                    "-vcodec", "mjpeg",
-                                    "-q:v", "10",
-                                    "-loglevel", "error",
+                                    "-i",
+                                    &path.to_string_lossy(),
+                                    "-vframes",
+                                    "1",
+                                    "-vf",
+                                    "scale=180:-1",
+                                    "-f",
+                                    "image2pipe",
+                                    "-vcodec",
+                                    "mjpeg",
+                                    "-q:v",
+                                    "8",
+                                    "-loglevel",
+                                    "error",
                                     "pipe:1",
                                 ])
                                 .output();
 
-                            if let Ok(result) = output {
-                                if result.status.success() && !result.stdout.is_empty() {
-                                    frames.push(result.stdout);
+                            match output {
+                                Ok(result)
+                                    if result.status.success() && !result.stdout.is_empty() =>
+                                {
+                                    if let Ok(mut cache) = web_state.thumbnails.write() {
+                                        cache.insert(filename, result.stdout);
+                                    }
+                                    count.fetch_add(1, Ordering::Relaxed);
+                                }
+                                Ok(result) => {
+                                    let err = String::from_utf8_lossy(&result.stderr);
+                                    log::warn!("Thumb: ffmpeg failed for {filename}: {err}");
+                                }
+                                Err(e) => {
+                                    log::warn!("Thumb: can't run ffmpeg for {filename}: {e}");
                                 }
                             }
-                        }
-
-                        if !frames.is_empty() {
-                            if let Ok(mut cache) = web_state.preview_frames.write() {
-                                cache.insert(filename, frames);
-                            }
-                            preview_count.fetch_add(1, Ordering::Relaxed);
-                        }
+                        })
                     })
-                }).collect();
+                    .collect();
 
                 for h in handles {
                     let _ = h.join();
                 }
             }
 
-            log::info!("Generated {}/{total} preview strips", preview_count.load(Ordering::Relaxed));
+            log::info!(
+                "Generated {}/{total} thumbnails",
+                count.load(Ordering::Relaxed)
+            );
+
+            // Pass 2: Generate preview frames (~8 per video, parallel batches of 4)
+            let preview_count = Arc::new(AtomicUsize::new(0));
+            for chunk in paths.chunks(4) {
+                let handles: Vec<_> = chunk
+                    .iter()
+                    .map(|path| {
+                        let path = path.clone();
+                        let web_state = web_state.clone();
+                        let preview_count = preview_count.clone();
+                        std::thread::spawn(move || {
+                            let filename = match path.file_name() {
+                                Some(n) => n.to_string_lossy().to_string(),
+                                None => return,
+                            };
+
+                            // Get video duration with ffprobe
+                            let duration = Command::new("ffprobe")
+                                .args([
+                                    "-v",
+                                    "error",
+                                    "-show_entries",
+                                    "format=duration",
+                                    "-of",
+                                    "csv=p=0",
+                                    &path.to_string_lossy(),
+                                ])
+                                .output()
+                                .ok()
+                                .and_then(|o| String::from_utf8(o.stdout).ok())
+                                .and_then(|s| s.trim().parse::<f64>().ok())
+                                .unwrap_or(0.0);
+
+                            if duration < 0.5 {
+                                return;
+                            }
+
+                            const NUM_FRAMES: usize = 8;
+                            let mut frames = Vec::with_capacity(NUM_FRAMES);
+
+                            for i in 0..NUM_FRAMES {
+                                let seek = duration * (i as f64) / (NUM_FRAMES as f64);
+                                let seek_str = format!("{:.2}", seek);
+
+                                let output = Command::new("ffmpeg")
+                                    .args([
+                                        "-ss",
+                                        &seek_str,
+                                        "-i",
+                                        &path.to_string_lossy(),
+                                        "-vframes",
+                                        "1",
+                                        "-vf",
+                                        "scale=180:-1",
+                                        "-f",
+                                        "image2pipe",
+                                        "-vcodec",
+                                        "mjpeg",
+                                        "-q:v",
+                                        "10",
+                                        "-loglevel",
+                                        "error",
+                                        "pipe:1",
+                                    ])
+                                    .output();
+
+                                if let Ok(result) = output {
+                                    if result.status.success() && !result.stdout.is_empty() {
+                                        frames.push(result.stdout);
+                                    }
+                                }
+                            }
+
+                            if !frames.is_empty() {
+                                if let Ok(mut cache) = web_state.preview_frames.write() {
+                                    cache.insert(filename, frames);
+                                }
+                                preview_count.fetch_add(1, Ordering::Relaxed);
+                            }
+                        })
+                    })
+                    .collect();
+
+                for h in handles {
+                    let _ = h.join();
+                }
+            }
+
+            log::info!(
+                "Generated {}/{total} preview strips",
+                preview_count.load(Ordering::Relaxed)
+            );
         })
         .ok();
 }
@@ -1582,8 +1682,7 @@ impl ApplicationHandler for App {
         event: WindowEvent,
     ) {
         if let Some(egui_winit) = &mut self.egui_winit {
-            let response =
-                egui_winit.on_window_event(self.window.as_ref().unwrap(), &event);
+            let response = egui_winit.on_window_event(self.window.as_ref().unwrap(), &event);
             if response.consumed {
                 return;
             }
@@ -1634,9 +1733,7 @@ impl ApplicationHandler for App {
                 use winit::keyboard::{KeyCode, PhysicalKey};
 
                 // Ctrl+key shortcuts (editor toggle, save, load)
-                if state == winit::event::ElementState::Pressed
-                    && self.modifiers.control_key()
-                {
+                if state == winit::event::ElementState::Pressed && self.modifiers.control_key() {
                     match physical_key {
                         PhysicalKey::Code(KeyCode::KeyE) => {
                             self.yaml_editor.active = !self.yaml_editor.active;
@@ -1766,7 +1863,9 @@ impl ApplicationHandler for App {
                     // loop on the lock) and `drain(..)` everything queued since last
                     // frame into a local Vec, releasing the lock before we apply
                     // them. `unwrap_or_default()` = "empty list if the lock is busy".
-                    let pending_actions: Vec<_> = self.web_state.actions
+                    let pending_actions: Vec<_> = self
+                        .web_state
+                        .actions
                         .try_lock()
                         .map(|mut a| a.drain(..).collect())
                         .unwrap_or_default();
@@ -1823,7 +1922,8 @@ impl ApplicationHandler for App {
                     // even when a low master_fps stutters the content clock, and so its
                     // phase matches the wall-clock `tap_downbeat` anchor set on each tap.
                     let bpm = self.tap_bpm;
-                    let beat = (self.start_time.elapsed().as_secs_f32() - self.tap_downbeat) * bpm / 60.0;
+                    let beat =
+                        (self.start_time.elapsed().as_secs_f32() - self.tap_downbeat) * bpm / 60.0;
                     for layer in &mut self.layers {
                         layer.effects.time = elapsed;
                         // Evaluate any automated params against `t = elapsed`.
@@ -1854,7 +1954,8 @@ impl ApplicationHandler for App {
                     self.master_effects.time = elapsed;
                     // Evaluate master automations (same `t` so live matches export).
                     for (param, expr) in &self.master_automations {
-                        self.master_effects.set_by_name(param, expr.eval(elapsed, beat, bpm));
+                        self.master_effects
+                            .set_by_name(param, expr.eval(elapsed, beat, bpm));
                     }
 
                     // A command encoder records GPU commands into a buffer; nothing
@@ -1863,11 +1964,12 @@ impl ApplicationHandler for App {
                     // encoder, then (below) either submit immediately or, if NTSC is
                     // on, submit early so the CPU can read the pixels back.
                     let renderer = self.renderer.as_mut().unwrap();
-                    let mut encoder = renderer.device.create_command_encoder(
-                        &wgpu::CommandEncoderDescriptor {
-                            label: Some("Frame Encoder"),
-                        },
-                    );
+                    let mut encoder =
+                        renderer
+                            .device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("Frame Encoder"),
+                            });
                     renderer.render_layers(&mut encoder, &self.layers);
                     renderer.render_master_effects(&mut encoder, &self.master_effects);
 
@@ -1958,22 +2060,20 @@ impl ApplicationHandler for App {
                         let mut render_pass = encoder
                             .begin_render_pass(&wgpu::RenderPassDescriptor {
                                 label: Some("egui Pass"),
-                                color_attachments: &[Some(
-                                    wgpu::RenderPassColorAttachment {
-                                        view: &surface_view,
-                                        resolve_target: None,
-                                        ops: wgpu::Operations {
-                                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                                r: 0.1,
-                                                g: 0.1,
-                                                b: 0.1,
-                                                a: 1.0,
-                                            }),
-                                            store: wgpu::StoreOp::Store,
-                                        },
-                                        depth_slice: None,
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &surface_view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                                            r: 0.1,
+                                            g: 0.1,
+                                            b: 0.1,
+                                            a: 1.0,
+                                        }),
+                                        store: wgpu::StoreOp::Store,
                                     },
-                                )],
+                                    depth_slice: None,
+                                })],
                                 depth_stencil_attachment: None,
                                 ..Default::default()
                             })
@@ -2042,12 +2142,7 @@ fn build_ui(
 
             if yaml_editor.active {
                 // Code view
-                patch::editor::build_yaml_editor_content(
-                    ui,
-                    layers,
-                    master_effects,
-                    yaml_editor,
-                );
+                patch::editor::build_yaml_editor_content(ui, layers, master_effects, yaml_editor);
             } else {
                 // UI view: collapsible layers
                 egui::ScrollArea::vertical()
@@ -2086,8 +2181,7 @@ fn build_ui(
                             // Collapsible header with layer name
                             let header_id = ui.make_persistent_id(format!("layer_col_{i}"));
                             let header = egui::CollapsingHeader::new(
-                                egui::RichText::new(&layers[i].filename)
-                                    .strong(),
+                                egui::RichText::new(&layers[i].filename).strong(),
                             )
                             .id_salt(header_id)
                             .default_open(is_selected);
@@ -2097,7 +2191,8 @@ fn build_ui(
 
                                 // Transport
                                 ui.horizontal(|ui| {
-                                    if ui.button(if layer.paused { "▶" } else { "⏸" }).clicked() {
+                                    if ui.button(if layer.paused { "▶" } else { "⏸" }).clicked()
+                                    {
                                         layer.paused = !layer.paused;
                                     }
                                     if ui.button("Reset FX").clicked() {
@@ -2105,24 +2200,32 @@ fn build_ui(
                                     }
                                 });
 
-                                labeled_slider(ui, "Speed",
+                                labeled_slider(
+                                    ui,
+                                    "Speed",
                                     egui::Slider::new(&mut layer.speed, 0.25..=4.0)
                                         .logarithmic(true)
                                         .custom_formatter(|v, _| format!("{:.2}×", v)),
                                 );
-                                labeled_slider(ui, "FPS",
+                                labeled_slider(
+                                    ui,
+                                    "FPS",
                                     egui::Slider::new(&mut layer.fps, 1.0..=60.0)
                                         .step_by(1.0)
                                         .custom_formatter(|v, _| format!("{:.0}", v)),
                                 );
-                                labeled_slider(ui, "Opacity",
+                                labeled_slider(
+                                    ui,
+                                    "Opacity",
                                     egui::Slider::new(&mut layer.opacity, 0.0..=1.0),
                                 );
                                 ui.horizontal(|ui| {
                                     ui.allocate_ui_with_layout(
                                         egui::vec2(78.0, ui.spacing().interact_size.y),
                                         egui::Layout::left_to_right(egui::Align::Center),
-                                        |ui| { ui.label("Blend"); },
+                                        |ui| {
+                                            ui.label("Blend");
+                                        },
                                     );
                                     egui::ComboBox::from_id_salt(format!("blend_mode_{i}"))
                                         .selected_text(layer.blend_mode.label())
@@ -2167,7 +2270,11 @@ fn build_ui(
                     // Transport
                     ui.horizontal(|ui| {
                         if ui
-                            .button(if *master_paused { "▶ Play All" } else { "⏸ Pause All" })
+                            .button(if *master_paused {
+                                "▶ Play All"
+                            } else {
+                                "⏸ Pause All"
+                            })
                             .clicked()
                         {
                             *master_paused = !*master_paused;
@@ -2279,7 +2386,9 @@ fn labeled_slider(ui: &mut egui::Ui, label: &str, slider: egui::Slider<'_>) {
         ui.allocate_ui_with_layout(
             egui::vec2(78.0, ui.spacing().interact_size.y),
             egui::Layout::left_to_right(egui::Align::Center),
-            |ui| { ui.label(label); },
+            |ui| {
+                ui.label(label);
+            },
         );
         ui.add(slider);
     });
@@ -2292,7 +2401,9 @@ fn labeled_checkbox(ui: &mut egui::Ui, label: &str, value: &mut bool) -> bool {
         ui.allocate_ui_with_layout(
             egui::vec2(78.0, ui.spacing().interact_size.y),
             egui::Layout::left_to_right(egui::Align::Center),
-            |ui| { ui.label(label); },
+            |ui| {
+                ui.label(label);
+            },
         );
         changed = ui.checkbox(value, "").changed();
     });
@@ -2304,35 +2415,53 @@ fn effects_sliders(ui: &mut egui::Ui, effects: &mut effects::EffectUniforms, id_
     // --- Digital effects ---
     ui.label(egui::RichText::new("Digital").weak().size(11.0));
 
-    labeled_slider(ui, "Pixelate",
+    labeled_slider(
+        ui,
+        "Pixelate",
         egui::Slider::new(&mut effects.pixelate_size, 1.0..=32.0)
             .step_by(1.0)
             .custom_formatter(|v, _| format!("{:.0}", v)),
     );
-    labeled_slider(ui, "RGB Split",
+    labeled_slider(
+        ui,
+        "RGB Split",
         egui::Slider::new(&mut effects.rgb_split, 0.0..=30.0)
             .step_by(1.0)
             .custom_formatter(|v, _| format!("{:.0}", v)),
     );
-    labeled_slider(ui, "Hue",
+    labeled_slider(
+        ui,
+        "Hue",
         egui::Slider::new(&mut effects.hue_shift, -180.0..=180.0)
             .step_by(1.0)
             .suffix("°"),
     );
-    labeled_slider(ui, "Saturation",
+    labeled_slider(
+        ui,
+        "Saturation",
         egui::Slider::new(&mut effects.saturation, -1.0..=1.0),
     );
-    labeled_slider(ui, "Brightness",
+    labeled_slider(
+        ui,
+        "Brightness",
         egui::Slider::new(&mut effects.brightness, -1.0..=1.0),
     );
-    labeled_slider(ui, "Contrast",
+    labeled_slider(
+        ui,
+        "Contrast",
         egui::Slider::new(&mut effects.contrast, -1.0..=1.0),
     );
-    labeled_slider(ui, "Posterize",
+    labeled_slider(
+        ui,
+        "Posterize",
         egui::Slider::new(&mut effects.posterize, 0.0..=16.0)
             .step_by(1.0)
             .custom_formatter(|v, _| {
-                if v < 2.0 { "Off".to_string() } else { format!("{:.0}", v) }
+                if v < 2.0 {
+                    "Off".to_string()
+                } else {
+                    format!("{:.0}", v)
+                }
             }),
     );
 
@@ -2347,12 +2476,16 @@ fn effects_sliders(ui: &mut egui::Ui, effects: &mut effects::EffectUniforms, id_
     // --- Analog effects ---
     ui.label(egui::RichText::new("Analog").weak().size(11.0));
 
-    labeled_slider(ui, "Grain",
+    labeled_slider(
+        ui,
+        "Grain",
         egui::Slider::new(&mut effects.grain_intensity, 0.0..=0.3),
     );
 
     if effects.grain_intensity > 0.0 {
-        labeled_slider(ui, "  Size",
+        labeled_slider(
+            ui,
+            "  Size",
             egui::Slider::new(&mut effects.grain_size, 1.0..=4.0)
                 .step_by(1.0)
                 .custom_formatter(|v, _| format!("{:.0}", v)),
@@ -2361,7 +2494,9 @@ fn effects_sliders(ui: &mut egui::Ui, effects: &mut effects::EffectUniforms, id_
             ui.allocate_ui_with_layout(
                 egui::vec2(78.0, ui.spacing().interact_size.y),
                 egui::Layout::left_to_right(egui::Align::Center),
-                |ui| { ui.label("  Algo"); },
+                |ui| {
+                    ui.label("  Algo");
+                },
             );
             egui::ComboBox::from_id_salt(format!("grain_algo_{id_prefix}"))
                 .width(90.0)
@@ -2384,10 +2519,14 @@ fn effects_sliders(ui: &mut egui::Ui, effects: &mut effects::EffectUniforms, id_
         }
     }
 
-    labeled_slider(ui, "Vignette",
+    labeled_slider(
+        ui,
+        "Vignette",
         egui::Slider::new(&mut effects.vignette, 0.0..=1.5),
     );
-    labeled_slider(ui, "Drift",
+    labeled_slider(
+        ui,
+        "Drift",
         egui::Slider::new(&mut effects.color_drift, 0.0..=0.02),
     );
 
@@ -2397,14 +2536,19 @@ fn effects_sliders(ui: &mut egui::Ui, effects: &mut effects::EffectUniforms, id_
     // --- Motion effects ---
     ui.label(egui::RichText::new("Motion").weak().size(11.0));
 
-    labeled_slider(ui, "Bth Scale",
+    labeled_slider(
+        ui,
+        "Bth Scale",
         egui::Slider::new(&mut effects.breathe_scale, 0.0..=0.05),
     );
-    labeled_slider(ui, "Bth Rotate",
-        egui::Slider::new(&mut effects.breathe_rotation, 0.0..=2.0)
-            .suffix("°"),
+    labeled_slider(
+        ui,
+        "Bth Rotate",
+        egui::Slider::new(&mut effects.breathe_rotation, 0.0..=2.0).suffix("°"),
     );
-    labeled_slider(ui, "Bth Drift",
+    labeled_slider(
+        ui,
+        "Bth Drift",
         egui::Slider::new(&mut effects.breathe_position, 0.0..=0.02),
     );
 }
@@ -2557,12 +2701,23 @@ fn open_control_panel(url: &str) {
     let _ = open::that(url);
 }
 
-/// Headless `render` subcommand: load a patch YAML and render it to an MP4.
+/// Parsed CLI arguments for the headless `render` subcommand.
+#[derive(Debug, Clone, PartialEq)]
+struct RenderArgs {
+    patch_path: String,
+    library: String,
+    out: String,
+    width: u32,
+    height: u32,
+    fps: u32,
+    duration: f32,
+}
+
+/// Parse the `render` subcommand's flags into a `RenderArgs` (pure: no I/O).
 ///
-/// Usage:
-///   collide-o-scope render --patch <file.yaml> --library <folder> \
-///       [--out <file.mp4>] [--duration <secs>] [--fps <n>] [--res <WxH>]
-fn run_cli_render(args: &[String]) -> Result<(), String> {
+/// `--patch` and `--library` are required; everything else has a default.
+/// Kept separate from `run_cli_render` so the CLI contract is unit-testable.
+fn parse_render_args(args: &[String]) -> Result<RenderArgs, String> {
     let mut patch_path: Option<String> = None;
     let mut library: Option<String> = None;
     let mut out = "experiments/headless-output/out.mp4".to_string();
@@ -2604,8 +2759,32 @@ fn run_cli_render(args: &[String]) -> Result<(), String> {
         i += 2;
     }
 
-    let patch_path = patch_path.ok_or("missing --patch <file.yaml>")?;
-    let library = library.ok_or("missing --library <folder>")?;
+    Ok(RenderArgs {
+        patch_path: patch_path.ok_or("missing --patch <file.yaml>")?,
+        library: library.ok_or("missing --library <folder>")?,
+        out,
+        width,
+        height,
+        fps,
+        duration,
+    })
+}
+
+/// Headless `render` subcommand: load a patch YAML and render it to an MP4.
+///
+/// Usage:
+///   collide-o-scope render --patch <file.yaml> --library <folder> \
+///       [--out <file.mp4>] [--duration <secs>] [--fps <n>] [--res <WxH>]
+fn run_cli_render(args: &[String]) -> Result<(), String> {
+    let RenderArgs {
+        patch_path,
+        library,
+        out,
+        width,
+        height,
+        fps,
+        duration,
+    } = parse_render_args(args)?;
 
     let yaml =
         std::fs::read_to_string(&patch_path).map_err(|e| format!("reading {patch_path}: {e}"))?;
@@ -2632,4 +2811,150 @@ fn run_cli_render(args: &[String]) -> Result<(), String> {
     render_export::render_blocking(patch, config, &library)?;
     println!("done: {out}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn output_dims_common_ratios_and_evenness() {
+        assert_eq!(output_dims("16:9", 1080), (1920, 1080));
+        assert_eq!(output_dims("4:3", 1080), (1440, 1080));
+        assert_eq!(output_dims("1:1", 1080), (1080, 1080));
+        assert_eq!(output_dims("9:16", 1080), (1080, 1920));
+        assert_eq!(output_dims("21:9", 1080), (2520, 1080));
+        // Unknown ratio falls back to 16:9.
+        assert_eq!(output_dims("bogus", 720), output_dims("16:9", 720));
+        // Dims are always even (encoder-friendly), even for odd quality input.
+        let (w, h) = output_dims("16:9", 721);
+        assert_eq!(w % 2, 0);
+        assert_eq!(h % 2, 0);
+    }
+
+    #[test]
+    fn fit_scale_modes() {
+        // Stretch (mode 0) is always identity.
+        assert_eq!(fit_scale(0.0, 1920.0, 1080.0, 1080.0, 1080.0), (1.0, 1.0));
+        // Square source on square canvas: any mode is identity.
+        assert_eq!(fit_scale(1.0, 100.0, 100.0, 100.0, 100.0), (1.0, 1.0));
+        // Contain (mode 1), wide source into square canvas (r = 16/9 > 1):
+        // bars top/bottom → scale up Y by r.
+        let (x, y) = fit_scale(1.0, 1920.0, 1080.0, 1080.0, 1080.0);
+        assert_eq!(x, 1.0);
+        assert!(y > 1.0);
+        // Cover (mode 2) of the same → crop sides (x < 1, y = 1).
+        let (x, y) = fit_scale(2.0, 1920.0, 1080.0, 1080.0, 1080.0);
+        assert!(x < 1.0);
+        assert_eq!(y, 1.0);
+        // Non-positive dims short-circuit to identity.
+        assert_eq!(fit_scale(2.0, 0.0, 100.0, 100.0, 100.0), (1.0, 1.0));
+        assert_eq!(fit_scale(1.0, 100.0, 100.0, 0.0, 100.0), (1.0, 1.0));
+    }
+
+    #[test]
+    fn hex_color_round_trip_and_fallback() {
+        assert_eq!(hex_to_rgb01("#000000"), (0.0, 0.0, 0.0));
+        assert_eq!(hex_to_rgb01("#ffffff"), (1.0, 1.0, 1.0));
+        // Leading # is optional.
+        assert_eq!(hex_to_rgb01("ff0000"), (1.0, 0.0, 0.0));
+        // Bad input → default green.
+        assert_eq!(hex_to_rgb01("#fff"), (0.0, 1.0, 0.0)); // too short
+        assert_eq!(hex_to_rgb01("nothex!"), (0.0, 1.0, 0.0));
+        // rgb01_to_hex round-trips and clamps out-of-range.
+        assert_eq!(rgb01_to_hex(1.0, 0.0, 0.0), "#ff0000");
+        assert_eq!(rgb01_to_hex(2.0, -1.0, 0.5), "#ff0080");
+        let (r, g, b) = hex_to_rgb01(&rgb01_to_hex(0.2, 0.4, 0.6));
+        assert!((r - 0.2).abs() < 0.01 && (g - 0.4).abs() < 0.01 && (b - 0.6).abs() < 0.01);
+    }
+
+    #[test]
+    fn sanitize_patch_name_strips_unsafe_and_caps_length() {
+        assert_eq!(sanitize_patch_name("my patch-1_v2"), "my patch-1_v2");
+        // Path traversal / symbols (incl. dots) become underscores.
+        assert_eq!(sanitize_patch_name("../etc/passwd"), "___etc_passwd");
+        assert_eq!(sanitize_patch_name("a/b\\c:d"), "a_b_c_d");
+        // Trimmed at both ends.
+        assert_eq!(sanitize_patch_name("  spaced  "), "spaced");
+        // Capped at 48 chars.
+        let long = "x".repeat(100);
+        assert_eq!(sanitize_patch_name(&long).len(), 48);
+    }
+
+    #[test]
+    fn fit_to_area_respects_both_bounds() {
+        // Width-limited: 16:9 into a wide-but-short box → height drives it.
+        let (w, h) = fit_to_area(1600.0, 100.0, 16.0 / 9.0);
+        assert!(h <= 100.0 + 1e-3);
+        assert!((w / h - 16.0 / 9.0).abs() < 1e-3);
+        // Height-limited: tall box → width drives it.
+        let (w, h) = fit_to_area(100.0, 1600.0, 16.0 / 9.0);
+        assert!(w <= 100.0 + 1e-3);
+        assert!((w / h - 16.0 / 9.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn parse_render_args_defaults_with_required_flags() {
+        let a = parse_render_args(&args(&["--patch", "p.yaml", "--library", "lib/"])).unwrap();
+        assert_eq!(a.patch_path, "p.yaml");
+        assert_eq!(a.library, "lib/");
+        assert_eq!(a.out, "experiments/headless-output/out.mp4");
+        assert_eq!((a.width, a.height), (1280, 720));
+        assert_eq!(a.fps, 30);
+        assert_eq!(a.duration, 10.0);
+    }
+
+    #[test]
+    fn parse_render_args_overrides_all() {
+        let a = parse_render_args(&args(&[
+            "--patch",
+            "p.yaml",
+            "--library",
+            "lib/",
+            "--out",
+            "o.mp4",
+            "--res",
+            "640x480",
+            "--fps",
+            "24",
+            "--duration",
+            "2.5",
+        ]))
+        .unwrap();
+        assert_eq!(a.out, "o.mp4");
+        assert_eq!((a.width, a.height), (640, 480));
+        assert_eq!(a.fps, 24);
+        assert_eq!(a.duration, 2.5);
+    }
+
+    #[test]
+    fn parse_render_args_requires_patch_and_library() {
+        assert!(parse_render_args(&args(&["--library", "lib/"])).is_err());
+        assert!(parse_render_args(&args(&["--patch", "p.yaml"])).is_err());
+        assert!(parse_render_args(&[]).is_err());
+    }
+
+    #[test]
+    fn parse_render_args_rejects_bad_values_and_unknown_flags() {
+        let base = ["--patch", "p.yaml", "--library", "lib/"];
+        // Malformed --res.
+        let mut v = base.to_vec();
+        v.extend(["--res", "1280"]);
+        assert!(parse_render_args(&args(&v)).is_err());
+        let mut v = base.to_vec();
+        v.extend(["--res", "axb"]);
+        assert!(parse_render_args(&args(&v)).is_err());
+        // Non-numeric --fps / --duration.
+        let mut v = base.to_vec();
+        v.extend(["--fps", "soon"]);
+        assert!(parse_render_args(&args(&v)).is_err());
+        // Unknown flag.
+        let mut v = base.to_vec();
+        v.extend(["--wat", "1"]);
+        assert!(parse_render_args(&args(&v)).is_err());
+    }
 }

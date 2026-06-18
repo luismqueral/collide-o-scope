@@ -66,6 +66,19 @@ cargo run -- render --patch patches/my-patch.yaml --library library/ \
 
 Launching opens the render window **and** auto-opens the panel at `http://127.0.0.1:3030`.
 
+## Testing
+
+Tests run with **cargo-nextest** (not `cargo test`): `cargo nextest run`. GPU-dependent
+tests are `#[ignore]`d and skipped by default — run them with `cargo nextest run
+--run-ignored all` on a machine with a real GPU. Because this is a **binary crate** (no
+`lib.rs`), unit/integration tests live as inline `#[cfg(test)] mod tests` blocks in each
+module (so they can reach private helpers); the one `tests/` file (`export_cli.rs`) drives
+the built binary's `render` subcommand as a subprocess via `CARGO_BIN_EXE_collide-o-scope`.
+ffmpeg integration tests synthesize tiny fixtures with the system `ffmpeg` into a tempdir —
+no media is committed. nextest's per-test process isolation keeps `ffmpeg::init()` global
+state from leaking between tests. CI (`.github/workflows/ci.yml`) runs on macOS (Homebrew
+ffmpeg 8, matching the pinned `ffmpeg-next`) and skips the GPU tests.
+
 ## Frame pipeline
 
 ```

@@ -20,14 +20,14 @@ use ffmpeg_next::ChannelLayout;
 /// Owns one open media file and decodes its audio track, resampling each frame
 /// to interleaved f32 at the device's sample rate / channel count.
 pub struct AudioDecoder {
-    path: String,                 // kept so we can reopen to loop
-    input_ctx: Input,             // ffmpeg demuxer
-    stream_index: usize,          // which stream is the audio track
+    path: String,                    // kept so we can reopen to loop
+    input_ctx: Input,                // ffmpeg demuxer
+    stream_index: usize,             // which stream is the audio track
     decoder: ffmpeg::decoder::Audio, // compressed packets → raw sample frames
-    resampler: Resampler,         // native format/rate → f32 packed @ out_rate
-    src_rate: u32,                // decoder's native sample rate (for capacity math)
-    out_rate: u32,                // device sample rate we resample to
-    out_channels: u16,            // device channel count (2 = stereo for v1)
+    resampler: Resampler,            // native format/rate → f32 packed @ out_rate
+    src_rate: u32,                   // decoder's native sample rate (for capacity math)
+    out_rate: u32,                   // device sample rate we resample to
+    out_channels: u16,               // device channel count (2 = stereo for v1)
 }
 
 impl AudioDecoder {
@@ -127,8 +127,8 @@ impl AudioDecoder {
     /// for resampler latency) keeps the FIFO drained. After `run()`,
     /// `out.samples()` is the actual number written.
     fn resample(&mut self, frame: &AudioFrame) -> Vec<f32> {
-        let cap = (frame.samples() as u64 * self.out_rate as u64
-            / self.src_rate.max(1) as u64) as usize
+        let cap = (frame.samples() as u64 * self.out_rate as u64 / self.src_rate.max(1) as u64)
+            as usize
             + 256;
         let layout = ChannelLayout::default(self.out_channels as i32);
         let mut out = AudioFrame::new(Sample::F32(SampleType::Packed), cap, layout);
@@ -186,5 +186,62 @@ impl AudioDecoder {
             .map_err(|e| format!("Resampler on reopen: {e}"))?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{synth_audio, synth_video};
+
+    #[test]
+    fn open_succeeds_on_audio_fixture() {
+        let (_dir, path) = synth_audio(440, 0.5);
+        assert!(AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).is_ok());
+    }
+
+    #[test]
+    fn open_errors_on_bogus_path() {
+        let err = match AudioDecoder::open("/no/such/file.m4a", 48_000, 2) {
+            Ok(_) => panic!("expected open to fail on a missing file"),
+            Err(e) => e,
+        };
+        assert!(err.contains("Cannot open"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn open_errors_on_file_without_audio() {
+        // A video-only `testsrc` clip has no audio track to decode.
+        let (_dir, path) = synth_video(64, 48, 10, 0.5);
+        assert!(AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).is_err());
+    }
+
+    #[test]
+    fn next_chunk_returns_interleaved_stereo_f32() {
+        let (_dir, path) = synth_audio(440, 0.5);
+        let mut dec = AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).expect("open fixture");
+        let chunk = dec.next_chunk().expect("decode a chunk");
+        assert!(!chunk.is_empty(), "first chunk should carry samples");
+        // Interleaved stereo → an even number of samples (L,R,L,R,...).
+        assert_eq!(chunk.len() % 2, 0, "stereo chunk must be channel-aligned");
+        // Decoded audio is finite.
+        assert!(
+            chunk.iter().all(|s| s.is_finite()),
+            "samples must be finite"
+        );
+    }
+
+    #[test]
+    fn next_chunk_loops_cleanly_past_eof() {
+        let (_dir, path) = synth_audio(440, 0.3);
+        let mut dec = AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).expect("open fixture");
+        // Pull far more audio than the 0.3 s file holds: the decoder loops by
+        // reopening, so every chunk must still come back as Some.
+        for i in 0..200 {
+            assert!(
+                dec.next_chunk().is_some(),
+                "chunk {i} returned None (no clean loop)"
+            );
+        }
     }
 }
