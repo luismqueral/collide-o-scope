@@ -1396,13 +1396,18 @@
     // Main (master) panel open by default; the right edge chevron collapses it.
     app.classList.add('master-open');
 
-    // Default collapse: in the layer grid, every group except SOURCE starts
-    // collapsed (seeded once here so user expand/collapse choices then persist
-    // across rebuilds). Only `layer:` keys are seeded — the master panel is
-    // untouched.
+    // Default collapse (seeded once here so user expand/collapse choices then
+    // persist across rebuilds): in the layer grid, every group except SOURCE
+    // starts collapsed; in the master panel, every group except AUDIO starts
+    // collapsed (OUTPUT is a static, non-collapsible section).
     layerLayout.forEach((g) => {
       if (g.name !== 'SOURCE') {
         collapsed.add('layer:' + g.name);
+      }
+    });
+    groups.forEach((g) => {
+      if (groupApplies(g, 'master') && g.name !== 'AUDIO') {
+        collapsed.add('master:' + g.name);
       }
     });
 
