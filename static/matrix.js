@@ -64,6 +64,23 @@
     return group.params.some((def) => applies(def, kind));
   }
 
+  // Layer-grid group order: AUDIO + AUDIO FX are hoisted to sit directly under
+  // LAYER (they live near the bottom of the shared schema). This only reorders
+  // the layer grid — the master panel keeps the schema order (buildMasterPanel
+  // iterates `groups` directly).
+  const LAYER_AUDIO_GROUPS = ['AUDIO', 'AUDIO FX'];
+  function layerGroupOrder() {
+    const head = [];   // LAYER (stays first)
+    const audio = [];  // AUDIO, AUDIO FX (hoisted, schema order preserved)
+    const tail = [];   // everything else, schema order
+    groups.forEach((g) => {
+      if (g.name === 'LAYER') head.push(g);
+      else if (LAYER_AUDIO_GROUPS.includes(g.name)) audio.push(g);
+      else tail.push(g);
+    });
+    return [...head, ...audio, ...tail];
+  }
+
   function computeSig(msg) {
     return (msg.layers || []).map((l) => l.id).join(',');
   }
@@ -197,8 +214,9 @@
     addColCells.push(addHead);
     gridEl.appendChild(addHead);
 
-    // Group + param rows (layer params only — master params live in the panel)
-    groups.forEach((group) => {
+    // Group + param rows (layer params only — master params live in the panel).
+    // Uses layerGroupOrder() so AUDIO/AUDIO FX sit right under LAYER.
+    layerGroupOrder().forEach((group) => {
       if (!groupApplies(group, 'layer')) return;
 
       // Group header band. The label cell (chevron + name) toggles collapse;
@@ -1375,6 +1393,16 @@
   function init() {
     // Main (master) panel open by default; the right edge chevron collapses it.
     app.classList.add('master-open');
+
+    // Default collapse: in the layer grid, every group except LAYER starts
+    // collapsed (seeded once here so user expand/collapse choices then persist
+    // across rebuilds). Only `layer:` keys are seeded — the master panel is
+    // untouched.
+    groups.forEach((g) => {
+      if (g.name !== 'LAYER' && groupApplies(g, 'layer')) {
+        collapsed.add('layer:' + g.name);
+      }
+    });
 
     const sb = document.getElementById('mx-sidebar-btn');
     if (sb) sb.addEventListener('click', toggleSidebar);
