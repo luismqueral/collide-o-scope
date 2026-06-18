@@ -170,14 +170,12 @@ fn run_export(
     }))
     .map_err(|e| format!("No GPU adapter found: {e}"))?;
 
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            label: Some("Export Device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            ..Default::default()
-        },
-    ))
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("Export Device"),
+        required_features: wgpu::Features::empty(),
+        required_limits: wgpu::Limits::default(),
+        ..Default::default()
+    }))
     .map_err(|e| format!("Failed to create export device: {e}"))?;
 
     let w = config.width;
@@ -408,8 +406,9 @@ fn run_export(
         })
     });
 
-    let composite_views: [wgpu::TextureView; 3] =
-        std::array::from_fn(|i| composite_textures[i].create_view(&wgpu::TextureViewDescriptor::default()));
+    let composite_views: [wgpu::TextureView; 3] = std::array::from_fn(|i| {
+        composite_textures[i].create_view(&wgpu::TextureViewDescriptor::default())
+    });
 
     // Previous-frame feedback texture (datamosh) — bound to effects binding 2.
     let feedback_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -475,7 +474,10 @@ fn run_export(
                 Ok(expr) => {
                     automations.insert(param.clone(), expr);
                 }
-                Err(e) => log::warn!("Export: bad automation '{param}' on layer '{}': {e}", layer_cfg.filename),
+                Err(e) => log::warn!(
+                    "Export: bad automation '{param}' on layer '{}': {e}",
+                    layer_cfg.filename
+                ),
             }
         }
 
@@ -548,15 +550,24 @@ fn run_export(
     let mut ffmpeg = Command::new("ffmpeg")
         .args([
             "-y",
-            "-f", "rawvideo",
-            "-pixel_format", "rgba",
-            "-video_size", &format!("{w}x{h}"),
-            "-framerate", &config.fps.to_string(),
-            "-i", "pipe:0",
-            "-c:v", "libx264",
-            "-preset", "slow",
-            "-crf", "18",
-            "-pix_fmt", "yuv420p",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            &format!("{w}x{h}"),
+            "-framerate",
+            &config.fps.to_string(),
+            "-i",
+            "pipe:0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
             &config.output_path,
         ])
         .stdin(Stdio::piped())
@@ -637,7 +648,9 @@ fn run_export(
 
             // Apply this layer's automations for the frame.
             for (param, expr) in &layer.automations {
-                layer.effects.set_by_name(param, expr.eval(time, beat, config.bpm));
+                layer
+                    .effects
+                    .set_by_name(param, expr.eval(time, beat, config.bpm));
             }
         }
 
@@ -688,7 +701,15 @@ fn run_export(
         // --- NTSC ---
         // Match preview: half-res (gritty, identical to the live look).
         // Otherwise full-res (sharper, finer artifacts).
-        let mut pixels = readback_pixels(&device, &queue, &composite_textures[0], &staging, w, h, bytes_per_row);
+        let mut pixels = readback_pixels(
+            &device,
+            &queue,
+            &composite_textures[0],
+            &staging,
+            w,
+            h,
+            bytes_per_row,
+        );
         if config.match_preview {
             ntsc_state.apply(&mut pixels, w, h);
         } else {
@@ -711,10 +732,15 @@ fn run_export(
     // then flushes and finalises the MP4. `wait_with_output` blocks until the
     // child exits and collects its captured stderr for the error check below.
     drop(ffmpeg_stdin);
-    let output = ffmpeg.wait_with_output().map_err(|e| format!("ffmpeg wait: {e}"))?;
+    let output = ffmpeg
+        .wait_with_output()
+        .map_err(|e| format!("ffmpeg wait: {e}"))?;
     if !output.status.success() && !progress.cancel.load(Ordering::Relaxed) {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("ffmpeg failed: {}", stderr.chars().take(200).collect::<String>()));
+        return Err(format!(
+            "ffmpeg failed: {}",
+            stderr.chars().take(200).collect::<String>()
+        ));
     }
 
     Ok(())
