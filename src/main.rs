@@ -300,6 +300,7 @@ impl App {
                             Ok(fresh) => {
                                 let layer = &mut self.layers[index];
                                 layer.decoder = fresh.decoder;
+                                layer.audio_only = fresh.audio_only;
                                 layer.texture = fresh.texture;
                                 layer.texture_view = fresh.texture_view;
                                 layer.width = fresh.width;
@@ -1165,7 +1166,8 @@ impl App {
                 speed: l.speed,
                 fps: l.fps,
                 blend_mode: l.blend_mode.as_str().to_string(),
-                progress: l.decoder.progress(),
+                progress: l.decoder.as_ref().map(|d| d.progress()).unwrap_or(0.0),
+                audio_only: l.audio_only,
                 automations: l.automations.iter()
                     .map(|(k, v)| (k.clone(), v.source.clone()))
                     .collect(),

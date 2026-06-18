@@ -79,7 +79,8 @@ pub struct Layer {
     /// track cards across reorders. Survives MoveLayer/RemoveLayer.
     pub id: u64,
     pub filename: String,
-    pub decoder: VideoDecoder,
+    /// `None` for audio-only layers (no video stream); the mixer drives audio.
+    pub decoder: Option<VideoDecoder>,
     pub texture: wgpu::Texture,
     pub texture_view: wgpu::TextureView,
     pub opacity: f32,
@@ -89,6 +90,8 @@ pub struct Layer {
     pub effects: EffectUniforms,
     pub width: u32,
     pub height: u32,
+    /// Audio-only clip: skipped in the visual composite, still mixed for audio.
+    pub audio_only: bool,
     // Transport
     pub speed: f32,             // 0.25..4.0 playback multiplier (1.0 = normal)
     pub fps: f32,               // target decode FPS (e.g. 30.0)
@@ -106,15 +109,24 @@ impl Layer {
         path: &str,
         device: &wgpu::Device,
     ) -> Result<Self, String> {
-        let decoder = VideoDecoder::open(path)?;
-        let width = decoder.width;
-        let height = decoder.height;
+        // Audio-only clips have no video stream: skip the (failing) decoder open
+        // and use a 1×1 placeholder texture. They're filtered out of the visual
+        // composite, so this texture is never actually sampled.
+        let audio_only = is_audio_file(std::path::Path::new(path));
+        let (decoder, width, height) = if audio_only {
+            (None, 1u32, 1u32)
+        } else {
+            let dec = VideoDecoder::open(path)?;
+            let (w, h) = (dec.width, dec.height);
+            (Some(dec), w, h)
+        };
 
         // Allocate the GPU texture decoded frames get copied into each tick.
         // wgpu uses "descriptor" structs (a settings bag) for resource creation.
         // `COPY_DST` = we'll write CPU pixels into it; `TEXTURE_BINDING` = the
         // shader can sample it. `Rgba8UnormSrgb` matches the decoder's RGBA8
-        // output and applies sRGB gamma correctly when sampled.
+        // output and applies sRGB gamma correctly when sampled. Audio-only
+        // layers get a 1×1 of this (never bound — see render_layers filter).
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Layer Texture"),
             size: wgpu::Extent3d {
@@ -150,6 +162,7 @@ impl Layer {
             id: 0,
             filename,
             decoder,
+            audio_only,
             texture,
             texture_view,
             opacity: 1.0,
@@ -175,6 +188,11 @@ impl Layer {
     /// when a tick runs long (e.g. the blocking VHS readback). Mirrors the export
     /// accumulator in render_export.rs, but capped for live use.
     pub fn advance(&mut self, dt: f32, queue: &wgpu::Queue) {
+        // Audio-only layers have no video decoder; audio is driven by the mixer
+        // thread, not by this per-frame pull. Nothing to advance here.
+        let Some(decoder) = &mut self.decoder else {
+            return;
+        };
         self.frame_accumulator += dt * self.speed;
         let interval = 1.0 / self.fps; // seconds per source frame
         let mut n = (self.frame_accumulator / interval).floor() as u32;
@@ -191,7 +209,7 @@ impl Layer {
         // Decode n frames; only the last is shown (skips intermediate frames).
         let mut last: Option<Vec<u8>> = None;
         for _ in 0..n {
-            if let Some(frame) = self.decoder.next_frame() {
+            if let Some(frame) = decoder.next_frame() {
                 last = Some(frame);
             }
         }
@@ -235,6 +253,21 @@ pub fn is_supported_media(path: &std::path::Path) -> bool {
             "mp4" | "webm" | "mov" | "avi" | "mkv"
             // images (held single frame) + animated gif (loops)
             | "gif" | "png" | "jpg" | "jpeg" | "bmp" | "webp" | "tiff" | "tif"
+            // audio-only (music bed / sound source — no video, see is_audio_file)
+            | "m4a" | "mp3" | "wav" | "aac" | "ogg" | "opus" | "flac" | "aiff" | "aif"
+        ),
+        None => false,
+    }
+}
+
+/// True for audio-only file extensions. These become layers with no video
+/// decoder (audio is driven entirely by the mixer thread), so they're skipped
+/// in the visual composite while keeping full per-layer audio controls.
+pub fn is_audio_file(path: &std::path::Path) -> bool {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => matches!(
+            ext.to_lowercase().as_str(),
+            "m4a" | "mp3" | "wav" | "aac" | "ogg" | "opus" | "flac" | "aiff" | "aif"
         ),
         None => false,
     }

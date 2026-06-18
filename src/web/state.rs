@@ -256,6 +256,9 @@ pub struct LayerSnapshot {
     pub fps: f32,
     pub blend_mode: String,
     pub progress: f32,
+    /// Audio-only clip (no video): the grid blanks video-only rows for it.
+    #[serde(default)]
+    pub audio_only: bool,
     /// Per-layer param automations: param name → expression text.
     #[serde(default)]
     pub automations: HashMap<String, String>,

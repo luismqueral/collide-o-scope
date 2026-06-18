@@ -665,8 +665,10 @@ impl Renderer {
         }
 
         // Render in reverse order: last layer in the vec is the bottom,
-        // first layer (index 0, "Layer 1" in UI) ends up on top.
-        let visible_layers: Vec<&Layer> = layers.iter().filter(|l| l.visible).rev().collect();
+        // first layer (index 0, "Layer 1" in UI) ends up on top. Audio-only
+        // layers have only a 1×1 placeholder texture, so they're excluded.
+        let visible_layers: Vec<&Layer> =
+            layers.iter().filter(|l| l.visible && !l.audio_only).rev().collect();
 
         // Each layer is handled in two steps: (1) run its effect shader into the
         // scratch texture [1], then (2) blend [1] over the accumulator [0]. The

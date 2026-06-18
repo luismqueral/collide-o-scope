@@ -2074,4 +2074,9 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .mx-colhead.mx-drop-before { box-shadow: inset 2px 0 0 var(--accent); }
 .mx-colhead.mx-drop-after { box-shadow: inset -2px 0 0 var(--accent); }
 
+/* Audio-only layer column: accent tint + a small music glyph by the label. */
+.mx-colhead.mx-col-audio { color: var(--accent); }
+.mx-col-audio-glyph { display: inline-flex; margin-left: 4px; opacity: 0.85; }
+.mx-col-audio-glyph svg { width: 11px; height: 11px; }
+
 /* --- Sidebar list rows (patches) --- */

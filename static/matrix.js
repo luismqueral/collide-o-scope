@@ -54,7 +54,7 @@
     // entry point for creating the first layer (opens the library in add mode).
     return layers.map((l, i) => ({
       key: 'layer:' + l.id, kind: 'layer', label: 'L' + (i + 1),
-      index: i, id: l.id, filename: l.filename,
+      index: i, id: l.id, filename: l.filename, audio_only: !!l.audio_only,
     }));
   }
 
@@ -73,6 +73,14 @@
   const layerLayout = window.LAYER_GROUPS;
   const defByKey = new Map();
   groups.forEach((g) => g.params.forEach((d) => defByKey.set(d.key, d)));
+
+  // Params that still apply to an audio-only column (no video). Everything else
+  // (color/warp/key/glitch/transform/blend + fps) is blanked as an mx-na cell.
+  const AUDIO_LAYER_PARAMS = new Set([
+    'clip', 'speed', 'paused',
+    'mute', 'volume', 'pan',
+    'eq_low', 'eq_mid', 'eq_high', 'delay_time', 'delay_feedback', 'delay_mix',
+  ]);
 
   // layerGroupOrder() returns schema-shaped groups ({ name, params }) built from
   // the LAYER_GROUPS layout, so buildMatrix's loop works unchanged.
@@ -175,10 +183,17 @@
     gridEl.appendChild(corner);
     columns.forEach((col) => {
       const h = document.createElement('div');
-      h.className = 'mx-colhead mx-col-' + col.kind;
+      h.className = 'mx-colhead mx-col-' + col.kind + (col.audio_only ? ' mx-col-audio' : '');
       h.textContent = col.label;
       if (col.filename) h.title = col.filename;
       col.headEl = h;
+      // Audio-only columns get a small music glyph for at-a-glance identification.
+      if (col.audio_only) {
+        const glyph = document.createElement('i');
+        glyph.className = 'mx-col-audio-glyph';
+        glyph.dataset.lucide = 'music';
+        h.appendChild(glyph);
+      }
       // Layer columns are draggable to reorder; MASTER stays pinned first.
       // They also carry a clip-timing progress bar beneath the title and a
       // remove (×) button to drop the layer.
@@ -222,6 +237,11 @@
     layerGroupOrder().forEach((group) => {
       if (!groupApplies(group, 'layer')) return;
 
+      // Does this group have any param that stays active on an audio-only
+      // column? If not (TRANSFORM, WARP, COLOR, …), audio columns get no
+      // dice/reset buttons — there's nothing for them to act on.
+      const groupHasAudioParam = group.params.some((def) => AUDIO_LAYER_PARAMS.has(def.key));
+
       // Group header band. The label cell (chevron + name) toggles collapse;
       // each layer column gets its own control cell with per-layer reset +
       // randomize. These control cells stay visible when the group collapses
@@ -237,7 +257,7 @@
         const ctl = document.createElement('div');
         ctl.className = 'mx-group-ctl';
         ctl.dataset.group = group.name;
-        if (col.kind === 'layer') {
+        if (col.kind === 'layer' && !(col.audio_only && !groupHasAudioParam)) {
           const rnd = document.createElement('button');
           rnd.className = 'mx-grp-btn';
           rnd.type = 'button';
@@ -290,7 +310,10 @@
         rowObj.labelEl = label;
 
         columns.forEach((col, c) => {
-          if (!applies(def, col.kind)) {
+          // Blank a cell if the param doesn't apply to this column kind, or if
+          // it's a video-only param on an audio-only column.
+          const audioBlank = col.audio_only && !AUDIO_LAYER_PARAMS.has(def.key);
+          if (!applies(def, col.kind) || audioBlank) {
             const na = document.createElement('div');
             na.className = 'mx-cell mx-na' + (tall ? ' mx-row-tall' : '');
             na.dataset.group = group.name;
