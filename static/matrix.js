@@ -361,7 +361,7 @@
 
   // Master FX panel — a single-column matrix (label + MASTER) in the right
   // slideout. Independent of layers, so it's built once. Shows only the groups
-  // that have master/global params (COLOR, DIGITAL, ANALOG, MOTION, VHS/NTSC).
+  // that have master/global params (AUDIO, COLOR, MOTION, VHS/NTSC) below OUTPUT.
   function buildMasterPanel() {
     masterRows = [];
     outputCells = [];

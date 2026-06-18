@@ -29,26 +29,48 @@ const MATRIX_GROUPS = [
     ],
   },
   {
+    // AUDIO hoisted to the top of the master column (right under OUTPUT),
+    // mirroring the layer view where AUDIO sits near the top.
+    name: 'AUDIO',
+    params: [
+      // Master bus: volume + brick-wall limiter. These read top-level snapshot
+      // fields (master_volume / master_limiter) and route through the dedicated
+      // set_master_audio_param action, NOT the generic set_param. `snap` overrides
+      // the snapshot key where it differs from the action param (limiter).
+      { key: 'master_volume', label: 'volume', ptype: 'float', min: -60, max: 6, step: 1, def: 0, automatable: false, noRandom: true, channels: 'master_audio' },
+      { key: 'limiter', label: 'limiter', ptype: 'bool', def: true, automatable: false, channels: 'master_audio', snap: 'master_limiter' },
+      // Per-layer: mute / volume (dB) / pan. Route through the standard
+      // set_layer_param path (keys match LayerSnapshot fields). noRandom keeps the
+      // dice button from blasting/scattering audio levels.
+      { key: 'mute', label: 'mute', ptype: 'bool', def: false, automatable: false, channels: 'layer' },
+      { key: 'volume', label: 'volume', ptype: 'float', min: -60, max: 6, step: 1, def: 0, automatable: false, noRandom: true, channels: 'layer' },
+      { key: 'pan', label: 'pan', ptype: 'bipolar', min: -1, max: 1, step: 0.05, def: 0, automatable: false, noRandom: true, channels: 'layer' },
+    ],
+  },
+  {
     name: 'COLOR',
     params: [
       { key: 'hue_shift', label: 'hue', ptype: 'bipolar', min: -180, max: 180, step: 1, def: 0, automatable: true, channels: 'both' },
       { key: 'saturation', label: 'sat', ptype: 'bipolar', min: -1, max: 1, step: 0.01, def: 0, automatable: true, channels: 'both' },
       { key: 'brightness', label: 'bright', ptype: 'bipolar', min: -1, max: 1, step: 0.01, def: 0, automatable: true, channels: 'both' },
       { key: 'contrast', label: 'contrast', ptype: 'bipolar', min: -1, max: 1, step: 0.01, def: 0, automatable: true, channels: 'both' },
-    ],
-  },
-  {
-    name: 'DIGITAL',
-    params: [
-      { key: 'pixelate', label: 'pixelate', ptype: 'float', min: 1, max: 32, step: 1, def: 1, automatable: true, channels: 'both' },
+      // Former DIGITAL params folded into COLOR (matches the layer view, where
+      // these moved to COLOR and pixelate moved to WARP — master has no WARP so
+      // pixelate lands here too, next to posterize).
       { key: 'rgb_split', label: 'rgb split', ptype: 'float', min: 0, max: 30, step: 0.5, def: 0, automatable: true, channels: 'both' },
       { key: 'posterize', label: 'posterize', ptype: 'float', min: 0, max: 16, step: 1, def: 0, automatable: true, channels: 'both' },
       { key: 'invert', label: 'invert', ptype: 'bool', def: false, automatable: false, channels: 'both' },
+      { key: 'pixelate', label: 'pixelate', ptype: 'float', min: 1, max: 32, step: 1, def: 1, automatable: true, channels: 'both' },
     ],
   },
   {
-    name: 'ANALOG',
+    // MOTION absorbs the former ANALOG group: output wobble (breathe) plus film
+    // degradation (grain / vignette / drift) live together as one master group.
+    name: 'MOTION',
     params: [
+      { key: 'breathe_scale', label: 'breathe sc', ptype: 'float', min: 0, max: 0.05, step: 0.001, def: 0, automatable: true, channels: 'master' },
+      { key: 'breathe_rotation', label: 'breathe rot', ptype: 'float', min: 0, max: 2, step: 0.05, def: 0, automatable: true, channels: 'master' },
+      { key: 'breathe_position', label: 'breathe pos', ptype: 'float', min: 0, max: 0.02, step: 0.001, def: 0, automatable: true, channels: 'master' },
       { key: 'grain_intensity', label: 'grain', ptype: 'float', min: 0, max: 0.3, step: 0.005, def: 0, automatable: true, channels: 'master' },
       { key: 'grain_size', label: 'grain sz', ptype: 'float', min: 1, max: 4, step: 0.25, def: 1, automatable: true, channels: 'master' },
       { key: 'grain_algo', label: 'grain algo', ptype: 'enum', def: 0, automatable: false, channels: 'master',
@@ -56,14 +78,6 @@ const MATRIX_GROUPS = [
       { key: 'color_grain', label: 'color grain', ptype: 'bool', def: false, automatable: false, channels: 'master' },
       { key: 'vignette', label: 'vignette', ptype: 'float', min: 0, max: 1.5, step: 0.01, def: 0, automatable: true, channels: 'master' },
       { key: 'color_drift', label: 'color drift', ptype: 'float', min: 0, max: 0.02, step: 0.001, def: 0, automatable: true, channels: 'master' },
-    ],
-  },
-  {
-    name: 'MOTION',
-    params: [
-      { key: 'breathe_scale', label: 'breathe sc', ptype: 'float', min: 0, max: 0.05, step: 0.001, def: 0, automatable: true, channels: 'master' },
-      { key: 'breathe_rotation', label: 'breathe rot', ptype: 'float', min: 0, max: 2, step: 0.05, def: 0, automatable: true, channels: 'master' },
-      { key: 'breathe_position', label: 'breathe pos', ptype: 'float', min: 0, max: 0.02, step: 0.001, def: 0, automatable: true, channels: 'master' },
     ],
   },
   {
@@ -130,23 +144,6 @@ const MATRIX_GROUPS = [
       { key: 'layer_scale', label: 'scale', ptype: 'float', min: 0.1, max: 4, step: 0.01, def: 1, automatable: true, channels: 'layer' },
       { key: 'fit_mode', label: 'fit', ptype: 'enum', def: 0, automatable: false, channels: 'layer',
         options: [ { value: 0, label: 'Stretch' }, { value: 1, label: 'Fit' }, { value: 2, label: 'Fill' } ] },
-    ],
-  },
-  {
-    name: 'AUDIO',
-    params: [
-      // Master bus: volume + brick-wall limiter. These read top-level snapshot
-      // fields (master_volume / master_limiter) and route through the dedicated
-      // set_master_audio_param action, NOT the generic set_param. `snap` overrides
-      // the snapshot key where it differs from the action param (limiter).
-      { key: 'master_volume', label: 'volume', ptype: 'float', min: -60, max: 6, step: 1, def: 0, automatable: false, noRandom: true, channels: 'master_audio' },
-      { key: 'limiter', label: 'limiter', ptype: 'bool', def: true, automatable: false, channels: 'master_audio', snap: 'master_limiter' },
-      // Per-layer: mute / volume (dB) / pan. Route through the standard
-      // set_layer_param path (keys match LayerSnapshot fields). noRandom keeps the
-      // dice button from blasting/scattering audio levels.
-      { key: 'mute', label: 'mute', ptype: 'bool', def: false, automatable: false, channels: 'layer' },
-      { key: 'volume', label: 'volume', ptype: 'float', min: -60, max: 6, step: 1, def: 0, automatable: false, noRandom: true, channels: 'layer' },
-      { key: 'pan', label: 'pan', ptype: 'bipolar', min: -1, max: 1, step: 0.05, def: 0, automatable: false, noRandom: true, channels: 'layer' },
     ],
   },
   {
