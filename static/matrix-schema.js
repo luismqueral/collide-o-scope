@@ -203,5 +203,31 @@ function CHANNEL_APPLIES(def, colKind) {
   return def.channels === colKind;
 }
 
+// LAYER_GROUPS — the per-layer grid's own grouping/order, decoupled from
+// MATRIX_GROUPS (which still drives the MASTER column unchanged). Each entry
+// lists param `keys`; matrix.js resolves them to the shared ParamDefs in
+// MATRIX_GROUPS via a key→def map, so min/max/step/etc. stay single-sourced.
+//
+// Differences from MATRIX_GROUPS for the layer view:
+//   - LAYER split into SOURCE (clip/speed/fps/paused) + BLEND (opacity/blend/visible).
+//   - TRANSFORM + WARP clustered early (geometry). pixelate folded into WARP.
+//   - DIGITAL dissolved: rgb_split → COLOR; pixelate → WARP. posterize/invert → COLOR.
+//   - KEY → COLOR KEY. SHIFT split into SLICE / BLOCKS / GLITCH. shift_chroma → COLOR.
+const LAYER_GROUPS = [
+  { name: 'SOURCE',    keys: ['clip', 'speed', 'fps', 'paused'] },
+  { name: 'BLEND',     keys: ['opacity', 'blend_mode', 'visible'] },
+  { name: 'AUDIO',     keys: ['mute', 'volume', 'pan'] },
+  { name: 'AUDIO FX',  keys: ['eq_low', 'eq_mid', 'eq_high', 'delay_time', 'delay_feedback', 'delay_mix'] },
+  { name: 'TRANSFORM', keys: ['layer_x', 'layer_y', 'layer_scale', 'fit_mode'] },
+  { name: 'WARP',      keys: ['wave_amp', 'wave_freq', 'wave_speed', 'wave_axis', 'swirl_angle', 'swirl_radius', 'bulge_strength', 'bulge_radius', 'pixelate'] },
+  { name: 'COLOR',     keys: ['hue_shift', 'saturation', 'brightness', 'contrast', 'invert', 'posterize', 'shift_chroma', 'rgb_split'] },
+  { name: 'COLOR KEY', keys: ['chroma_enable', 'chroma_color', 'chroma_threshold', 'chroma_smoothness', 'chroma_spill', 'chroma_bg_enable', 'chroma_bg_color'] },
+  { name: 'SLICE',     keys: ['slice_intensity', 'slice_height', 'slice_prob', 'slice_speed', 'slice_axis'] },
+  { name: 'BLOCKS',    keys: ['block_size', 'block_intensity', 'block_prob', 'block_speed'] },
+  { name: 'GLITCH',    keys: ['jitter_amount', 'jitter_speed', 'datamosh'] },
+  { name: 'FEEDBACK',  keys: ['feedback_persistence', 'feedback_zoom', 'feedback_rotate', 'feedback_luma_key', 'feedback_chroma', 'feedback_additive'] },
+];
+
 window.MATRIX_GROUPS = MATRIX_GROUPS;
 window.CHANNEL_APPLIES = CHANNEL_APPLIES;
+window.LAYER_GROUPS = LAYER_GROUPS;

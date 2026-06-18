@@ -748,10 +748,16 @@ impl App {
                 if let Some(layer) = self.layers.get_mut(index) {
                     let d = crate::effects::EffectUniforms::default();
                     match group.as_str() {
-                        "blend" => {
-                            layer.opacity = 1.0;
+                        "source" => {
+                            // Transport only (speed/fps). Clip + paused are left
+                            // alone — resetting a group shouldn't reload media.
                             layer.speed = 1.0;
                             layer.fps = 30.0;
+                        }
+                        "blend" => {
+                            // Composite params. visible is left alone (matches the
+                            // prior behavior of not toggling visibility on reset).
+                            layer.opacity = 1.0;
                             layer.blend_mode = crate::layers::BlendMode::Normal;
                         }
                         "audio" => {
@@ -770,18 +776,21 @@ impl App {
                             layer.audio.delay_mix = 0.0;
                         }
                         "color" => {
+                            // DIGITAL was dissolved into the layer view: rgb_split,
+                            // posterize and invert now live in COLOR (plus the
+                            // grade params and shift_chroma).
                             layer.effects.hue_shift = d.hue_shift;
                             layer.effects.saturation = d.saturation;
                             layer.effects.brightness = d.brightness;
                             layer.effects.contrast = d.contrast;
-                        }
-                        "digital" => {
-                            layer.effects.pixelate_size = d.pixelate_size;
-                            layer.effects.rgb_split = d.rgb_split;
-                            layer.effects.posterize = d.posterize;
                             layer.effects.invert = d.invert;
+                            layer.effects.posterize = d.posterize;
+                            layer.effects.shift_chroma = d.shift_chroma;
+                            layer.effects.rgb_split = d.rgb_split;
                         }
                         "warp" => {
+                            // pixelate (the other former DIGITAL param) folds into
+                            // WARP alongside the geometric distortions.
                             layer.effects.wave_amp = d.wave_amp;
                             layer.effects.wave_freq = d.wave_freq;
                             layer.effects.wave_speed = d.wave_speed;
@@ -790,8 +799,9 @@ impl App {
                             layer.effects.swirl_radius = d.swirl_radius;
                             layer.effects.bulge_strength = d.bulge_strength;
                             layer.effects.bulge_radius = d.bulge_radius;
+                            layer.effects.pixelate_size = d.pixelate_size;
                         }
-                        "key" => {
+                        "colorkey" => {
                             layer.effects.chroma_enable = d.chroma_enable;
                             layer.effects.chroma_threshold = d.chroma_threshold;
                             layer.effects.chroma_smoothness = d.chroma_smoothness;
@@ -804,17 +814,20 @@ impl App {
                             layer.effects.chroma_bg_g = d.chroma_bg_g;
                             layer.effects.chroma_bg_b = d.chroma_bg_b;
                         }
-                        "shift" => {
+                        "slice" => {
                             layer.effects.slice_intensity = d.slice_intensity;
                             layer.effects.slice_height = d.slice_height;
                             layer.effects.slice_prob = d.slice_prob;
                             layer.effects.slice_speed = d.slice_speed;
+                            layer.effects.slice_axis = d.slice_axis;
+                        }
+                        "blocks" => {
                             layer.effects.block_size = d.block_size;
                             layer.effects.block_intensity = d.block_intensity;
                             layer.effects.block_prob = d.block_prob;
                             layer.effects.block_speed = d.block_speed;
-                            layer.effects.shift_chroma = d.shift_chroma;
-                            layer.effects.slice_axis = d.slice_axis;
+                        }
+                        "glitch" => {
                             layer.effects.jitter_amount = d.jitter_amount;
                             layer.effects.jitter_speed = d.jitter_speed;
                             layer.effects.datamosh = d.datamosh;
@@ -835,15 +848,15 @@ impl App {
                         }
                         _ => {}
                     }
-                    // Resync the mixer for groups that touch audio: "audio"
-                    // (mute/volume/pan) and "blend" (resets speed → varispeed).
+                    // Resync the mixer for groups that touch audio: "audio"/"audiofx"
+                    // (mute/volume/pan/eq/delay) and "source" (resets speed → varispeed).
                     if let Some(audio) = &self.audio {
                         let id = self.layers[index].id;
                         match group.as_str() {
                             "audio" | "audiofx" => {
                                 audio.set_params(id, self.layers[index].audio)
                             }
-                            "blend" => audio.set_speed(id, self.layers[index].speed),
+                            "source" => audio.set_speed(id, self.layers[index].speed),
                             _ => {}
                         }
                     }

@@ -64,21 +64,22 @@
     return group.params.some((def) => applies(def, kind));
   }
 
-  // Layer-grid group order: AUDIO + AUDIO FX are hoisted to sit directly under
-  // LAYER (they live near the bottom of the shared schema). This only reorders
-  // the layer grid — the master panel keeps the schema order (buildMasterPanel
-  // iterates `groups` directly).
-  const LAYER_AUDIO_GROUPS = ['AUDIO', 'AUDIO FX'];
+  // Layer-grid grouping is decoupled from the schema: window.LAYER_GROUPS lists
+  // the layer view's own groups/order by param key (SOURCE/BLEND/.../GLITCH),
+  // while the master panel keeps iterating `groups` (MATRIX_GROUPS) directly.
+  // We resolve each key to its shared ParamDef via defByKey so min/max/step/etc.
+  // stay single-sourced in the schema.
+  const layerLayout = window.LAYER_GROUPS;
+  const defByKey = new Map();
+  groups.forEach((g) => g.params.forEach((d) => defByKey.set(d.key, d)));
+
+  // layerGroupOrder() returns schema-shaped groups ({ name, params }) built from
+  // the LAYER_GROUPS layout, so buildMatrix's loop works unchanged.
   function layerGroupOrder() {
-    const head = [];   // LAYER (stays first)
-    const audio = [];  // AUDIO, AUDIO FX (hoisted, schema order preserved)
-    const tail = [];   // everything else, schema order
-    groups.forEach((g) => {
-      if (g.name === 'LAYER') head.push(g);
-      else if (LAYER_AUDIO_GROUPS.includes(g.name)) audio.push(g);
-      else tail.push(g);
-    });
-    return [...head, ...audio, ...tail];
+    return layerLayout.map((g) => ({
+      name: g.name,
+      params: g.keys.map((k) => defByKey.get(k)).filter(Boolean),
+    }));
   }
 
   function computeSig(msg) {
@@ -323,12 +324,11 @@
     rebuildNav();
   }
 
-  // Matrix group name -> reset_layer_group key (LAYER is stored as "blend",
-  // "AUDIO FX" as "audiofx" — the backend keys have no spaces).
+  // Layer group name -> reset_layer_group key: lowercase, spaces removed
+  // (SOURCE→source, COLOR KEY→colorkey, AUDIO FX→audiofx, GLITCH→glitch, ...).
+  // Backend arms in main.rs must match these keys.
   function resetGroupKey(name) {
-    if (name === 'LAYER') return 'blend';
-    if (name === 'AUDIO FX') return 'audiofx';
-    return name.toLowerCase();
+    return name.toLowerCase().replace(/\s+/g, '');
   }
 
   function resetLayerGroup(groupName, index) {
@@ -338,9 +338,11 @@
   // Client-side randomize (mirrors classic): only numeric (float/bipolar) layer
   // params get a fresh in-range value; toggles/enums/colors/clips are skipped.
   function randomizeLayerGroup(groupName, index) {
-    const group = groups.find((g) => g.name === groupName);
-    if (!group) return;
-    group.params.forEach((def) => {
+    const layout = layerLayout.find((g) => g.name === groupName);
+    if (!layout) return;
+    layout.keys.forEach((k) => {
+      const def = defByKey.get(k);
+      if (!def) return;
       if (!applies(def, 'layer')) return;
       if (def.noRandom) return;
       if (def.ptype !== 'float' && def.ptype !== 'bipolar') return;
@@ -1394,12 +1396,12 @@
     // Main (master) panel open by default; the right edge chevron collapses it.
     app.classList.add('master-open');
 
-    // Default collapse: in the layer grid, every group except LAYER starts
+    // Default collapse: in the layer grid, every group except SOURCE starts
     // collapsed (seeded once here so user expand/collapse choices then persist
     // across rebuilds). Only `layer:` keys are seeded — the master panel is
     // untouched.
-    groups.forEach((g) => {
-      if (g.name !== 'LAYER' && groupApplies(g, 'layer')) {
+    layerLayout.forEach((g) => {
+      if (g.name !== 'SOURCE') {
         collapsed.add('layer:' + g.name);
       }
     });
