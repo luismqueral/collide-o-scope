@@ -28,8 +28,9 @@ mod decoder;
 mod dsp;
 mod output;
 
-use std::collections::VecDeque;
-use std::sync::atomic::Ordering;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread;
@@ -100,8 +101,13 @@ fn equal_power_pan(pan: f32) -> (f32, f32) {
 /// stable `Layer::id` (survives reorders/removals), never by index.
 enum AudioCommand {
     /// Register a new source decoding `path`'s audio track. No-ops silently if
-    /// the file has no audio stream.
-    AddSource { id: u64, path: String },
+    /// the file has no audio stream. `meter` is the shared peak cell the engine
+    /// reads for this layer's UI meter.
+    AddSource {
+        id: u64,
+        path: String,
+        meter: Arc<AtomicU32>,
+    },
     /// Drop a source (layer removed).
     RemoveSource { id: u64 },
     /// Swap a source's file in place (clip swap), keeping its params/speed.
@@ -136,6 +142,10 @@ struct LayerSource {
     /// Decoder hit an unrecoverable error — go silent but stay addressable so
     /// the layer can still be removed / clip-swapped by id.
     dead: bool,
+    /// This source's post-FX peak level (0..1, f32 bits), written each mixed
+    /// block and read by the UI for the per-layer meter. Shared with the engine
+    /// (main thread) via an `Arc` keyed by layer id.
+    meter: Arc<AtomicU32>,
 }
 
 impl LayerSource {
@@ -173,6 +183,8 @@ impl LayerSource {
     /// a paused source contributes nothing and does not advance.
     fn mix_into(&mut self, block: &mut [f32], out_channels: u16) {
         if self.paused {
+            // Paused contributes nothing — drop the meter so the UI shows idle.
+            self.meter.store(0.0f32.to_bits(), Ordering::Relaxed);
             return;
         }
         let ch = out_channels as usize;
@@ -189,6 +201,9 @@ impl LayerSource {
         // an EQ gain actually changed). DSP runs even when muted so the delay
         // tail stays time-aligned; gain=0 is applied *after* it.
         self.dsp.update_params(&self.params);
+
+        // Track this source's post-FX peak across the block for the UI meter.
+        let mut peak = 0.0f32;
 
         for f in 0..frames {
             // Drop frames we've advanced past so read_pos stays in [0, 1) and
@@ -240,9 +255,15 @@ impl LayerSource {
                     }
                 }
                 block[f * ch + c] += v;
+                let a = v.abs();
+                if a > peak {
+                    peak = a;
+                }
             }
             self.read_pos += step;
         }
+
+        self.meter.store(peak.to_bits(), Ordering::Relaxed);
     }
 }
 
@@ -252,6 +273,11 @@ impl LayerSource {
 pub struct AudioEngine {
     cmd_tx: Sender<AudioCommand>,
     master: Arc<MasterControls>,
+    // Per-layer peak cells keyed by layer id. The mixer thread holds a clone of
+    // each `Arc` inside its `LayerSource` and writes the peak per block; the
+    // main thread reads here for the UI meter. Only touched on the main thread,
+    // so a `RefCell` suffices (no cross-thread access to the map itself).
+    layer_meters: RefCell<HashMap<u64, Arc<AtomicU32>>>,
     // The cpal stream is kept alive for its whole lifetime; it is `!Send` on
     // some platforms, which is why `AudioEngine` lives on the main thread.
     _stream: cpal::Stream,
@@ -286,22 +312,30 @@ impl AudioEngine {
         Ok(Self {
             cmd_tx,
             master,
+            layer_meters: RefCell::new(HashMap::new()),
             _stream: stream,
             _mixer_thread: mixer_thread,
         })
     }
 
     /// Register a layer's audio track. Fire-and-forget: a missing audio stream
-    /// (e.g. a silent clip or image) just yields no source.
+    /// (e.g. a silent clip or image) just yields no source (the meter cell then
+    /// simply stays at 0).
     pub fn add_source(&self, id: u64, path: &str) {
+        let meter = Arc::new(AtomicU32::new(0.0f32.to_bits()));
+        self.layer_meters
+            .borrow_mut()
+            .insert(id, Arc::clone(&meter));
         let _ = self.cmd_tx.send(AudioCommand::AddSource {
             id,
             path: path.to_string(),
+            meter,
         });
     }
 
     /// Drop a layer's source (layer removed).
     pub fn remove_source(&self, id: u64) {
+        self.layer_meters.borrow_mut().remove(&id);
         let _ = self.cmd_tx.send(AudioCommand::RemoveSource { id });
     }
 
@@ -315,6 +349,7 @@ impl AudioEngine {
 
     /// Drop all sources (patch load rebuilds layers from scratch).
     pub fn clear_sources(&self) {
+        self.layer_meters.borrow_mut().clear();
         let _ = self.cmd_tx.send(AudioCommand::ClearSources);
     }
 
@@ -353,9 +388,19 @@ impl AudioEngine {
         self.master.limiter.store(on, Ordering::Relaxed);
     }
 
-    /// Current output peak level (0..1) for the UI meter.
+    /// Current output peak level (0..1) for the master UI meter.
     pub fn meter(&self) -> f32 {
         f32::from_bits(self.master.meter.load(Ordering::Relaxed))
+    }
+
+    /// Current post-FX peak level (0..1) for one layer's UI meter. Returns 0 for
+    /// an unknown id or a layer with no audio source.
+    pub fn layer_meter(&self, id: u64) -> f32 {
+        self.layer_meters
+            .borrow()
+            .get(&id)
+            .map(|m| f32::from_bits(m.load(Ordering::Relaxed)))
+            .unwrap_or(0.0)
     }
 }
 
@@ -418,7 +463,7 @@ fn apply_command(
     out_channels: u16,
 ) {
     match cmd {
-        AudioCommand::AddSource { id, path } => {
+        AudioCommand::AddSource { id, path, meter } => {
             match AudioDecoder::open(&path, out_rate, out_channels) {
                 Ok(decoder) => sources.push(LayerSource {
                     id,
@@ -430,6 +475,7 @@ fn apply_command(
                     read_pos: 0.0,
                     dsp: LayerDsp::new(out_rate, out_channels),
                     dead: false,
+                    meter,
                 }),
                 // No audio stream (image / silent clip) is normal — stay silent.
                 Err(e) => eprintln!("audio: no source for {path}: {e}"),

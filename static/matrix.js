@@ -36,6 +36,7 @@
   let vhsPresetName = null;         // currently applied VHS preset name (or null)
   let vhsPresetEls = null;          // { name, mod } spans on the VHS header
   let masterMeterFill = null;       // master output level meter fill (live peak)
+  let layerMeterFills = [];         // per-layer audio meter fills, indexed by column
   let addColCells = [];             // every cell in the trailing add-layer column
   const cellIndex = new Map();      // "<colKey>|<paramKey>" -> cellInfo
   const collapsed = new Set();      // collapsed group names
@@ -157,6 +158,7 @@
     columns = buildColumns(msg);
     rows = [];
     addColCells = [];
+    layerMeterFills = [];
     cellIndex.clear();
     gridEl.innerHTML = '';
     gridEl.style.setProperty('--mx-cols', columns.length);
@@ -267,6 +269,11 @@
       addColCells.push(ghTail);
       gridEl.appendChild(ghTail);
 
+      // Read-only per-layer meter row, pinned at the TOP of the AUDIO group
+      // (one bar per layer column, fed each frame from layer.meter). Collapses
+      // with the group via data-group.
+      if (group.name === 'AUDIO') buildLayerMeterRow(group.name);
+
       group.params.forEach((def) => {
         if (!applies(def, 'layer')) return;
         const rowObj = { group: group.name, def, cells: [] };
@@ -322,6 +329,41 @@
 
     built = true;
     rebuildNav();
+  }
+
+  // Read-only per-layer audio meter row for the layer grid: a "meter" label
+  // plus one horizontal bar per layer column whose fill tracks that layer's
+  // live post-FX peak (layer.meter, 0..1). Fills are stashed in layerMeterFills
+  // by column index and refreshed each frame in updateCells.
+  function buildLayerMeterRow(groupName) {
+    const label = document.createElement('div');
+    label.className = 'mx-label';
+    label.dataset.group = groupName;
+    label.textContent = 'meter';
+    gridEl.appendChild(label);
+
+    columns.forEach((col, c) => {
+      const cell = document.createElement('div');
+      cell.className = 'mx-cell mx-meter-cell';
+      cell.dataset.group = groupName;
+      if (col.kind === 'layer') {
+        const meter = document.createElement('div');
+        meter.className = 'audio-meter';
+        const fill = document.createElement('div');
+        fill.className = 'audio-meter-fill';
+        meter.appendChild(fill);
+        cell.appendChild(meter);
+        layerMeterFills[c] = fill;
+      }
+      gridEl.appendChild(cell);
+    });
+
+    // Trailing add-column filler keeps the row aligned with the grid template.
+    const pad = document.createElement('div');
+    pad.className = 'mx-addcol';
+    pad.dataset.group = groupName;
+    addColCells.push(pad);
+    gridEl.appendChild(pad);
   }
 
   // Layer group name -> reset_layer_group key: lowercase, spaces removed
@@ -420,6 +462,10 @@
       gh.appendChild(ctl);
       masterGridEl.appendChild(gh);
 
+      // Live output level meter pinned at the TOP of the AUDIO group (read-only
+      // peak, fed each frame from snapshot.meter — not an editable param row).
+      if (group.name === 'AUDIO') buildMasterMeterRow(group.name);
+
       group.params.forEach((def) => {
         if (!applies(def, 'master')) return;
 
@@ -438,10 +484,6 @@
         cellIndex.set(MASTER_COL.key + '|' + def.key, info);
         masterRows.push({ group: group.name, def, cell: info });
       });
-
-      // Live output level meter pinned under the AUDIO group (read-only peak,
-      // fed each frame from snapshot.meter — not an editable param row).
-      if (group.name === 'AUDIO') buildMasterMeterRow();
     });
 
     masterBuilt = true;
@@ -514,14 +556,16 @@
 
   // Read-only master output meter: a label + a thin horizontal bar whose fill
   // tracks the live peak level (0..1) broadcast in snapshot.meter.
-  function buildMasterMeterRow() {
+  function buildMasterMeterRow(groupName) {
     const label = document.createElement('div');
     label.className = 'mx-label';
+    label.dataset.group = groupName;
     label.textContent = 'meter';
     masterGridEl.appendChild(label);
 
     const cell = document.createElement('div');
     cell.className = 'mx-cell mx-meter-cell';
+    cell.dataset.group = groupName;
     const meter = document.createElement('div');
     meter.className = 'audio-meter';
     const fill = document.createElement('div');
@@ -924,6 +968,7 @@
   }
 
   function updateCells(msg) {
+    const layers = msg.layers || [];
     for (let ci = 0; ci < columns.length; ci++) {
       const col = columns[ci];
       const [autos, errors] = readAutos(msg, col);
@@ -931,6 +976,13 @@
         const info = rows[ri].cells[ci];
         if (!info) continue;
         updateCell(info, msg, autos, errors);
+      }
+      // Live per-layer audio meter (read-only row at the top of AUDIO).
+      const fill = layerMeterFills[ci];
+      if (fill) {
+        const layer = layers[col.index];
+        const m = Math.max(0, Math.min(1, (layer && layer.meter) || 0));
+        fill.style.width = (m * 100).toFixed(1) + '%';
       }
     }
   }

@@ -269,6 +269,9 @@ pub struct LayerSnapshot {
     pub volume: f32,
     #[serde(default)]
     pub pan: f32,
+    /// Live post-FX peak level (0..1) for the per-layer audio meter.
+    #[serde(default)]
+    pub meter: f32,
     // Per-layer audio FX (3-band EQ + tap delay)
     #[serde(default)]
     pub eq_low: f32,

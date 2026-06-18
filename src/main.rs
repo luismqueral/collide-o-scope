@@ -1173,6 +1173,7 @@ impl App {
                 mute: l.audio.mute,
                 volume: l.audio.volume,
                 pan: l.audio.pan,
+                meter: self.audio.as_ref().map(|a| a.layer_meter(l.id)).unwrap_or(0.0),
                 eq_low: l.audio.eq_low,
                 eq_mid: l.audio.eq_mid,
                 eq_high: l.audio.eq_high,
