@@ -2569,18 +2569,24 @@ fn fit_to_area(max_w: f32, max_h: f32, aspect: f32) -> (f32, f32) {
 fn configure_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 
+    // Fonts are vendored under assets/fonts/ and embedded at compile time, so
+    // the build is self-contained (works on CI and any clone, not just a Mac
+    // with these installed in ~/Library/Fonts). IBM Plex ships under the SIL
+    // Open Font License, which permits redistribution.
     fonts.font_data.insert(
         "IBMPlexSans".to_owned(),
-        Arc::new(egui::FontData::from_static(include_bytes!(
-            "/Users/luis/Library/Fonts/IBMPlexSans-Regular.otf"
-        ))),
+        Arc::new(egui::FontData::from_static(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/fonts/IBMPlexSans-Regular.otf"
+        )))),
     );
 
     fonts.font_data.insert(
         "IBMPlexMono".to_owned(),
-        Arc::new(egui::FontData::from_static(include_bytes!(
-            "/Users/luis/Library/Fonts/IBMPlexMono-Regular.otf"
-        ))),
+        Arc::new(egui::FontData::from_static(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/fonts/IBMPlexMono-Regular.otf"
+        )))),
     );
 
     fonts
