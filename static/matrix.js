@@ -1398,10 +1398,10 @@
 
     // Default collapse (seeded once here so user expand/collapse choices then
     // persist across rebuilds): in the layer grid, every group except SOURCE
-    // starts collapsed; in the master panel, every group except AUDIO starts
-    // collapsed (OUTPUT is a static, non-collapsible section).
+    // and AUDIO starts collapsed; in the master panel, every group except AUDIO
+    // starts collapsed (OUTPUT is a static, non-collapsible section).
     layerLayout.forEach((g) => {
-      if (g.name !== 'SOURCE') {
+      if (g.name !== 'SOURCE' && g.name !== 'AUDIO') {
         collapsed.add('layer:' + g.name);
       }
     });
