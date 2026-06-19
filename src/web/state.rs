@@ -94,6 +94,12 @@ fn default_quality() -> u32 {
     1080
 }
 
+/// serde default for `loop_end`: 1.0 = loop to the end of the clip. Lets old
+/// snapshots/patches (which predate loop trimming) deserialize to whole-clip.
+fn default_loop_end() -> f32 {
+    1.0
+}
+
 impl Default for AppSnapshot {
     fn default() -> Self {
         Self {
@@ -254,6 +260,12 @@ pub struct LayerSnapshot {
     pub opacity: f32,
     pub speed: f32,
     pub fps: f32,
+    // Loop window as fractions of the clip (0.0..1.0). Defaulted so older
+    // snapshots/patches (no loop fields) deserialize to the whole-clip loop.
+    #[serde(default)]
+    pub loop_start: f32,
+    #[serde(default = "default_loop_end")]
+    pub loop_end: f32,
     pub blend_mode: String,
     pub progress: f32,
     /// Audio-only clip (no video): the grid blanks video-only rows for it.
@@ -835,6 +847,106 @@ mod tests {
         eprintln!("web: unknown WebAction tag fails to deserialize");
         let bad = serde_json::json!({ "action": "not_a_real_action" });
         assert!(serde_json::from_value::<WebAction>(bad).is_err());
+    }
+
+    /// Build a fully-populated `LayerSnapshot` with a trimmed loop window. The
+    /// struct literal is compiler-checked, so adding a field forces this helper
+    /// to be updated (a deliberate guard).
+    fn sample_layer_snapshot() -> LayerSnapshot {
+        LayerSnapshot {
+            id: 7,
+            filename: "clip.mp4".to_string(),
+            visible: true,
+            paused: false,
+            opacity: 1.0,
+            speed: 1.0,
+            fps: 30.0,
+            loop_start: 0.2,
+            loop_end: 0.8,
+            blend_mode: "normal".to_string(),
+            progress: 0.0,
+            audio_only: false,
+            automations: HashMap::new(),
+            automation_errors: HashMap::new(),
+            mute: false,
+            volume: 0.0,
+            pan: 0.0,
+            meter: 0.0,
+            eq_low: 0.0,
+            eq_mid: 0.0,
+            eq_high: 0.0,
+            delay_time: 0.0,
+            delay_feedback: 0.0,
+            delay_mix: 0.0,
+            hue_shift: 0.0,
+            saturation: 0.0,
+            brightness: 0.0,
+            contrast: 0.0,
+            pixelate: 1.0,
+            rgb_split: 0.0,
+            posterize: 0.0,
+            invert: false,
+            wave_amp: 0.0,
+            wave_freq: 0.0,
+            wave_speed: 0.0,
+            wave_axis: 0.0,
+            swirl_angle: 0.0,
+            swirl_radius: 0.0,
+            bulge_strength: 0.0,
+            bulge_radius: 0.5,
+            chroma_enable: false,
+            chroma_threshold: 0.0,
+            chroma_smoothness: 0.0,
+            chroma_spill: 0.0,
+            chroma_color: "#00ff00".to_string(),
+            chroma_bg_enable: false,
+            chroma_bg_color: "#000000".to_string(),
+            slice_intensity: 0.0,
+            slice_height: 0.0,
+            slice_prob: 0.0,
+            slice_speed: 0.0,
+            block_size: 0.0,
+            block_intensity: 0.0,
+            block_prob: 0.0,
+            block_speed: 0.0,
+            shift_chroma: 0.0,
+            slice_axis: 0.0,
+            jitter_amount: 0.0,
+            jitter_speed: 0.0,
+            datamosh: 0.0,
+            feedback_persistence: 0.0,
+            feedback_zoom: 1.0,
+            feedback_rotate: 0.0,
+            feedback_luma_key: 0.0,
+            feedback_chroma: 0.0,
+            feedback_additive: 0.0,
+            layer_x: 0.0,
+            layer_y: 0.0,
+            layer_scale: 1.0,
+            fit_mode: 0,
+        }
+    }
+
+    /// `LayerSnapshot` carries the loop window through a JSON round-trip, and an
+    /// older snapshot lacking the fields deserializes to the whole-clip default.
+    #[test]
+    fn layer_snapshot_loop_window_json_round_trips() {
+        eprintln!("web: LayerSnapshot loop window round-trips; absent fields default to 0.0/1.0");
+        let snap = sample_layer_snapshot();
+        let json = serde_json::to_string(&snap).expect("serialize");
+        let back: LayerSnapshot = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.loop_start, 0.2);
+        assert_eq!(back.loop_end, 0.8);
+
+        // Drop the loop keys to simulate an older snapshot, then deserialize:
+        // serde defaults must fill in the whole-clip window (0.0..1.0).
+        let mut value = serde_json::to_value(&snap).expect("to value");
+        let obj = value.as_object_mut().unwrap();
+        obj.remove("loop_start");
+        obj.remove("loop_end");
+        let old: LayerSnapshot = serde_json::from_value(value).expect("deserialize without loop");
+        assert_eq!(old.loop_start, 0.0, "absent loop_start defaults to 0.0");
+        assert_eq!(old.loop_end, 1.0, "absent loop_end defaults to 1.0");
     }
 
     /// `AppSnapshot::default` has the expected field values and survives a full

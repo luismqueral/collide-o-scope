@@ -458,6 +458,19 @@ impl App {
                                 layer.fps = (v as f32).clamp(1.0, 60.0);
                             }
                         }
+                        // Loop in/out points (fractions of the clip). Set the one
+                        // field, then push the pair through `set_loop` so the
+                        // decoder's window updates (and gets clamped/ordered).
+                        "loop_start" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.set_loop((v as f32).clamp(0.0, 1.0), layer.loop_end);
+                            }
+                        }
+                        "loop_end" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.set_loop(layer.loop_start, (v as f32).clamp(0.0, 1.0));
+                            }
+                        }
                         "blend_mode" => {
                             if let Some(s) = value.as_str() {
                                 layer.blend_mode = match s {
@@ -775,10 +788,13 @@ impl App {
                     let d = crate::effects::EffectUniforms::default();
                     match group.as_str() {
                         "source" => {
-                            // Transport only (speed/fps). Clip + paused are left
-                            // alone — resetting a group shouldn't reload media.
+                            // Transport only (speed/fps + loop window). Clip +
+                            // paused are left alone — resetting a group shouldn't
+                            // reload media.
                             layer.speed = 1.0;
                             layer.fps = 30.0;
+                            // Back to whole-clip loop (forwards into the decoder).
+                            layer.set_loop(0.0, 1.0);
                         }
                         "blend" => {
                             // Composite params. visible is left alone (matches the
@@ -1200,6 +1216,8 @@ impl App {
                     opacity: l.opacity,
                     speed: l.speed,
                     fps: l.fps,
+                    loop_start: l.loop_start,
+                    loop_end: l.loop_end,
                     blend_mode: l.blend_mode.as_str().to_string(),
                     progress: l.decoder.as_ref().map(|d| d.progress()).unwrap_or(0.0),
                     audio_only: l.audio_only,
