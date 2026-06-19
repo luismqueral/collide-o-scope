@@ -232,16 +232,21 @@ mod tests {
     use super::*;
     use crate::test_support::{synth_video, write_non_media};
 
+    /// Opening a known fixture reports the clip's true pixel dimensions.
     #[test]
     fn open_reads_dimensions_from_fixture() {
+        eprintln!("video: VideoDecoder::open reports the fixture's width and height");
         let (_dir, path) = synth_video(64, 48, 10, 0.5);
         let dec = VideoDecoder::open(path.to_str().unwrap()).expect("open fixture");
         assert_eq!(dec.width, 64);
         assert_eq!(dec.height, 48);
     }
 
+    /// Opening a path that doesn't exist returns an Err naming the failure
+    /// ("Cannot open"), rather than panicking or half-initializing a decoder.
     #[test]
     fn open_errors_on_bogus_path() {
+        eprintln!("video: VideoDecoder::open errors on a missing file path");
         let err = match VideoDecoder::open("/no/such/file.mp4") {
             Ok(_) => panic!("expected open to fail on a missing file"),
             Err(e) => e,
@@ -249,16 +254,22 @@ mod tests {
         assert!(err.contains("Cannot open"), "unexpected error: {err}");
     }
 
+    /// Opening a plain text file (no decodable video stream) returns an Err
+    /// instead of a half-built decoder.
     #[test]
     fn open_errors_on_non_media_file() {
+        eprintln!("video: VideoDecoder::open errors on a non-media file");
         let (_dir, path) = write_non_media();
         // A text file has no decodable video stream; open must fail rather than
         // hand back a half-built decoder.
         assert!(VideoDecoder::open(path.to_str().unwrap()).is_err());
     }
 
+    /// Decoding one frame yields a buffer of exactly width × height × 4 bytes
+    /// (RGBA), confirming the scaler output size.
     #[test]
     fn next_frame_yields_rgba_sized_buffer() {
+        eprintln!("video: next_frame returns an RGBA buffer sized to the frame");
         let (_dir, path) = synth_video(64, 48, 10, 0.5);
         let mut dec = VideoDecoder::open(path.to_str().unwrap()).expect("open fixture");
         let frame = dec.next_frame().expect("decode one frame");
@@ -266,8 +277,11 @@ mod tests {
         assert_eq!(frame.len(), 64 * 48 * 4);
     }
 
+    /// progress() starts at 0, stays within [0, 1), advances as frames decode,
+    /// and wraps back down at a loop boundary.
     #[test]
     fn progress_advances_and_wraps_on_loop() {
+        eprintln!("video: progress stays in [0,1), advances, and wraps on loop");
         let (_dir, path) = synth_video(64, 48, 10, 0.5); // ~5 frames
         let mut dec = VideoDecoder::open(path.to_str().unwrap()).expect("open fixture");
         assert_eq!(dec.progress(), 0.0, "no frames decoded yet");

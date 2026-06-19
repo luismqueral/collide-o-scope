@@ -79,6 +79,11 @@ no media is committed. nextest's per-test process isolation keeps `ffmpeg::init(
 state from leaking between tests. CI (`.github/workflows/ci.yml`) runs on macOS (Homebrew
 ffmpeg 8, matching the pinned `ffmpeg-next`) and skips the GPU tests.
 
+Each test has a `///` doc comment describing what it verifies and prints the same as a
+one-line `eprintln!` (shown only with `cargo nextest run --no-capture`; captured otherwise).
+The `default` nextest profile sets `status-level = "all"`, so a normal run prints every test
+(pass/skip) as a checklist. `cargo nextest list` shows the full roster without running it.
+
 ## Frame pipeline
 
 ```

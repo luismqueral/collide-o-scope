@@ -1742,8 +1742,11 @@ audio:
         serde_yaml::from_str(yaml).expect("parse sample patch")
     }
 
+    /// A representative patch survives a YAML serialize → deserialize round-trip
+    /// with all key fields preserved.
     #[test]
     fn patch_state_yaml_round_trips() {
+        eprintln!("patch: PatchState round-trips through YAML");
         let patch = sample_patch();
         let yaml = serde_yaml::to_string(&patch).expect("serialize");
         let back: PatchState = serde_yaml::from_str(&yaml).expect("deserialize");
@@ -1765,8 +1768,11 @@ audio:
         assert!(!lim);
     }
 
+    /// A minimal patch with only required fields loads, filling every absent
+    /// field from its serde default.
     #[test]
     fn minimal_yaml_relies_on_serde_defaults() {
+        eprintln!("patch: minimal YAML falls back to serde defaults");
         // An old/minimal patch: only the required fields. Everything else must
         // fall back to its serde default (guards patch-format drift).
         let yaml = "master: {}\nlayers:\n  - filename: only.mp4\n";
@@ -1789,8 +1795,11 @@ audio:
         assert!(lim);
     }
 
+    /// Out-of-range `EffectsConfig` values are clamped (and `fit_mode` rounded)
+    /// when applied to the GPU uniforms.
     #[test]
     fn effects_config_apply_to_uniforms_clamps() {
+        eprintln!("patch: EffectsConfig apply_to_uniforms clamps out-of-range values");
         let mut cfg = EffectsConfig::default();
         cfg.pixelate = 999.0;
         cfg.rgb_split = -5.0;
@@ -1812,8 +1821,11 @@ audio:
         assert_eq!(u.fit_mode, 2.0);
     }
 
+    /// In-range uniform values round-trip through uniforms → config → uniforms
+    /// unchanged.
     #[test]
     fn effects_config_from_apply_symmetry() {
+        eprintln!("patch: EffectsConfig from/apply uniforms is symmetric");
         // Round-trip in-range uniform values: uniforms → config → uniforms.
         let mut u = EffectUniforms::default();
         u.rgb_split = 10.0;
@@ -1837,8 +1849,11 @@ audio:
         assert_eq!(back.layer_scale, 2.0);
     }
 
+    /// Known parameter names resolve to metadata with a sane range, and unknown
+    /// names return none.
     #[test]
     fn param_meta_lookup_coverage() {
+        eprintln!("patch: param_meta resolves known params and rejects unknown");
         // A representative set of known params must resolve with a sane range.
         for name in [
             "pixelate",
@@ -1864,8 +1879,11 @@ audio:
         assert!(param_meta("not_a_param").is_none());
     }
 
+    /// `EffectsConfig::set_field` parses valid values, and rejects unparseable
+    /// values and unknown keys without mutating state.
     #[test]
     fn effects_config_set_field_parses_and_rejects() {
+        eprintln!("patch: EffectsConfig set_field parses valid input and rejects bad keys/values");
         let mut cfg = EffectsConfig::default();
         // Valid numeric.
         assert!(cfg.set_field("rgb_split", "7.5"));
@@ -1883,8 +1901,11 @@ audio:
         assert!(!cfg.set_field("nonexistent", "1.0"));
     }
 
+    /// `LayerConfig::set_field` accepts blend_mode strings verbatim, parses
+    /// numeric/bool fields, and rejects bad values and unknown keys.
     #[test]
     fn layer_config_set_field_handles_blend_mode_strings() {
+        eprintln!("patch: LayerConfig set_field handles blend_mode and typed fields");
         // blend_mode accepts any string verbatim (always recognized).
         let mut cfg = sample_patch().layers.remove(1); // b.mp4 (defaults)
         assert!(cfg.set_field("blend_mode", "multiply"));
@@ -1899,8 +1920,10 @@ audio:
         assert!(!cfg.set_field("nope", "x"));
     }
 
+    /// `NtscConfig` round-trips faithfully through from_params → to_params.
     #[test]
     fn ntsc_config_from_to_params_round_trips() {
+        eprintln!("patch: NtscConfig from_params/to_params round-trips");
         let mut p = NtscParams::default();
         p.enabled = true;
         p.tape_speed = 2;
@@ -1918,8 +1941,11 @@ audio:
         assert_abs_diff_eq!(back.snow_intensity, 0.5, epsilon = 1e-6);
     }
 
+    /// Compiling master automations keeps valid expressions and routes invalid
+    /// ones into the errors map.
     #[test]
     fn compile_master_automations_maps_valid_and_errors() {
+        eprintln!("patch: compile_master_automations separates valid exprs from errors");
         let mut patch = sample_patch();
         patch.master_automations.clear();
         patch

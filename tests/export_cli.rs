@@ -33,9 +33,12 @@ fn synth_clip(path: &Path) {
     assert!(status.success(), "ffmpeg fixture synthesis failed");
 }
 
+/// End-to-end: the built binary's `render` subcommand decodes a clip, runs the
+/// full FX/composite path, and writes a non-trivial MP4 to the requested path.
 #[test]
 #[ignore = "requires GPU (headless wgpu) — run with --run-ignored all"]
 fn render_subcommand_exports_an_mp4() {
+    eprintln!("export-e2e: render subcommand produces a non-trivial MP4 end-to-end");
     let dir = tempfile::tempdir().expect("create tempdir");
     let lib = dir.path();
 

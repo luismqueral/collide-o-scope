@@ -329,8 +329,10 @@ mod tests {
         c.iter().all(|v| v.is_finite())
     }
 
+    /// At 0 dB every RBJ band collapses to a flat H(z)=1 (b0≈1, b1≈a1, b2≈a2).
     #[test]
     fn shelves_and_peak_are_identity_at_0db() {
+        eprintln!("audio-dsp: 0 dB shelves and peak collapse to a flat response");
         // At 0 dB gain every RBJ band collapses to H(z)=1: b0≈1 and the
         // numerator equals the denominator (b1≈a1, b2≈a2).
         for c in [
@@ -344,8 +346,10 @@ mod tests {
         }
     }
 
+    /// A biquad loaded with 0 dB coefficients passes its input through unchanged.
     #[test]
     fn identity_coeffs_pass_signal_through_unchanged() {
+        eprintln!("audio-dsp: 0 dB biquad passes the input signal through unchanged");
         // Feeding a signal through a biquad loaded with 0 dB coeffs returns the
         // input (the transfer function is exactly 1).
         let mut bq = Biquad::identity();
@@ -356,8 +360,10 @@ mod tests {
         }
     }
 
+    /// All band coefficients stay finite across the full −24..+12 dB gain range.
     #[test]
     fn coeffs_stay_finite_across_gain_range() {
+        eprintln!("audio-dsp: band coefficients stay finite across the full gain range");
         let mut db = -24.0;
         while db <= 12.0 {
             assert!(coeffs_finite(&low_shelf(LOW_FREQ, FS, db)), "low {db}");
@@ -370,8 +376,10 @@ mod tests {
         }
     }
 
+    /// A pure-delay biquad emits the previous input and `reset` clears its history.
     #[test]
     fn biquad_process_updates_history() {
+        eprintln!("audio-dsp: biquad advances its history and reset clears it");
         // b1 = 1, everything else 0 → a pure one-sample delay (y[n] = x[n-1]).
         let mut bq = Biquad::identity();
         bq.set_coeffs([0.0, 1.0, 0.0, 0.0, 0.0]);
@@ -384,8 +392,10 @@ mod tests {
         assert_eq!(bq.process(0.0), 0.0);
     }
 
+    /// `update_params` clamps delay time, feedback, and mix into their valid ranges.
     #[test]
     fn update_params_clamps_delay_settings() {
+        eprintln!("audio-dsp: update_params clamps delay time, feedback, and mix");
         let mut dsp = LayerDsp::new(48_000, 2);
         let mut p = AudioParams::default();
         p.delay_time = 5_000.0; // over MAX_DELAY_MS (1000)

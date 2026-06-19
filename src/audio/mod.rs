@@ -532,23 +532,29 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
 
+    /// `db_to_gain` hits its reference points: 0 dB unity, −6 dB ≈ half, +6 dB ≈ 2×.
     #[test]
     fn db_to_gain_reference_points() {
+        eprintln!("audio: db_to_gain matches its dB reference points");
         assert_abs_diff_eq!(db_to_gain(0.0), 1.0, epsilon = 1e-6); // unity
         assert_abs_diff_eq!(db_to_gain(-6.0), 0.5012, epsilon = 1e-3); // ≈ half amplitude
         assert_abs_diff_eq!(db_to_gain(6.0), 1.9953, epsilon = 1e-3); // ≈ +6 dB
     }
 
+    /// `db_to_gain` returns exactly zero at or below the dB floor.
     #[test]
     fn db_to_gain_floors_to_silence() {
+        eprintln!("audio: db_to_gain floors to exact silence at/below the dB floor");
         // At or below the floor it is *exactly* zero, not a tiny trickle.
         assert_eq!(db_to_gain(DB_FLOOR), 0.0);
         assert_eq!(db_to_gain(-60.0), 0.0);
         assert_eq!(db_to_gain(-120.0), 0.0);
     }
 
+    /// `equal_power_pan` gives ~0.707 each at center and full level on hard sides.
     #[test]
     fn equal_power_pan_center_and_hard_sides() {
+        eprintln!("audio: equal_power_pan yields center 0.707 and hard-side full level");
         let (l, r) = equal_power_pan(0.0);
         assert_abs_diff_eq!(l, std::f32::consts::FRAC_1_SQRT_2, epsilon = 1e-6);
         assert_abs_diff_eq!(r, std::f32::consts::FRAC_1_SQRT_2, epsilon = 1e-6);
@@ -562,8 +568,10 @@ mod tests {
         assert_abs_diff_eq!(r, 1.0, epsilon = 1e-6);
     }
 
+    /// `equal_power_pan` clamps out-of-range input and keeps l²+r²≈1 across the sweep.
     #[test]
     fn equal_power_pan_clamps_and_conserves_power() {
+        eprintln!("audio: equal_power_pan clamps input and conserves power across the sweep");
         // Out-of-range pan is clamped to the hard-side result.
         assert_eq!(equal_power_pan(5.0), equal_power_pan(1.0));
         assert_eq!(equal_power_pan(-5.0), equal_power_pan(-1.0));
@@ -576,8 +584,10 @@ mod tests {
         }
     }
 
+    /// `AudioParams::default` is fully neutral: no mute and all gains/FX at zero.
     #[test]
     fn audio_params_default_is_neutral() {
+        eprintln!("audio: AudioParams::default is neutral with all gains and FX at zero");
         let p = AudioParams::default();
         assert!(!p.mute);
         assert_eq!(p.volume, 0.0);

@@ -156,11 +156,18 @@ Tests run with [cargo-nextest](https://nexte.st/) (`curl -LsSf https://get.nexte
 ```sh
 cargo nextest run                    # fast hardware-free unit + ffmpeg integration tests
 cargo nextest run --run-ignored all  # also runs the GPU export E2E (needs a real GPU)
+cargo nextest run --no-capture       # also prints each test's one-line description as it runs
+cargo nextest list                   # list every test (grouped by module) without running
 ```
 
 GPU-dependent tests are marked `#[ignore]` so the default run (and CI) stays
 hardware-free; ffmpeg tests synthesize their own tiny fixtures via the system
 `ffmpeg`. There are no doctests yet (those would run via `cargo test --doc`).
+
+Every test carries a `///` doc comment saying what it verifies, and prints the
+same as a one-line description (visible with `--no-capture`). The nextest
+`default` profile uses `status-level = "all"`, so the output lists every test —
+pass or skip — as a checklist of what's covered.
 
 ## Controls (render window)
 

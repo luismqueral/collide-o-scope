@@ -8,6 +8,11 @@
 [profile.default]
 # A pure unit test that takes this long is almost certainly hung.
 slow-timeout = { period = "30s", terminate-after = 2 }
+# Print a line for *every* test as it runs (not just failures), so the output
+# reads as a checklist of what's being verified. `final-status-level = "all"`
+# repeats the full pass/skip roster in the end-of-run summary too.
+status-level = "all"
+final-status-level = "all"
 
 [profile.ci]
 # CI: retry once to absorb the occasional flaky ffmpeg/timing test, and emit
