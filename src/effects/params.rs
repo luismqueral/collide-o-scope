@@ -4,19 +4,19 @@
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct EffectUniforms {
     // vec4 #1
-    pub pixelate_size: f32,  // 1.0 = off, 2..32 = block size in pixels
-    pub rgb_split: f32,      // 0.0 = off, 1..30 = horizontal pixel offset
+    pub pixelate_size: f32, // 1.0 = off, 2..32 = block size in pixels
+    pub rgb_split: f32,     // 0.0 = off, 1..30 = horizontal pixel offset
     pub resolution: [f32; 2],
     // vec4 #2
-    pub hue_shift: f32,      // -180..180 degrees
-    pub saturation: f32,     // -1..1 (0 = no change)
-    pub brightness: f32,     // -1..1 (0 = no change)
-    pub contrast: f32,       // -1..1 (0 = no change)
+    pub hue_shift: f32,  // -180..180 degrees
+    pub saturation: f32, // -1..1 (0 = no change)
+    pub brightness: f32, // -1..1 (0 = no change)
+    pub contrast: f32,   // -1..1 (0 = no change)
     // vec4 #3
-    pub posterize: f32,      // 0 = off, 2..16 = color levels
-    pub invert: f32,         // 0.0 = off, 1.0 = full invert
-    pub downsample: f32,     // 1.0 = full res, 0.05..1.0 = fraction (lower = blurrier)
-    pub time: f32,           // elapsed seconds (for animated noise)
+    pub posterize: f32,  // 0 = off, 2..16 = color levels
+    pub invert: f32,     // 0.0 = off, 1.0 = full invert
+    pub downsample: f32, // 1.0 = full res, 0.05..1.0 = fraction (lower = blurrier)
+    pub time: f32,       // elapsed seconds (for animated noise)
     // vec4 #4 — Analog: grain
     pub grain_intensity: f32, // 0.0 = off, 0.01..0.3
     pub grain_size: f32,      // 1.0 = fine, 2..4 = coarse
@@ -28,25 +28,25 @@ pub struct EffectUniforms {
     pub breathe_position: f32, // 0.0 = off, 0.0..0.02 (drift)
     pub vignette: f32,         // 0.0 = off, 0.0..1.5
     // vec4 #6 — Analog: color drift + Warp: wave
-    pub color_drift: f32,     // 0.0 = off, 0.0..0.02 (per-frame random aberration)
-    pub wave_amp: f32,        // 0.0 = off, 0.0..0.10 (UV displacement amplitude)
-    pub wave_freq: f32,       // wave cycles across the frame
-    pub wave_speed: f32,      // scroll speed (multiplies time)
+    pub color_drift: f32, // 0.0 = off, 0.0..0.02 (per-frame random aberration)
+    pub wave_amp: f32,    // 0.0 = off, 0.0..0.10 (UV displacement amplitude)
+    pub wave_freq: f32,   // wave cycles across the frame
+    pub wave_speed: f32,  // scroll speed (multiplies time)
     // vec4 #7 — Warp: wave axis + swirl + bulge strength
-    pub wave_axis: f32,       // 0 = horizontal, 1 = vertical, 2 = both
-    pub swirl_angle: f32,     // -720..720 degrees at center (0 = off)
-    pub swirl_radius: f32,    // 0..1 radius of influence (UV)
-    pub bulge_strength: f32,  // -1..1 (+ bulge / - pinch, 0 = off)
+    pub wave_axis: f32,      // 0 = horizontal, 1 = vertical, 2 = both
+    pub swirl_angle: f32,    // -720..720 degrees at center (0 = off)
+    pub swirl_radius: f32,   // 0..1 radius of influence (UV)
+    pub bulge_strength: f32, // -1..1 (+ bulge / - pinch, 0 = off)
     // vec4 #8 — Warp: bulge radius + Chroma: enable/threshold/smoothness
-    pub bulge_radius: f32,    // 0..1 extent of the lens
-    pub chroma_enable: f32,   // 0.0 = off, 1.0 = key on
-    pub chroma_threshold: f32,// 0..1 how close to key color counts as keyed
-    pub chroma_smoothness: f32,// 0..1 soft edge / feather past threshold
+    pub bulge_radius: f32,      // 0..1 extent of the lens
+    pub chroma_enable: f32,     // 0.0 = off, 1.0 = key on
+    pub chroma_threshold: f32,  // 0..1 how close to key color counts as keyed
+    pub chroma_smoothness: f32, // 0..1 soft edge / feather past threshold
     // vec4 #9 — Chroma: spill + key color (sRGB 0..1)
-    pub chroma_spill: f32,    // 0..1 suppress residual key tint
-    pub chroma_color_r: f32,  // key color red (sRGB 0..1)
-    pub chroma_color_g: f32,  // key color green (sRGB 0..1)
-    pub chroma_color_b: f32,  // key color blue (sRGB 0..1)
+    pub chroma_spill: f32,   // 0..1 suppress residual key tint
+    pub chroma_color_r: f32, // key color red (sRGB 0..1)
+    pub chroma_color_g: f32, // key color green (sRGB 0..1)
+    pub chroma_color_b: f32, // key color blue (sRGB 0..1)
     // vec4 #10 — Shift: slice (scanline-band displacement glitch)
     pub slice_intensity: f32, // 0..1 max horizontal shift (fraction of width)
     pub slice_height: f32,    // 1..128 band thickness in pixels
@@ -58,18 +58,18 @@ pub struct EffectUniforms {
     pub block_prob: f32,      // 0..1 fraction of blocks displaced
     pub block_speed: f32,     // 0..30 reseed rate (steps/sec)
     // vec4 #12 — Shift: chroma fringing + slice axis + continuous jitter
-    pub shift_chroma: f32,    // 0..1 R/B channel offset on displaced regions
-    pub slice_axis: f32,      // 0 = horizontal bands (shift X), 1 = vertical (shift Y), 2 = both
-    pub jitter_amount: f32,   // 0..1 continuous per-line wobble amplitude
-    pub jitter_speed: f32,    // 0..30 wobble evolution rate
+    pub shift_chroma: f32,  // 0..1 R/B channel offset on displaced regions
+    pub slice_axis: f32,    // 0 = horizontal bands (shift X), 1 = vertical (shift Y), 2 = both
+    pub jitter_amount: f32, // 0..1 continuous per-line wobble amplitude
+    pub jitter_speed: f32,  // 0..30 wobble evolution rate
     // vec4 #13 — Shift: datamosh + Layer transform: position/size
-    pub datamosh: f32,        // 0..1 how much displaced blocks sample the previous frame
-    pub layer_x: f32,         // -1..1 horizontal offset (+ = right), 0 = centered
-    pub layer_y: f32,         // -1..1 vertical offset (+ = up), 0 = centered
-    pub layer_scale: f32,     // 0.1..4 zoom (1.0 = unchanged)
+    pub datamosh: f32, // 0..1 how much displaced blocks sample the previous frame
+    pub layer_x: f32,  // -1..1 horizontal offset (+ = right), 0 = centered
+    pub layer_y: f32,  // -1..1 vertical offset (+ = up), 0 = centered
+    pub layer_scale: f32, // 0.1..4 zoom (1.0 = unchanged)
     // vec4 #14 — Fit mode (computed scale on CPU) + pad
-    pub fit_mode: f32,        // 0=stretch (default), 1=fit/contain, 2=fill/cover
-    pub fit_scale_x: f32,     // computed per-frame from fit_mode + source/canvas aspects
+    pub fit_mode: f32,    // 0=stretch (default), 1=fit/contain, 2=fill/cover
+    pub fit_scale_x: f32, // computed per-frame from fit_mode + source/canvas aspects
     pub fit_scale_y: f32,
     pub _pad_fit: f32,
     // vec4 #15 — Feedback: persistence + transform + luma key
@@ -78,15 +78,15 @@ pub struct EffectUniforms {
     pub feedback_rotate: f32,      // -30..30 degrees spiral smear (0 = off)
     pub feedback_luma_key: f32,    // 0..1 bias bleed toward bright regions
     // vec4 #16 — Feedback: channel desync + additive blend + pad
-    pub feedback_chroma: f32,      // 0..1 R/G/B fed back at offset UVs (color ghosts)
-    pub feedback_additive: f32,    // 0..1 crossfade mix -> additive accumulation
+    pub feedback_chroma: f32, // 0..1 R/G/B fed back at offset UVs (color ghosts)
+    pub feedback_additive: f32, // 0..1 crossfade mix -> additive accumulation
     pub _pad_fb0: f32,
     pub _pad_fb1: f32,
     // vec4 #17 — Chroma key background fill (replace keyed-out regions w/ solid color)
-    pub chroma_bg_enable: f32,     // 0.0 = transparent key (default), 1.0 = fill bg color
-    pub chroma_bg_r: f32,          // bg color red (sRGB 0..1)
-    pub chroma_bg_g: f32,          // bg color green (sRGB 0..1)
-    pub chroma_bg_b: f32,          // bg color blue (sRGB 0..1)
+    pub chroma_bg_enable: f32, // 0.0 = transparent key (default), 1.0 = fill bg color
+    pub chroma_bg_r: f32,      // bg color red (sRGB 0..1)
+    pub chroma_bg_g: f32,      // bg color green (sRGB 0..1)
+    pub chroma_bg_b: f32,      // bg color blue (sRGB 0..1)
 }
 
 impl Default for EffectUniforms {
@@ -245,5 +245,104 @@ impl EffectUniforms {
             "layer_scale" => self.layer_scale = v.clamp(0.1, 4.0),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `EffectUniforms` struct is exactly 272 bytes so it stays byte-identical
+    /// to the WGSL `Uniforms` binding.
+    #[test]
+    fn uniforms_are_exactly_272_bytes() {
+        eprintln!("effects: EffectUniforms is exactly 272 bytes (17 x vec4)");
+        // The Rust struct and the WGSL `Uniforms` must stay byte-identical
+        // (17 × vec4 = 272). If this fails, the shader binding is broken.
+        assert_eq!(std::mem::size_of::<EffectUniforms>(), 272);
+    }
+
+    /// `set_by_name` stores in-range values verbatim and clamps out-of-range
+    /// values to each param's documented bounds.
+    #[test]
+    fn set_by_name_sets_and_clamps_known_params() {
+        eprintln!("effects: set_by_name stores and clamps known params");
+        let mut u = EffectUniforms::default();
+        // In-range value is stored verbatim.
+        u.set_by_name("rgb_split", 12.0);
+        assert_eq!(u.rgb_split, 12.0);
+        // Over the max clamps down.
+        u.set_by_name("rgb_split", 999.0);
+        assert_eq!(u.rgb_split, 30.0);
+        // Under the min clamps up.
+        u.set_by_name("rgb_split", -5.0);
+        assert_eq!(u.rgb_split, 0.0);
+        // Signed param clamps both ends.
+        u.set_by_name("hue_shift", 500.0);
+        assert_eq!(u.hue_shift, 180.0);
+        u.set_by_name("hue_shift", -500.0);
+        assert_eq!(u.hue_shift, -180.0);
+        // A non-zero-based min (bulge_radius 0.05..1.0).
+        u.set_by_name("bulge_radius", 0.0);
+        assert_eq!(u.bulge_radius, 0.05);
+    }
+
+    /// `set_by_name` leaves state untouched for unknown or non-automatable
+    /// param names.
+    #[test]
+    fn set_by_name_ignores_unknown_param() {
+        eprintln!("effects: set_by_name no-ops on unknown/non-automatable params");
+        let mut u = EffectUniforms::default();
+        let before = u; // EffectUniforms is Copy
+                        // Unknown key (and non-automatable params like "invert") must no-op.
+        u.set_by_name("not_a_real_param", 5.0);
+        u.set_by_name("invert", 1.0);
+        assert_eq!(
+            bytemuck::bytes_of(&u),
+            bytemuck::bytes_of(&before),
+            "unknown param must not mutate state"
+        );
+    }
+
+    /// `reset` restores all params to their defaults while preserving the current
+    /// resolution.
+    #[test]
+    fn reset_restores_defaults_but_keeps_resolution() {
+        eprintln!("effects: reset restores defaults but keeps resolution");
+        let mut u = EffectUniforms::default();
+        u.resolution = [1920.0, 1080.0];
+        u.rgb_split = 20.0;
+        u.hue_shift = 90.0;
+        u.reset();
+        assert_eq!(
+            u.resolution,
+            [1920.0, 1080.0],
+            "reset must preserve resolution"
+        );
+        assert_eq!(u.rgb_split, 0.0);
+        assert_eq!(u.hue_shift, 0.0);
+    }
+
+    /// Increasing pixelate doubles the block size (saturating at 32) and
+    /// decreasing halves it (flooring at 1.0).
+    #[test]
+    fn pixelate_increase_decrease_double_halve_and_clamp() {
+        eprintln!("effects: pixelate increase/decrease doubles/halves and clamps");
+        let mut u = EffectUniforms::default(); // pixelate_size = 1.0
+                                               // First increase jumps from 1.0 to max(2.0, 2.0) = 2.0.
+        u.increase_pixelate();
+        assert_eq!(u.pixelate_size, 2.0);
+        u.increase_pixelate();
+        assert_eq!(u.pixelate_size, 4.0);
+        // Saturates at 32.
+        for _ in 0..10 {
+            u.increase_pixelate();
+        }
+        assert_eq!(u.pixelate_size, 32.0);
+        // Decrease halves down to a floor of 1.0.
+        for _ in 0..10 {
+            u.decrease_pixelate();
+        }
+        assert_eq!(u.pixelate_size, 1.0);
     }
 }

@@ -1,0 +1,24 @@
+# cargo-nextest configuration. See https://nexte.st/docs/configuration/
+#
+# Tests are run in their own process (per-test isolation), which neatly sidesteps
+# the ffmpeg::init() global-state / one-time-init issues that bite shared-process
+# `cargo test`. GPU-dependent tests are marked #[ignore] and skipped by default;
+# run them locally with `cargo nextest run --run-ignored all`.
+
+[profile.default]
+# A pure unit test that takes this long is almost certainly hung.
+slow-timeout = { period = "30s", terminate-after = 2 }
+# Print a line for *every* test as it runs (not just failures), so the output
+# reads as a checklist of what's being verified. `final-status-level = "all"`
+# repeats the full pass/skip roster in the end-of-run summary too.
+status-level = "all"
+final-status-level = "all"
+
+[profile.ci]
+# CI: retry once to absorb the occasional flaky ffmpeg/timing test, and emit
+# JUnit XML for the Actions test report.
+retries = 1
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"

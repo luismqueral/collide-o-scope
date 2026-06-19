@@ -104,7 +104,7 @@ impl Expr {
 /// Triangle wave, output -1..1.
 fn tri(t: f64) -> f64 {
     let p = (t - t.floor()).fract(); // 0..1 phase
-    // 0 -> -1, 0.5 -> 1, 1 -> -1
+                                     // 0 -> -1, 0.5 -> 1, 1 -> -1
     1.0 - 4.0 * (p - 0.5).abs()
 }
 
@@ -194,4 +194,160 @@ fn wiggle(freq: f64, amp: f64, t: f64) -> f64 {
 /// Deterministic noise sample for a given seed, output -1..1.
 fn noise(seed: f64) -> f64 {
     value_noise(seed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    /// Valid expressions compile successfully while unbalanced or empty source
+    /// surfaces a parse error instead of panicking.
+    #[test]
+    fn expr_parses_valid_and_rejects_garbage() {
+        eprintln!("automation: Expr::new accepts valid exprs and rejects garbage");
+        assert!(Expr::new("0.5 + 0.5*sin(t*tau)").is_ok());
+        assert!(Expr::new("sin(beat * tau)").is_ok());
+        // Unbalanced / nonsense should surface a parse error, not panic.
+        assert!(Expr::new("((((").is_err());
+        assert!(Expr::new("").is_err());
+    }
+
+    /// Evaluating the same expression with identical inputs yields identical
+    /// output, guaranteeing live/offline render parity.
+    #[test]
+    fn eval_is_deterministic_for_same_inputs() {
+        eprintln!("automation: Expr::eval is deterministic for equal inputs");
+        let e = Expr::new("sin(t) + wiggle(2, 1) + noise(t)").unwrap();
+        let a = e.eval(1.234, 0.0, 120.0);
+        let b = e.eval(1.234, 0.0, 120.0);
+        assert_eq!(
+            a, b,
+            "same inputs must yield identical output (live/offline parity)"
+        );
+    }
+
+    /// Eval errors (unknown functions) and non-finite results (divide by zero)
+    /// collapse to 0.0 rather than panicking.
+    #[test]
+    fn eval_collapses_errors_and_non_finite_to_zero() {
+        eprintln!("automation: Expr::eval collapses errors and non-finite to 0.0");
+        // Unknown function → fasteval eval error → 0.0 (never panics).
+        let bad = Expr::new("totally_unknown_fn(t)").unwrap();
+        assert_eq!(bad.eval(0.5, 0.0, 120.0), 0.0);
+        // 1/0 → non-finite → 0.0.
+        let div0 = Expr::new("1 / 0").unwrap();
+        assert_eq!(div0.eval(0.0, 0.0, 120.0), 0.0);
+    }
+
+    /// The `t`, `beat`, `bpm`, and `pi` variables resolve to their expected
+    /// values inside an evaluated expression.
+    #[test]
+    fn eval_exposes_time_and_tempo_vars() {
+        eprintln!("automation: Expr::eval exposes t/beat/bpm/pi variables");
+        assert_abs_diff_eq!(
+            Expr::new("t").unwrap().eval(3.5, 0.0, 120.0),
+            3.5,
+            epsilon = 1e-6
+        );
+        assert_abs_diff_eq!(
+            Expr::new("beat").unwrap().eval(0.0, 2.0, 120.0),
+            2.0,
+            epsilon = 1e-6
+        );
+        assert_abs_diff_eq!(
+            Expr::new("bpm").unwrap().eval(0.0, 0.0, 128.0),
+            128.0,
+            epsilon = 1e-4
+        );
+        assert_abs_diff_eq!(
+            Expr::new("pi").unwrap().eval(0.0, 0.0, 120.0),
+            std::f32::consts::PI,
+            epsilon = 1e-6
+        );
+    }
+
+    /// The triangle oscillator hits -1 at phase 0, +1 at the midpoint, and is
+    /// periodic at 1.
+    #[test]
+    fn triangle_wave_shape() {
+        eprintln!("automation: tri() has correct triangle-wave shape");
+        assert_abs_diff_eq!(tri(0.0), -1.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(tri(0.5), 1.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(tri(1.0), -1.0, epsilon = 1e-9); // periodic
+    }
+
+    /// The sawtooth oscillator ramps from -1 at phase 0 through 0 at the midpoint
+    /// and approaches +1 just before wrapping.
+    #[test]
+    fn sawtooth_wave_shape() {
+        eprintln!("automation: saw() has correct sawtooth-wave shape");
+        assert_abs_diff_eq!(saw(0.0), -1.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(saw(0.5), 0.0, epsilon = 1e-9);
+        // Just before the wrap it approaches +1.
+        assert!(saw(0.999) > 0.99);
+    }
+
+    /// The square oscillator is +1 over the first half of its period and -1 over
+    /// the second half.
+    #[test]
+    fn square_wave_shape() {
+        eprintln!("automation: square() has correct square-wave shape");
+        assert_eq!(square(0.0), 1.0);
+        assert_eq!(square(0.25), 1.0);
+        assert_eq!(square(0.5), -1.0);
+        assert_eq!(square(0.75), -1.0);
+    }
+
+    /// Every oscillator and noise shape stays within the [-1, 1] range across a
+    /// sweep of input values.
+    #[test]
+    fn oscillators_stay_in_unit_range() {
+        eprintln!("automation: oscillators stay within [-1, 1] across a sweep");
+        let mut x = -3.0;
+        while x < 3.0 {
+            for v in [tri(x), saw(x), square(x), pulse(x), fbm(x), hold(x)] {
+                assert!((-1.0..=1.0).contains(&v), "osc out of [-1,1] at x={x}: {v}");
+            }
+            x += 0.013;
+        }
+    }
+
+    /// Smoothstep returns its endpoints exactly, clamps outside the range, and
+    /// returns 0.0 for a degenerate lo == hi (no divide-by-zero).
+    #[test]
+    fn smoothstep_endpoints_and_degenerate() {
+        eprintln!("automation: smoothstep() endpoints, clamping, and degenerate case");
+        assert_abs_diff_eq!(smoothstep(0.0, 1.0, 0.0), 0.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(smoothstep(0.0, 1.0, 1.0), 1.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(smoothstep(0.0, 1.0, 0.5), 0.5, epsilon = 1e-9);
+        // Below/above the range clamps.
+        assert_eq!(smoothstep(0.0, 1.0, -2.0), 0.0);
+        assert_eq!(smoothstep(0.0, 1.0, 2.0), 1.0);
+        // Degenerate lo == hi → 0.0 (no divide-by-zero).
+        assert_eq!(smoothstep(1.0, 1.0, 5.0), 0.0);
+    }
+
+    /// The hash01 helper is a pure function bounded to [-1, 1] for a range of
+    /// inputs.
+    #[test]
+    fn hash01_is_deterministic_and_bounded() {
+        eprintln!("automation: hash01() is deterministic and bounded to [-1, 1]");
+        for x in [-10.0, -1.5, 0.0, 1.0, 3.14159, 1000.0] {
+            let v = hash01(x);
+            assert!((-1.0..=1.0).contains(&v), "hash01({x})={v} out of range");
+            assert_eq!(v, hash01(x), "hash01 must be a pure function");
+        }
+    }
+
+    /// Value-noise equals hash01 at integer inputs and is deterministic between
+    /// repeated evaluations.
+    #[test]
+    fn value_noise_is_continuous_at_integers() {
+        eprintln!("automation: value_noise() is continuous and deterministic at integers");
+        // At an integer the interpolation weight is 0, so it equals hash01(i).
+        assert_abs_diff_eq!(value_noise(4.0), hash01(4.0), epsilon = 1e-9);
+        // Deterministic between frames.
+        assert_eq!(value_noise(2.37), value_noise(2.37));
+    }
 }

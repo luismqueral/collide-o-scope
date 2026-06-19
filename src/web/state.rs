@@ -350,7 +350,10 @@ pub struct LayerSnapshot {
 pub enum WebAction {
     /// Set a master effect parameter
     #[serde(rename = "set_param")]
-    SetParam { param: String, value: serde_json::Value },
+    SetParam {
+        param: String,
+        value: serde_json::Value,
+    },
     /// Add a layer from the library by filename
     #[serde(rename = "add_layer")]
     AddLayer { filename: String },
@@ -383,7 +386,11 @@ pub enum WebAction {
     ResetLayerGroup { index: usize, group: String },
     /// Set a per-layer parameter (opacity, speed, blend_mode)
     #[serde(rename = "set_layer_param")]
-    SetLayerParam { index: usize, param: String, value: serde_json::Value },
+    SetLayerParam {
+        index: usize,
+        param: String,
+        value: serde_json::Value,
+    },
     /// Set the master content framerate (frame-hold / stutter look)
     #[serde(rename = "set_master_framerate")]
     SetMasterFramerate { value: f32 },
@@ -392,13 +399,26 @@ pub enum WebAction {
     SetOutputSize { ratio: String, quality: u32 },
     /// Set an NTSC/VHS effect parameter
     #[serde(rename = "set_ntsc_param")]
-    SetNtscParam { param: String, value: serde_json::Value },
+    SetNtscParam {
+        param: String,
+        value: serde_json::Value,
+    },
     /// Set a master audio bus parameter (master_volume, limiter)
     #[serde(rename = "set_master_audio_param")]
-    SetMasterAudioParam { param: String, value: serde_json::Value },
+    SetMasterAudioParam {
+        param: String,
+        value: serde_json::Value,
+    },
     /// Start an offline render export
     #[serde(rename = "start_export")]
-    StartExport { width: u32, height: u32, fps: u32, duration_secs: f32, #[serde(default)] match_preview: bool },
+    StartExport {
+        width: u32,
+        height: u32,
+        fps: u32,
+        duration_secs: f32,
+        #[serde(default)]
+        match_preview: bool,
+    },
     /// Cancel a running export
     #[serde(rename = "cancel_export")]
     CancelExport,
@@ -410,7 +430,11 @@ pub enum WebAction {
     ClearAutomation { param: String },
     /// Automate a per-layer param with an expression
     #[serde(rename = "set_layer_automation")]
-    SetLayerAutomation { index: usize, param: String, expr: String },
+    SetLayerAutomation {
+        index: usize,
+        param: String,
+        expr: String,
+    },
     /// Clear automation on a per-layer param
     #[serde(rename = "clear_layer_automation")]
     ClearLayerAutomation { index: usize, param: String },
@@ -480,23 +504,91 @@ impl EffectsSnapshot {
     pub fn apply_param(&mut self, param: &str, value: &serde_json::Value) {
         let v = value;
         match param {
-            "pixelate" => if let Some(n) = v.as_f64() { self.pixelate = n as f32; },
-            "rgb_split" => if let Some(n) = v.as_f64() { self.rgb_split = n as f32; },
-            "hue_shift" => if let Some(n) = v.as_f64() { self.hue_shift = n as f32; },
-            "saturation" => if let Some(n) = v.as_f64() { self.saturation = n as f32; },
-            "brightness" => if let Some(n) = v.as_f64() { self.brightness = n as f32; },
-            "contrast" => if let Some(n) = v.as_f64() { self.contrast = n as f32; },
-            "posterize" => if let Some(n) = v.as_f64() { self.posterize = n as f32; },
-            "invert" => if let Some(b) = v.as_bool() { self.invert = b; },
-            "grain_intensity" => if let Some(n) = v.as_f64() { self.grain_intensity = n as f32; },
-            "grain_size" => if let Some(n) = v.as_f64() { self.grain_size = n as f32; },
-            "grain_algo" => if let Some(n) = v.as_u64() { self.grain_algo = n as u32; },
-            "color_grain" => if let Some(b) = v.as_bool() { self.color_grain = b; },
-            "vignette" => if let Some(n) = v.as_f64() { self.vignette = n as f32; },
-            "color_drift" => if let Some(n) = v.as_f64() { self.color_drift = n as f32; },
-            "breathe_scale" => if let Some(n) = v.as_f64() { self.breathe_scale = n as f32; },
-            "breathe_rotation" => if let Some(n) = v.as_f64() { self.breathe_rotation = n as f32; },
-            "breathe_position" => if let Some(n) = v.as_f64() { self.breathe_position = n as f32; },
+            "pixelate" => {
+                if let Some(n) = v.as_f64() {
+                    self.pixelate = n as f32;
+                }
+            }
+            "rgb_split" => {
+                if let Some(n) = v.as_f64() {
+                    self.rgb_split = n as f32;
+                }
+            }
+            "hue_shift" => {
+                if let Some(n) = v.as_f64() {
+                    self.hue_shift = n as f32;
+                }
+            }
+            "saturation" => {
+                if let Some(n) = v.as_f64() {
+                    self.saturation = n as f32;
+                }
+            }
+            "brightness" => {
+                if let Some(n) = v.as_f64() {
+                    self.brightness = n as f32;
+                }
+            }
+            "contrast" => {
+                if let Some(n) = v.as_f64() {
+                    self.contrast = n as f32;
+                }
+            }
+            "posterize" => {
+                if let Some(n) = v.as_f64() {
+                    self.posterize = n as f32;
+                }
+            }
+            "invert" => {
+                if let Some(b) = v.as_bool() {
+                    self.invert = b;
+                }
+            }
+            "grain_intensity" => {
+                if let Some(n) = v.as_f64() {
+                    self.grain_intensity = n as f32;
+                }
+            }
+            "grain_size" => {
+                if let Some(n) = v.as_f64() {
+                    self.grain_size = n as f32;
+                }
+            }
+            "grain_algo" => {
+                if let Some(n) = v.as_u64() {
+                    self.grain_algo = n as u32;
+                }
+            }
+            "color_grain" => {
+                if let Some(b) = v.as_bool() {
+                    self.color_grain = b;
+                }
+            }
+            "vignette" => {
+                if let Some(n) = v.as_f64() {
+                    self.vignette = n as f32;
+                }
+            }
+            "color_drift" => {
+                if let Some(n) = v.as_f64() {
+                    self.color_drift = n as f32;
+                }
+            }
+            "breathe_scale" => {
+                if let Some(n) = v.as_f64() {
+                    self.breathe_scale = n as f32;
+                }
+            }
+            "breathe_rotation" => {
+                if let Some(n) = v.as_f64() {
+                    self.breathe_rotation = n as f32;
+                }
+            }
+            "breathe_position" => {
+                if let Some(n) = v.as_f64() {
+                    self.breathe_position = n as f32;
+                }
+            }
             _ => {}
         }
     }
@@ -512,5 +604,257 @@ impl WebState {
             thumbnails: std::sync::RwLock::new(HashMap::new()),
             preview_frames: std::sync::RwLock::new(HashMap::new()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    /// An in-range effects snapshot survives the snapshot → uniforms → snapshot
+    /// round-trip unchanged (the browser↔engine effects mirror).
+    #[test]
+    fn effects_snapshot_round_trips_through_uniforms() {
+        eprintln!("web: EffectsSnapshot round-trips through EffectUniforms");
+        // A snapshot of in-range values must survive snapshot → uniforms →
+        // snapshot unchanged (the browser↔engine effects mirror).
+        let mut snap = EffectsSnapshot::default();
+        snap.pixelate = 8.0;
+        snap.rgb_split = 12.0;
+        snap.hue_shift = 90.0;
+        snap.saturation = 0.5;
+        snap.invert = true;
+        snap.grain_intensity = 0.2;
+        snap.grain_algo = 2;
+        snap.color_grain = true;
+        snap.vignette = 1.0;
+
+        let mut u = EffectUniforms::default();
+        snap.apply_to_uniforms(&mut u);
+        let back = EffectsSnapshot::from_uniforms(&u);
+
+        assert_eq!(back.pixelate, 8.0);
+        assert_eq!(back.rgb_split, 12.0);
+        assert_eq!(back.hue_shift, 90.0);
+        assert_eq!(back.saturation, 0.5);
+        assert!(back.invert);
+        assert_eq!(back.grain_intensity, 0.2);
+        assert_eq!(back.grain_algo, 2);
+        assert!(back.color_grain);
+        assert_eq!(back.vignette, 1.0);
+    }
+
+    /// Out-of-range snapshot values are clamped to each parameter's valid range
+    /// when applied to the GPU uniforms.
+    #[test]
+    fn apply_to_uniforms_clamps_out_of_range() {
+        eprintln!("web: apply_to_uniforms clamps out-of-range values");
+        let mut snap = EffectsSnapshot::default();
+        snap.pixelate = 999.0; // > 32
+        snap.rgb_split = -5.0; // < 0
+        snap.hue_shift = 500.0; // > 180
+        snap.saturation = -9.0; // < -1
+        snap.grain_intensity = 9.0; // > 0.3
+        snap.grain_algo = 99; // > 3
+        snap.vignette = 9.0; // > 1.5
+
+        let mut u = EffectUniforms::default();
+        snap.apply_to_uniforms(&mut u);
+
+        assert_eq!(u.pixelate_size, 32.0);
+        assert_eq!(u.rgb_split, 0.0);
+        assert_eq!(u.hue_shift, 180.0);
+        assert_eq!(u.saturation, -1.0);
+        assert_eq!(u.grain_intensity, 0.3);
+        assert_eq!(u.grain_algo, 3.0);
+        assert_eq!(u.vignette, 1.5);
+    }
+
+    /// `apply_param` parses f64/bool/u64 JSON values into the right fields and
+    /// ignores unknown params and wrong-typed values.
+    #[test]
+    fn apply_param_parses_value_types() {
+        eprintln!("web: apply_param parses value types and ignores bad input");
+        let mut snap = EffectsSnapshot::default();
+        // f64 → f32
+        snap.apply_param("rgb_split", &serde_json::json!(15.0));
+        assert_eq!(snap.rgb_split, 15.0);
+        // bool
+        snap.apply_param("invert", &serde_json::json!(true));
+        assert!(snap.invert);
+        // u64 → u32
+        snap.apply_param("grain_algo", &serde_json::json!(2));
+        assert_eq!(snap.grain_algo, 2);
+        // Unknown param → no-op
+        snap.apply_param("not_a_param", &serde_json::json!(5.0));
+        // Wrong type for a numeric param → ignored (still default 0.0)
+        snap.apply_param("saturation", &serde_json::json!("nope"));
+        assert_eq!(snap.saturation, 0.0);
+    }
+
+    /// `NtscSnapshot::from_params` faithfully mirrors the source `NtscParams`.
+    #[test]
+    fn ntsc_snapshot_mirrors_params() {
+        eprintln!("web: NtscSnapshot mirrors NtscParams");
+        let mut p = crate::ntsc::NtscParams::default();
+        p.enabled = true;
+        p.tape_speed = 2;
+        p.chroma_loss = 0.4;
+        p.head_switching_height = 12;
+        p.snow_intensity = 0.7;
+        let snap = NtscSnapshot::from_params(&p);
+        assert!(snap.enabled);
+        assert_eq!(snap.tape_speed, 2);
+        assert_abs_diff_eq!(snap.chroma_loss, 0.4, epsilon = 1e-6);
+        assert_eq!(snap.head_switching_height, 12);
+        assert_abs_diff_eq!(snap.snow_intensity, 0.7, epsilon = 1e-6);
+    }
+
+    /// Serialize → deserialize → re-serialize and compare the JSON values.
+    /// `WebAction` has no `PartialEq`, so we compare `serde_json::Value`.
+    fn assert_action_round_trips(action: WebAction) {
+        let json = serde_json::to_value(&action).expect("serialize");
+        let parsed: WebAction = serde_json::from_value(json.clone()).expect("deserialize");
+        let reserialized = serde_json::to_value(&parsed).expect("re-serialize");
+        assert_eq!(json, reserialized, "round-trip mismatch for {action:?}");
+    }
+
+    /// Every `WebAction` variant survives a serialize → deserialize → serialize
+    /// round-trip with matching JSON.
+    #[test]
+    fn web_action_serde_tag_round_trips_every_variant() {
+        eprintln!("web: every WebAction variant round-trips through serde");
+        let v = serde_json::json!(5.0);
+        let cases = vec![
+            WebAction::SetParam {
+                param: "rgb_split".into(),
+                value: v.clone(),
+            },
+            WebAction::AddLayer {
+                filename: "clip.mp4".into(),
+            },
+            WebAction::SetLayerClip {
+                index: 1,
+                filename: "b.mp4".into(),
+            },
+            WebAction::RemoveLayer { index: 0 },
+            WebAction::MoveLayer { from: 0, to: 2 },
+            WebAction::ToggleVisibility { index: 3 },
+            WebAction::ToggleLayerPause { index: 1 },
+            WebAction::ToggleMasterPause,
+            WebAction::ResetFx,
+            WebAction::ResetGroup {
+                group: "digital".into(),
+            },
+            WebAction::ResetLayerGroup {
+                index: 0,
+                group: "warp".into(),
+            },
+            WebAction::SetLayerParam {
+                index: 0,
+                param: "opacity".into(),
+                value: v.clone(),
+            },
+            WebAction::SetMasterFramerate { value: 24.0 },
+            WebAction::SetOutputSize {
+                ratio: "16:9".into(),
+                quality: 1080,
+            },
+            WebAction::SetNtscParam {
+                param: "chroma_loss".into(),
+                value: v.clone(),
+            },
+            WebAction::SetMasterAudioParam {
+                param: "master_volume".into(),
+                value: v.clone(),
+            },
+            WebAction::StartExport {
+                width: 1280,
+                height: 720,
+                fps: 30,
+                duration_secs: 10.0,
+                match_preview: false,
+            },
+            WebAction::CancelExport,
+            WebAction::SetAutomation {
+                param: "vignette".into(),
+                expr: "sin(t)".into(),
+            },
+            WebAction::ClearAutomation {
+                param: "vignette".into(),
+            },
+            WebAction::SetLayerAutomation {
+                index: 1,
+                param: "pixelate".into(),
+                expr: "saw(beat)".into(),
+            },
+            WebAction::ClearLayerAutomation {
+                index: 1,
+                param: "pixelate".into(),
+            },
+            WebAction::TapTempo,
+            WebAction::SetBpm { value: 128.0 },
+            WebAction::SavePatch {
+                name: "my-patch".into(),
+            },
+            WebAction::LoadPatch {
+                name: "my-patch".into(),
+            },
+            WebAction::DeletePatch {
+                name: "my-patch".into(),
+            },
+            WebAction::FocusWindow,
+        ];
+        for action in cases {
+            assert_action_round_trips(action);
+        }
+    }
+
+    /// The serialized `action` tag and field names match the browser wire
+    /// contract for representative variants.
+    #[test]
+    fn web_action_tag_field_names_match_contract() {
+        eprintln!("web: WebAction tag/field names match the browser contract");
+        // The "action" tag is the wire contract with the browser; spot-check it.
+        let json = serde_json::to_value(WebAction::ToggleMasterPause).unwrap();
+        assert_eq!(json["action"], "toggle_master_pause");
+        let json = serde_json::to_value(WebAction::SetParam {
+            param: "rgb_split".into(),
+            value: serde_json::json!(3),
+        })
+        .unwrap();
+        assert_eq!(json["action"], "set_param");
+        assert_eq!(json["param"], "rgb_split");
+    }
+
+    /// An unknown `action` tag is rejected rather than silently deserializing
+    /// into some default variant.
+    #[test]
+    fn web_action_unknown_tag_fails_to_deserialize() {
+        eprintln!("web: unknown WebAction tag fails to deserialize");
+        let bad = serde_json::json!({ "action": "not_a_real_action" });
+        assert!(serde_json::from_value::<WebAction>(bad).is_err());
+    }
+
+    /// `AppSnapshot::default` has the expected field values and survives a full
+    /// JSON round-trip.
+    #[test]
+    fn app_snapshot_defaults_and_json_round_trips() {
+        eprintln!("web: AppSnapshot defaults and JSON round-trip");
+        let snap = AppSnapshot::default();
+        assert_eq!(snap.msg_type, "state");
+        assert_eq!(snap.framerate, 30.0);
+        assert_eq!(snap.output_ratio, "16:9");
+        assert_eq!(snap.output_quality, 1080);
+        assert!(snap.master_limiter);
+
+        // Full JSON round-trip preserves the key fields.
+        let json = serde_json::to_string(&snap).unwrap();
+        let back: AppSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.msg_type, "state");
+        assert_eq!(back.framerate, 30.0);
+        assert_eq!(back.output_quality, 1080);
+        assert!(back.master_limiter);
     }
 }

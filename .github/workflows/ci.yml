@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cancel superseded runs on the same ref to save runner minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # macos-latest matches the dev environment and ships ffmpeg 8 via Homebrew.
+    # ffmpeg-next is pinned to v8, and Ubuntu's apt ffmpeg is the wrong major
+    # version, so the build would fail to link there.
+    runs-on: macos-latest
+
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg (provides the v8 libs ffmpeg-next links against)
+        run: brew install ffmpeg
+
+      - name: Install Rust toolchain (with rustfmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry + build
+        # wgpu and the ntsc-rs git dependency are slow to compile from scratch.
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Build (tests)
+        run: cargo build --tests
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Run tests (Tier 1 + Tier 2; GPU #[ignore] tests skipped)
+        # Hosted runners have no reliable Metal device, so the headless GPU
+        # export E2E stays ignored here and runs locally instead.
+        run: cargo nextest run --profile ci
+
+      - name: Clippy (advisory)
+        # First clippy pass over a large, previously-untested codebase will
+        # surface many lints; keep it non-blocking until they're cleaned up,
+        # then tighten to `-D warnings`.
+        continue-on-error: true
+        run: cargo clippy --all-targets

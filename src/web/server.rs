@@ -113,10 +113,7 @@ async fn preview_handler(
 
 /// HTTP→WebSocket upgrade entry point. The browser opens `ws://.../ws`; axum
 /// performs the protocol handshake and then hands us the live socket.
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<WebState>>,
-) -> impl IntoResponse {
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WebState>>) -> impl IntoResponse {
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 

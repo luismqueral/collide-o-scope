@@ -20,10 +20,10 @@ use super::{param_meta, EffectsConfig, LayerConfig, PatchState};
 /// State that must survive between frames (egui widgets don't hold their own).
 pub struct EditorState {
     pub active: bool,
-    pub tab: usize,              // 0 = Master, 1+ = layer index + 1
+    pub tab: usize,                   // 0 = Master, 1+ = layer index + 1
     pub active_field: Option<String>, // which param key is being edited
-    pub field_buffer: String,    // text in the active pill input
-    pub request_focus: bool,     // request focus on next frame
+    pub field_buffer: String,         // text in the active pill input
+    pub request_focus: bool,          // request focus on next frame
 }
 
 impl Default for EditorState {
@@ -127,10 +127,12 @@ fn param_row(
                 response.request_focus();
                 // Select all text so typing replaces the old value immediately.
                 if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
-                    state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                        egui::text::CCursor::new(0),
-                        egui::text::CCursor::new(editor.field_buffer.len()),
-                    )));
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(editor.field_buffer.len()),
+                        )));
                     state.store(ui.ctx(), id);
                 }
                 editor.request_focus = false;
@@ -253,11 +255,7 @@ pub fn build_yaml_editor_content(
     // Tab bar: Master + per-layer tabs. selectable_label draws a toggle-styled
     // button; switching tabs also clears any in-progress field edit.
     ui.horizontal(|ui| {
-        if ui
-            .selectable_label(editor.tab == 0, "Master")
-            .clicked()
-            && editor.tab != 0
-        {
+        if ui.selectable_label(editor.tab == 0, "Master").clicked() && editor.tab != 0 {
             editor.tab = 0;
             editor.active_field = None;
         }
@@ -265,11 +263,7 @@ pub fn build_yaml_editor_content(
         for i in 0..layers.len() {
             let tab_id = i + 1;
             let label = format!("Layer {}", i + 1);
-            if ui
-                .selectable_label(editor.tab == tab_id, &label)
-                .clicked()
-                && editor.tab != tab_id
-            {
+            if ui.selectable_label(editor.tab == tab_id, &label).clicked() && editor.tab != tab_id {
                 editor.tab = tab_id;
                 editor.active_field = None;
             }
@@ -301,7 +295,8 @@ pub fn build_yaml_editor_content(
                                 .color(GROUP_COLOR),
                         );
                         for (key, value) in fields {
-                            if let Some(new_val) = param_row(ui, key, value, editor, KEY_COL_WIDTH) {
+                            if let Some(new_val) = param_row(ui, key, value, editor, KEY_COL_WIDTH)
+                            {
                                 if updated_config.set_field(key, &new_val) {
                                     changed = true;
                                 }
@@ -355,7 +350,8 @@ pub fn build_yaml_editor_content(
                                 });
                                 continue;
                             }
-                            if let Some(new_val) = param_row(ui, key, value, editor, KEY_COL_WIDTH) {
+                            if let Some(new_val) = param_row(ui, key, value, editor, KEY_COL_WIDTH)
+                            {
                                 if updated_config.set_field(key, &new_val) {
                                     changed = true;
                                 }
@@ -380,7 +376,9 @@ pub fn build_yaml_editor_content(
                                     .color(GROUP_COLOR),
                             );
                             for (key, value) in fields {
-                                if let Some(new_val) = param_row(ui, key, value, editor, KEY_COL_WIDTH) {
+                                if let Some(new_val) =
+                                    param_row(ui, key, value, editor, KEY_COL_WIDTH)
+                                {
                                     if updated_config.effects.set_field(key, &new_val) {
                                         changed = true;
                                     }

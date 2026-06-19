@@ -41,70 +41,369 @@ pub struct ParamMeta {
 
 pub fn param_meta(name: &str) -> Option<ParamMeta> {
     match name {
-        "pixelate" => Some(ParamMeta { step: 1.0, min: 1.0, max: 32.0, desc: "pixel block size" }),
-        "rgb_split" => Some(ParamMeta { step: 0.5, min: 0.0, max: 30.0, desc: "chromatic split px" }),
-        "hue_shift" => Some(ParamMeta { step: 5.0, min: -180.0, max: 180.0, desc: "degrees" }),
-        "saturation" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "color intensity" }),
-        "brightness" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "exposure" }),
-        "contrast" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "dynamic range" }),
-        "posterize" => Some(ParamMeta { step: 1.0, min: 0.0, max: 16.0, desc: "color levels (0=off)" }),
-        "grain_intensity" => Some(ParamMeta { step: 0.01, min: 0.0, max: 0.3, desc: "film grain amount" }),
-        "grain_size" => Some(ParamMeta { step: 0.25, min: 1.0, max: 4.0, desc: "grain particle scale" }),
-        "grain_algo" => Some(ParamMeta { step: 1.0, min: 0.0, max: 3.0, desc: "0=value 1=perlin 2=gaussian 3=salt&pepper" }),
-        "breathe_scale" => Some(ParamMeta { step: 0.005, min: 0.0, max: 0.05, desc: "zoom oscillation" }),
-        "breathe_rotation" => Some(ParamMeta { step: 0.1, min: 0.0, max: 2.0, desc: "rotation oscillation deg" }),
-        "breathe_position" => Some(ParamMeta { step: 0.002, min: 0.0, max: 0.02, desc: "position drift" }),
-        "vignette" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.5, desc: "edge darkening" }),
-        "color_drift" => Some(ParamMeta { step: 0.002, min: 0.0, max: 0.02, desc: "chromatic aberration" }),
-        "opacity" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "layer transparency" }),
-        "speed" => Some(ParamMeta { step: 0.25, min: 0.25, max: 4.0, desc: "playback multiplier" }),
-        "fps" => Some(ParamMeta { step: 1.0, min: 1.0, max: 60.0, desc: "decode frame rate" }),
-        "volume" => Some(ParamMeta { step: 1.0, min: -60.0, max: 6.0, desc: "audio level dB (0=unity)" }),
-        "pan" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "stereo pan (-1=L 1=R)" }),
-        "eq_low" => Some(ParamMeta { step: 1.0, min: -24.0, max: 12.0, desc: "low shelf dB (120Hz)" }),
-        "eq_mid" => Some(ParamMeta { step: 1.0, min: -24.0, max: 12.0, desc: "mid peak dB (1kHz)" }),
-        "eq_high" => Some(ParamMeta { step: 1.0, min: -24.0, max: 12.0, desc: "high shelf dB (6kHz)" }),
-        "delay_time" => Some(ParamMeta { step: 10.0, min: 0.0, max: 1000.0, desc: "delay time ms (0=off)" }),
-        "delay_feedback" => Some(ParamMeta { step: 0.05, min: 0.0, max: 0.95, desc: "delay regeneration" }),
-        "delay_mix" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "delay dry/wet" }),
-        "wave_amp" => Some(ParamMeta { step: 0.005, min: 0.0, max: 0.1, desc: "wave displacement" }),
-        "wave_freq" => Some(ParamMeta { step: 1.0, min: 0.0, max: 50.0, desc: "wave cycles" }),
-        "wave_speed" => Some(ParamMeta { step: 0.5, min: 0.0, max: 10.0, desc: "wave scroll speed" }),
-        "wave_axis" => Some(ParamMeta { step: 1.0, min: 0.0, max: 2.0, desc: "0=horiz 1=vert 2=both" }),
-        "swirl_angle" => Some(ParamMeta { step: 10.0, min: -720.0, max: 720.0, desc: "vortex degrees" }),
-        "swirl_radius" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "vortex extent" }),
-        "bulge_strength" => Some(ParamMeta { step: 0.05, min: -1.0, max: 1.0, desc: "+bulge / -pinch" }),
-        "bulge_radius" => Some(ParamMeta { step: 0.05, min: 0.05, max: 1.0, desc: "lens extent" }),
-        "chroma_threshold" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "key tolerance" }),
-        "chroma_smoothness" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "key feather" }),
-        "chroma_spill" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "key spill suppress" }),
-        "slice_intensity" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "band shift amount" }),
-        "slice_height" => Some(ParamMeta { step: 1.0, min: 1.0, max: 128.0, desc: "band thickness px" }),
-        "slice_prob" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "bands shifted" }),
-        "slice_speed" => Some(ParamMeta { step: 1.0, min: 0.0, max: 30.0, desc: "reseed steps/sec" }),
-        "block_size" => Some(ParamMeta { step: 4.0, min: 4.0, max: 128.0, desc: "block edge px" }),
-        "block_intensity" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "block offset amount" }),
-        "block_prob" => Some(ParamMeta { step: 0.05, min: 0.0, max: 1.0, desc: "blocks displaced" }),
-        "block_speed" => Some(ParamMeta { step: 1.0, min: 0.0, max: 30.0, desc: "block reseed rate" }),
-        "shift_chroma" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "glitch chroma fringe" }),
-        "slice_axis" => Some(ParamMeta { step: 1.0, min: 0.0, max: 2.0, desc: "0=horiz 1=vert 2=both" }),
-        "jitter_amount" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "continuous wobble" }),
-        "jitter_speed" => Some(ParamMeta { step: 1.0, min: 0.0, max: 30.0, desc: "wobble rate" }),
-        "datamosh" => Some(ParamMeta { step: 0.02, min: 0.0, max: 1.0, desc: "prev-frame bleed" }),
-        "feedback_persistence" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "whole-frame trails (1=freeze)" }),
-        "feedback_zoom" => Some(ParamMeta { step: 0.005, min: 0.8, max: 1.2, desc: "droste zoom (1=off)" }),
-        "feedback_rotate" => Some(ParamMeta { step: 0.5, min: -30.0, max: 30.0, desc: "spiral smear deg" }),
-        "feedback_luma_key" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "bias trails to bright" }),
-        "feedback_chroma" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "channel-desync ghosts" }),
-        "feedback_additive" => Some(ParamMeta { step: 0.01, min: 0.0, max: 1.0, desc: "mix->additive bloom" }),
-        "layer_x" => Some(ParamMeta { step: 0.01, min: -1.0, max: 1.0, desc: "horizontal offset" }),
-        "layer_y" => Some(ParamMeta { step: 0.01, min: -1.0, max: 1.0, desc: "vertical offset" }),
-        "layer_scale" => Some(ParamMeta { step: 0.01, min: 0.1, max: 4.0, desc: "zoom (1=unchanged)" }),
-        "fit_mode" => Some(ParamMeta { step: 1.0, min: 0.0, max: 2.0, desc: "0=stretch 1=fit 2=fill" }),
+        "pixelate" => Some(ParamMeta {
+            step: 1.0,
+            min: 1.0,
+            max: 32.0,
+            desc: "pixel block size",
+        }),
+        "rgb_split" => Some(ParamMeta {
+            step: 0.5,
+            min: 0.0,
+            max: 30.0,
+            desc: "chromatic split px",
+        }),
+        "hue_shift" => Some(ParamMeta {
+            step: 5.0,
+            min: -180.0,
+            max: 180.0,
+            desc: "degrees",
+        }),
+        "saturation" => Some(ParamMeta {
+            step: 0.05,
+            min: -1.0,
+            max: 1.0,
+            desc: "color intensity",
+        }),
+        "brightness" => Some(ParamMeta {
+            step: 0.05,
+            min: -1.0,
+            max: 1.0,
+            desc: "exposure",
+        }),
+        "contrast" => Some(ParamMeta {
+            step: 0.05,
+            min: -1.0,
+            max: 1.0,
+            desc: "dynamic range",
+        }),
+        "posterize" => Some(ParamMeta {
+            step: 1.0,
+            min: 0.0,
+            max: 16.0,
+            desc: "color levels (0=off)",
+        }),
+        "grain_intensity" => Some(ParamMeta {
+            step: 0.01,
+            min: 0.0,
+            max: 0.3,
+            desc: "film grain amount",
+        }),
+        "grain_size" => Some(ParamMeta {
+            step: 0.25,
+            min: 1.0,
+            max: 4.0,
+            desc: "grain particle scale",
+        }),
+        "grain_algo" => Some(ParamMeta {
+            step: 1.0,
+            min: 0.0,
+            max: 3.0,
+            desc: "0=value 1=perlin 2=gaussian 3=salt&pepper",
+        }),
+        "breathe_scale" => Some(ParamMeta {
+            step: 0.005,
+            min: 0.0,
+            max: 0.05,
+            desc: "zoom oscillation",
+        }),
+        "breathe_rotation" => Some(ParamMeta {
+            step: 0.1,
+            min: 0.0,
+            max: 2.0,
+            desc: "rotation oscillation deg",
+        }),
+        "breathe_position" => Some(ParamMeta {
+            step: 0.002,
+            min: 0.0,
+            max: 0.02,
+            desc: "position drift",
+        }),
+        "vignette" => Some(ParamMeta {
+            step: 0.05,
+            min: 0.0,
+            max: 1.5,
+            desc: "edge darkening",
+        }),
+        "color_drift" => Some(ParamMeta {
+            step: 0.002,
+            min: 0.0,
+            max: 0.02,
+            desc: "chromatic aberration",
+        }),
+        "opacity" => Some(ParamMeta {
+            step: 0.05,
+            min: 0.0,
+            max: 1.0,
+            desc: "layer transparency",
+        }),
+        "speed" => Some(ParamMeta {
+            step: 0.25,
+            min: 0.25,
+            max: 4.0,
+            desc: "playback multiplier",
+        }),
+        "fps" => Some(ParamMeta {
+            step: 1.0,
+            min: 1.0,
+            max: 60.0,
+            desc: "decode frame rate",
+        }),
+        "volume" => Some(ParamMeta {
+            step: 1.0,
+            min: -60.0,
+            max: 6.0,
+            desc: "audio level dB (0=unity)",
+        }),
+        "pan" => Some(ParamMeta {
+            step: 0.05,
+            min: -1.0,
+            max: 1.0,
+            desc: "stereo pan (-1=L 1=R)",
+        }),
+        "eq_low" => Some(ParamMeta {
+            step: 1.0,
+            min: -24.0,
+            max: 12.0,
+            desc: "low shelf dB (120Hz)",
+        }),
+        "eq_mid" => Some(ParamMeta {
+            step: 1.0,
+            min: -24.0,
+            max: 12.0,
+            desc: "mid peak dB (1kHz)",
+        }),
+        "eq_high" => Some(ParamMeta {
+            step: 1.0,
+            min: -24.0,
+            max: 12.0,
+            desc: "high shelf dB (6kHz)",
+        }),
+        "delay_time" => Some(ParamMeta {
+            step: 10.0,
+            min: 0.0,
+            max: 1000.0,
+            desc: "delay time ms (0=off)",
+        }),
+        "delay_feedback" => Some(ParamMeta {
+            step: 0.05,
+            min: 0.0,
+            max: 0.95,
+            desc: "delay regeneration",
+        }),
+        "delay_mix" => Some(ParamMeta {
+            step: 0.05,
+            min: 0.0,
+            max: 1.0,
+            desc: "delay dry/wet",
+        }),
+        "wave_amp" => Some(ParamMeta {
+            step: 0.005,
+            min: 0.0,
+            max: 0.1,
+            desc: "wave displacement",
+        }),
+        "wave_freq" => Some(ParamMeta {
+            step: 1.0,
+            min: 0.0,
+            max: 50.0,
+            desc: "wave cycles",
+        }),
+        "wave_speed" => Some(ParamMeta {
+            step: 0.5,
+            min: 0.0,
+            max: 10.0,
+            desc: "wave scroll speed",
+        }),
+        "wave_axis" => Some(ParamMeta {
+            step: 1.0,
+            min: 0.0,
+            max: 2.0,
+            desc: "0=horiz 1=vert 2=both",
+        }),
+        "swirl_angle" => Some(ParamMeta {
+            step: 10.0,
+            min: -720.0,
+            max: 720.0,
+            desc: "vortex degrees",
+        }),
+        "swirl_radius" => Some(ParamMeta {
+            step: 0.05,
+            min: 0.0,
+            max: 1.0,
+            desc: "vortex extent",
+        }),
+        "bulge_strength" => Some(ParamMeta {
+            step: 0.05,
+            min: -1.0,
+            max: 1.0,
+            desc: "+bulge / -pinch",
+        }),
+        "bulge_radius" => Some(ParamMeta {
+            step: 0.05,
+            min: 0.05,
+            max: 1.0,
+            desc: "lens extent",
+        }),
+        "chroma_threshold" => Some(ParamMeta {
+            step: 0.02,
+            min: 0.0,
+            max: 1.0,
+            desc: "key tolerance",
+        }),
+        "chroma_smoothness" => Some(ParamMeta {
+            step: 0.02,
+            min: 0.0,
+            max: 1.0,
+            desc: "key feather",
+        }),
+        "chroma_spill" => Some(ParamMeta {
+            step: 0.05,
+            min: 0.0,
+            max: 1.0,
+            desc: "key spill suppress",
+        }),
+        "slice_intensity" => Some(ParamMeta {
+            step: 0.02,
+            min: 0.0,
+            max: 1.0,
+            desc: "band shift amount",
+        }),
+        "slice_height" => Some(ParamMeta {
+            step: 1.0,
+            min: 1.0,
+            max: 128.0,
+            desc: "band thickness px",
+        }),
+        "slice_prob" => Some(ParamMeta {
+            step: 0.05,
+            min: 0.0,
+            max: 1.0,
+            desc: "bands shifted",
+        }),
+        "slice_speed" => Some(ParamMeta {
+            step: 1.0,
+            min: 0.0,
+            max: 30.0,
+            desc: "reseed steps/sec",
+        }),
+        "block_size" => Some(ParamMeta {
+            step: 4.0,
+            min: 4.0,
+            max: 128.0,
+            desc: "block edge px",
+        }),
+        "block_intensity" => Some(ParamMeta {
+            step: 0.02,
+            min: 0.0,
+            max: 1.0,
+            desc: "block offset amount",
+        }),
+        "block_prob" => Some(ParamMeta {
+            step: 0.05,
+            min: 0.0,
+            max: 1.0,
+            desc: "blocks displaced",
+        }),
+        "block_speed" => Some(ParamMeta {
+            step: 1.0,
+            min: 0.0,
+            max: 30.0,
+            desc: "block reseed rate",
+        }),
+        "shift_chroma" => Some(ParamMeta {
+            step: 0.02,
+            min: 0.0,
+            max: 1.0,
+            desc: "glitch chroma fringe",
+        }),
+        "slice_axis" => Some(ParamMeta {
+            step: 1.0,
+            min: 0.0,
+            max: 2.0,
+            desc: "0=horiz 1=vert 2=both",
+        }),
+        "jitter_amount" => Some(ParamMeta {
+            step: 0.01,
+            min: 0.0,
+            max: 1.0,
+            desc: "continuous wobble",
+        }),
+        "jitter_speed" => Some(ParamMeta {
+            step: 1.0,
+            min: 0.0,
+            max: 30.0,
+            desc: "wobble rate",
+        }),
+        "datamosh" => Some(ParamMeta {
+            step: 0.02,
+            min: 0.0,
+            max: 1.0,
+            desc: "prev-frame bleed",
+        }),
+        "feedback_persistence" => Some(ParamMeta {
+            step: 0.01,
+            min: 0.0,
+            max: 1.0,
+            desc: "whole-frame trails (1=freeze)",
+        }),
+        "feedback_zoom" => Some(ParamMeta {
+            step: 0.005,
+            min: 0.8,
+            max: 1.2,
+            desc: "droste zoom (1=off)",
+        }),
+        "feedback_rotate" => Some(ParamMeta {
+            step: 0.5,
+            min: -30.0,
+            max: 30.0,
+            desc: "spiral smear deg",
+        }),
+        "feedback_luma_key" => Some(ParamMeta {
+            step: 0.01,
+            min: 0.0,
+            max: 1.0,
+            desc: "bias trails to bright",
+        }),
+        "feedback_chroma" => Some(ParamMeta {
+            step: 0.01,
+            min: 0.0,
+            max: 1.0,
+            desc: "channel-desync ghosts",
+        }),
+        "feedback_additive" => Some(ParamMeta {
+            step: 0.01,
+            min: 0.0,
+            max: 1.0,
+            desc: "mix->additive bloom",
+        }),
+        "layer_x" => Some(ParamMeta {
+            step: 0.01,
+            min: -1.0,
+            max: 1.0,
+            desc: "horizontal offset",
+        }),
+        "layer_y" => Some(ParamMeta {
+            step: 0.01,
+            min: -1.0,
+            max: 1.0,
+            desc: "vertical offset",
+        }),
+        "layer_scale" => Some(ParamMeta {
+            step: 0.01,
+            min: 0.1,
+            max: 4.0,
+            desc: "zoom (1=unchanged)",
+        }),
+        "fit_mode" => Some(ParamMeta {
+            step: 1.0,
+            min: 0.0,
+            max: 2.0,
+            desc: "0=stretch 1=fit 2=fill",
+        }),
         _ => None,
     }
 }
-
 
 // --- Serializable patch state ---
 
@@ -142,7 +441,10 @@ pub struct MasterAudioConfig {
 
 impl Default for MasterAudioConfig {
     fn default() -> Self {
-        Self { volume: 0.0, limiter: true }
+        Self {
+            volume: 0.0,
+            limiter: true,
+        }
     }
 }
 
@@ -189,9 +491,15 @@ pub struct NtscConfig {
     pub composite_sharpening: f32,
 }
 
-fn default_edge_wave_speed() -> f32 { 0.5 }
-fn default_head_height() -> i32 { 8 }
-fn default_tracking_height() -> i32 { 24 }
+fn default_edge_wave_speed() -> f32 {
+    0.5
+}
+fn default_head_height() -> i32 {
+    8
+}
+fn default_tracking_height() -> i32 {
+    24
+}
 
 impl NtscConfig {
     pub fn from_params(p: &NtscParams) -> Self {
@@ -425,17 +733,39 @@ pub struct EffectsConfig {
     pub fit_mode: f32,
 }
 
-fn default_wave_freq() -> f32 { 8.0 }
-fn default_half() -> f32 { 0.5 }
-fn default_chroma_threshold() -> f32 { 0.4 }
-fn default_chroma_smoothness() -> f32 { 0.1 }
-fn default_slice_height() -> f32 { 16.0 }
-fn default_slice_prob() -> f32 { 0.3 }
-fn default_slice_speed() -> f32 { 8.0 }
-fn default_block_size() -> f32 { 32.0 }
-fn default_block_prob() -> f32 { 0.2 }
-fn default_block_speed() -> f32 { 6.0 }
-fn default_jitter_speed() -> f32 { 8.0 }
+fn default_wave_freq() -> f32 {
+    8.0
+}
+fn default_half() -> f32 {
+    0.5
+}
+fn default_chroma_threshold() -> f32 {
+    0.4
+}
+fn default_chroma_smoothness() -> f32 {
+    0.1
+}
+fn default_slice_height() -> f32 {
+    16.0
+}
+fn default_slice_prob() -> f32 {
+    0.3
+}
+fn default_slice_speed() -> f32 {
+    8.0
+}
+fn default_block_size() -> f32 {
+    32.0
+}
+fn default_block_prob() -> f32 {
+    0.2
+}
+fn default_block_speed() -> f32 {
+    6.0
+}
+fn default_jitter_speed() -> f32 {
+    8.0
+}
 
 impl Default for EffectsConfig {
     fn default() -> Self {
@@ -636,146 +966,477 @@ impl EffectsConfig {
     /// Get fields organized into groups for display.
     pub fn grouped_fields(&self) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
         vec![
-            ("digital", vec![
-                ("pixelate", format!("{:.1}", self.pixelate)),
-                ("rgb_split", format!("{:.1}", self.rgb_split)),
-                ("hue_shift", format!("{:.1}", self.hue_shift)),
-                ("saturation", format!("{:.2}", self.saturation)),
-                ("brightness", format!("{:.2}", self.brightness)),
-                ("contrast", format!("{:.2}", self.contrast)),
-                ("posterize", format!("{:.1}", self.posterize)),
-                ("invert", format!("{}", self.invert)),
-            ]),
-            ("analog", vec![
-                ("grain_intensity", format!("{:.2}", self.grain_intensity)),
-                ("grain_size", format!("{:.2}", self.grain_size)),
-                ("grain_algo", format!("{}", self.grain_algo)),
-                ("color_grain", format!("{}", self.color_grain)),
-                ("vignette", format!("{:.2}", self.vignette)),
-                ("color_drift", format!("{:.3}", self.color_drift)),
-            ]),
-            ("motion", vec![
-                ("breathe_scale", format!("{:.3}", self.breathe_scale)),
-                ("breathe_rotation", format!("{:.2}", self.breathe_rotation)),
-                ("breathe_position", format!("{:.3}", self.breathe_position)),
-            ]),
-            ("warp", vec![
-                ("wave_amp", format!("{:.3}", self.wave_amp)),
-                ("wave_freq", format!("{:.1}", self.wave_freq)),
-                ("wave_speed", format!("{:.2}", self.wave_speed)),
-                ("wave_axis", format!("{:.0}", self.wave_axis)),
-                ("swirl_angle", format!("{:.1}", self.swirl_angle)),
-                ("swirl_radius", format!("{:.2}", self.swirl_radius)),
-                ("bulge_strength", format!("{:.2}", self.bulge_strength)),
-                ("bulge_radius", format!("{:.2}", self.bulge_radius)),
-            ]),
-            ("key", vec![
-                ("chroma_enable", format!("{}", self.chroma_enable)),
-                ("chroma_threshold", format!("{:.2}", self.chroma_threshold)),
-                ("chroma_smoothness", format!("{:.2}", self.chroma_smoothness)),
-                ("chroma_spill", format!("{:.2}", self.chroma_spill)),
-                ("chroma_r", format!("{:.2}", self.chroma_r)),
-                ("chroma_g", format!("{:.2}", self.chroma_g)),
-                ("chroma_b", format!("{:.2}", self.chroma_b)),
-                ("chroma_bg_enable", format!("{}", self.chroma_bg_enable)),
-                ("chroma_bg_r", format!("{:.2}", self.chroma_bg_r)),
-                ("chroma_bg_g", format!("{:.2}", self.chroma_bg_g)),
-                ("chroma_bg_b", format!("{:.2}", self.chroma_bg_b)),
-            ]),
-            ("shift", vec![
-                ("slice_intensity", format!("{:.2}", self.slice_intensity)),
-                ("slice_height", format!("{:.1}", self.slice_height)),
-                ("slice_prob", format!("{:.2}", self.slice_prob)),
-                ("slice_speed", format!("{:.1}", self.slice_speed)),
-                ("block_size", format!("{:.1}", self.block_size)),
-                ("block_intensity", format!("{:.2}", self.block_intensity)),
-                ("block_prob", format!("{:.2}", self.block_prob)),
-                ("block_speed", format!("{:.1}", self.block_speed)),
-                ("shift_chroma", format!("{:.2}", self.shift_chroma)),
-                ("slice_axis", format!("{:.1}", self.slice_axis)),
-                ("jitter_amount", format!("{:.2}", self.jitter_amount)),
-                ("jitter_speed", format!("{:.1}", self.jitter_speed)),
-                ("datamosh", format!("{:.2}", self.datamosh)),
-            ]),
-            ("feedback", vec![
-                ("feedback_persistence", format!("{:.2}", self.feedback_persistence)),
-                ("feedback_zoom", format!("{:.3}", self.feedback_zoom)),
-                ("feedback_rotate", format!("{:.1}", self.feedback_rotate)),
-                ("feedback_luma_key", format!("{:.2}", self.feedback_luma_key)),
-                ("feedback_chroma", format!("{:.2}", self.feedback_chroma)),
-                ("feedback_additive", format!("{:.2}", self.feedback_additive)),
-            ]),
-            ("transform", vec![
-                ("layer_x", format!("{:.2}", self.layer_x)),
-                ("layer_y", format!("{:.2}", self.layer_y)),
-                ("layer_scale", format!("{:.2}", self.layer_scale)),
-                ("fit_mode", format!("{:.0}", self.fit_mode)),
-            ]),
+            (
+                "digital",
+                vec![
+                    ("pixelate", format!("{:.1}", self.pixelate)),
+                    ("rgb_split", format!("{:.1}", self.rgb_split)),
+                    ("hue_shift", format!("{:.1}", self.hue_shift)),
+                    ("saturation", format!("{:.2}", self.saturation)),
+                    ("brightness", format!("{:.2}", self.brightness)),
+                    ("contrast", format!("{:.2}", self.contrast)),
+                    ("posterize", format!("{:.1}", self.posterize)),
+                    ("invert", format!("{}", self.invert)),
+                ],
+            ),
+            (
+                "analog",
+                vec![
+                    ("grain_intensity", format!("{:.2}", self.grain_intensity)),
+                    ("grain_size", format!("{:.2}", self.grain_size)),
+                    ("grain_algo", format!("{}", self.grain_algo)),
+                    ("color_grain", format!("{}", self.color_grain)),
+                    ("vignette", format!("{:.2}", self.vignette)),
+                    ("color_drift", format!("{:.3}", self.color_drift)),
+                ],
+            ),
+            (
+                "motion",
+                vec![
+                    ("breathe_scale", format!("{:.3}", self.breathe_scale)),
+                    ("breathe_rotation", format!("{:.2}", self.breathe_rotation)),
+                    ("breathe_position", format!("{:.3}", self.breathe_position)),
+                ],
+            ),
+            (
+                "warp",
+                vec![
+                    ("wave_amp", format!("{:.3}", self.wave_amp)),
+                    ("wave_freq", format!("{:.1}", self.wave_freq)),
+                    ("wave_speed", format!("{:.2}", self.wave_speed)),
+                    ("wave_axis", format!("{:.0}", self.wave_axis)),
+                    ("swirl_angle", format!("{:.1}", self.swirl_angle)),
+                    ("swirl_radius", format!("{:.2}", self.swirl_radius)),
+                    ("bulge_strength", format!("{:.2}", self.bulge_strength)),
+                    ("bulge_radius", format!("{:.2}", self.bulge_radius)),
+                ],
+            ),
+            (
+                "key",
+                vec![
+                    ("chroma_enable", format!("{}", self.chroma_enable)),
+                    ("chroma_threshold", format!("{:.2}", self.chroma_threshold)),
+                    (
+                        "chroma_smoothness",
+                        format!("{:.2}", self.chroma_smoothness),
+                    ),
+                    ("chroma_spill", format!("{:.2}", self.chroma_spill)),
+                    ("chroma_r", format!("{:.2}", self.chroma_r)),
+                    ("chroma_g", format!("{:.2}", self.chroma_g)),
+                    ("chroma_b", format!("{:.2}", self.chroma_b)),
+                    ("chroma_bg_enable", format!("{}", self.chroma_bg_enable)),
+                    ("chroma_bg_r", format!("{:.2}", self.chroma_bg_r)),
+                    ("chroma_bg_g", format!("{:.2}", self.chroma_bg_g)),
+                    ("chroma_bg_b", format!("{:.2}", self.chroma_bg_b)),
+                ],
+            ),
+            (
+                "shift",
+                vec![
+                    ("slice_intensity", format!("{:.2}", self.slice_intensity)),
+                    ("slice_height", format!("{:.1}", self.slice_height)),
+                    ("slice_prob", format!("{:.2}", self.slice_prob)),
+                    ("slice_speed", format!("{:.1}", self.slice_speed)),
+                    ("block_size", format!("{:.1}", self.block_size)),
+                    ("block_intensity", format!("{:.2}", self.block_intensity)),
+                    ("block_prob", format!("{:.2}", self.block_prob)),
+                    ("block_speed", format!("{:.1}", self.block_speed)),
+                    ("shift_chroma", format!("{:.2}", self.shift_chroma)),
+                    ("slice_axis", format!("{:.1}", self.slice_axis)),
+                    ("jitter_amount", format!("{:.2}", self.jitter_amount)),
+                    ("jitter_speed", format!("{:.1}", self.jitter_speed)),
+                    ("datamosh", format!("{:.2}", self.datamosh)),
+                ],
+            ),
+            (
+                "feedback",
+                vec![
+                    (
+                        "feedback_persistence",
+                        format!("{:.2}", self.feedback_persistence),
+                    ),
+                    ("feedback_zoom", format!("{:.3}", self.feedback_zoom)),
+                    ("feedback_rotate", format!("{:.1}", self.feedback_rotate)),
+                    (
+                        "feedback_luma_key",
+                        format!("{:.2}", self.feedback_luma_key),
+                    ),
+                    ("feedback_chroma", format!("{:.2}", self.feedback_chroma)),
+                    (
+                        "feedback_additive",
+                        format!("{:.2}", self.feedback_additive),
+                    ),
+                ],
+            ),
+            (
+                "transform",
+                vec![
+                    ("layer_x", format!("{:.2}", self.layer_x)),
+                    ("layer_y", format!("{:.2}", self.layer_y)),
+                    ("layer_scale", format!("{:.2}", self.layer_scale)),
+                    ("fit_mode", format!("{:.0}", self.fit_mode)),
+                ],
+            ),
         ]
     }
 
     /// Set a single field by key name. Returns true if the key was recognized.
     pub fn set_field(&mut self, key: &str, value: &str) -> bool {
         match key {
-            "pixelate" => { if let Ok(v) = value.parse() { self.pixelate = v; return true; } }
-            "rgb_split" => { if let Ok(v) = value.parse() { self.rgb_split = v; return true; } }
-            "hue_shift" => { if let Ok(v) = value.parse() { self.hue_shift = v; return true; } }
-            "saturation" => { if let Ok(v) = value.parse() { self.saturation = v; return true; } }
-            "brightness" => { if let Ok(v) = value.parse() { self.brightness = v; return true; } }
-            "contrast" => { if let Ok(v) = value.parse() { self.contrast = v; return true; } }
-            "posterize" => { if let Ok(v) = value.parse() { self.posterize = v; return true; } }
-            "invert" => { if let Ok(v) = value.parse() { self.invert = v; return true; } }
-            "grain_intensity" => { if let Ok(v) = value.parse() { self.grain_intensity = v; return true; } }
-            "grain_size" => { if let Ok(v) = value.parse() { self.grain_size = v; return true; } }
-            "grain_algo" => { if let Ok(v) = value.parse() { self.grain_algo = v; return true; } }
-            "color_grain" => { if let Ok(v) = value.parse() { self.color_grain = v; return true; } }
-            "breathe_scale" => { if let Ok(v) = value.parse() { self.breathe_scale = v; return true; } }
-            "breathe_rotation" => { if let Ok(v) = value.parse() { self.breathe_rotation = v; return true; } }
-            "breathe_position" => { if let Ok(v) = value.parse() { self.breathe_position = v; return true; } }
-            "vignette" => { if let Ok(v) = value.parse() { self.vignette = v; return true; } }
-            "color_drift" => { if let Ok(v) = value.parse() { self.color_drift = v; return true; } }
-            "wave_amp" => { if let Ok(v) = value.parse() { self.wave_amp = v; return true; } }
-            "wave_freq" => { if let Ok(v) = value.parse() { self.wave_freq = v; return true; } }
-            "wave_speed" => { if let Ok(v) = value.parse() { self.wave_speed = v; return true; } }
-            "wave_axis" => { if let Ok(v) = value.parse() { self.wave_axis = v; return true; } }
-            "swirl_angle" => { if let Ok(v) = value.parse() { self.swirl_angle = v; return true; } }
-            "swirl_radius" => { if let Ok(v) = value.parse() { self.swirl_radius = v; return true; } }
-            "bulge_strength" => { if let Ok(v) = value.parse() { self.bulge_strength = v; return true; } }
-            "bulge_radius" => { if let Ok(v) = value.parse() { self.bulge_radius = v; return true; } }
-            "chroma_enable" => { if let Ok(v) = value.parse() { self.chroma_enable = v; return true; } }
-            "chroma_threshold" => { if let Ok(v) = value.parse() { self.chroma_threshold = v; return true; } }
-            "chroma_smoothness" => { if let Ok(v) = value.parse() { self.chroma_smoothness = v; return true; } }
-            "chroma_spill" => { if let Ok(v) = value.parse() { self.chroma_spill = v; return true; } }
-            "chroma_r" => { if let Ok(v) = value.parse() { self.chroma_r = v; return true; } }
-            "chroma_g" => { if let Ok(v) = value.parse() { self.chroma_g = v; return true; } }
-            "chroma_b" => { if let Ok(v) = value.parse() { self.chroma_b = v; return true; } }
-            "chroma_bg_enable" => { if let Ok(v) = value.parse() { self.chroma_bg_enable = v; return true; } }
-            "chroma_bg_r" => { if let Ok(v) = value.parse() { self.chroma_bg_r = v; return true; } }
-            "chroma_bg_g" => { if let Ok(v) = value.parse() { self.chroma_bg_g = v; return true; } }
-            "chroma_bg_b" => { if let Ok(v) = value.parse() { self.chroma_bg_b = v; return true; } }
-            "slice_intensity" => { if let Ok(v) = value.parse() { self.slice_intensity = v; return true; } }
-            "slice_height" => { if let Ok(v) = value.parse() { self.slice_height = v; return true; } }
-            "slice_prob" => { if let Ok(v) = value.parse() { self.slice_prob = v; return true; } }
-            "slice_speed" => { if let Ok(v) = value.parse() { self.slice_speed = v; return true; } }
-            "block_size" => { if let Ok(v) = value.parse() { self.block_size = v; return true; } }
-            "block_intensity" => { if let Ok(v) = value.parse() { self.block_intensity = v; return true; } }
-            "block_prob" => { if let Ok(v) = value.parse() { self.block_prob = v; return true; } }
-            "block_speed" => { if let Ok(v) = value.parse() { self.block_speed = v; return true; } }
-            "shift_chroma" => { if let Ok(v) = value.parse() { self.shift_chroma = v; return true; } }
-            "slice_axis" => { if let Ok(v) = value.parse() { self.slice_axis = v; return true; } }
-            "jitter_amount" => { if let Ok(v) = value.parse() { self.jitter_amount = v; return true; } }
-            "jitter_speed" => { if let Ok(v) = value.parse() { self.jitter_speed = v; return true; } }
-            "datamosh" => { if let Ok(v) = value.parse() { self.datamosh = v; return true; } }
-            "feedback_persistence" => { if let Ok(v) = value.parse() { self.feedback_persistence = v; return true; } }
-            "feedback_zoom" => { if let Ok(v) = value.parse() { self.feedback_zoom = v; return true; } }
-            "feedback_rotate" => { if let Ok(v) = value.parse() { self.feedback_rotate = v; return true; } }
-            "feedback_luma_key" => { if let Ok(v) = value.parse() { self.feedback_luma_key = v; return true; } }
-            "feedback_chroma" => { if let Ok(v) = value.parse() { self.feedback_chroma = v; return true; } }
-            "feedback_additive" => { if let Ok(v) = value.parse() { self.feedback_additive = v; return true; } }
-            "layer_x" => { if let Ok(v) = value.parse() { self.layer_x = v; return true; } }
-            "layer_y" => { if let Ok(v) = value.parse() { self.layer_y = v; return true; } }
-            "layer_scale" => { if let Ok(v) = value.parse() { self.layer_scale = v; return true; } }
-            "fit_mode" => { if let Ok(v) = value.parse() { self.fit_mode = v; return true; } }
+            "pixelate" => {
+                if let Ok(v) = value.parse() {
+                    self.pixelate = v;
+                    return true;
+                }
+            }
+            "rgb_split" => {
+                if let Ok(v) = value.parse() {
+                    self.rgb_split = v;
+                    return true;
+                }
+            }
+            "hue_shift" => {
+                if let Ok(v) = value.parse() {
+                    self.hue_shift = v;
+                    return true;
+                }
+            }
+            "saturation" => {
+                if let Ok(v) = value.parse() {
+                    self.saturation = v;
+                    return true;
+                }
+            }
+            "brightness" => {
+                if let Ok(v) = value.parse() {
+                    self.brightness = v;
+                    return true;
+                }
+            }
+            "contrast" => {
+                if let Ok(v) = value.parse() {
+                    self.contrast = v;
+                    return true;
+                }
+            }
+            "posterize" => {
+                if let Ok(v) = value.parse() {
+                    self.posterize = v;
+                    return true;
+                }
+            }
+            "invert" => {
+                if let Ok(v) = value.parse() {
+                    self.invert = v;
+                    return true;
+                }
+            }
+            "grain_intensity" => {
+                if let Ok(v) = value.parse() {
+                    self.grain_intensity = v;
+                    return true;
+                }
+            }
+            "grain_size" => {
+                if let Ok(v) = value.parse() {
+                    self.grain_size = v;
+                    return true;
+                }
+            }
+            "grain_algo" => {
+                if let Ok(v) = value.parse() {
+                    self.grain_algo = v;
+                    return true;
+                }
+            }
+            "color_grain" => {
+                if let Ok(v) = value.parse() {
+                    self.color_grain = v;
+                    return true;
+                }
+            }
+            "breathe_scale" => {
+                if let Ok(v) = value.parse() {
+                    self.breathe_scale = v;
+                    return true;
+                }
+            }
+            "breathe_rotation" => {
+                if let Ok(v) = value.parse() {
+                    self.breathe_rotation = v;
+                    return true;
+                }
+            }
+            "breathe_position" => {
+                if let Ok(v) = value.parse() {
+                    self.breathe_position = v;
+                    return true;
+                }
+            }
+            "vignette" => {
+                if let Ok(v) = value.parse() {
+                    self.vignette = v;
+                    return true;
+                }
+            }
+            "color_drift" => {
+                if let Ok(v) = value.parse() {
+                    self.color_drift = v;
+                    return true;
+                }
+            }
+            "wave_amp" => {
+                if let Ok(v) = value.parse() {
+                    self.wave_amp = v;
+                    return true;
+                }
+            }
+            "wave_freq" => {
+                if let Ok(v) = value.parse() {
+                    self.wave_freq = v;
+                    return true;
+                }
+            }
+            "wave_speed" => {
+                if let Ok(v) = value.parse() {
+                    self.wave_speed = v;
+                    return true;
+                }
+            }
+            "wave_axis" => {
+                if let Ok(v) = value.parse() {
+                    self.wave_axis = v;
+                    return true;
+                }
+            }
+            "swirl_angle" => {
+                if let Ok(v) = value.parse() {
+                    self.swirl_angle = v;
+                    return true;
+                }
+            }
+            "swirl_radius" => {
+                if let Ok(v) = value.parse() {
+                    self.swirl_radius = v;
+                    return true;
+                }
+            }
+            "bulge_strength" => {
+                if let Ok(v) = value.parse() {
+                    self.bulge_strength = v;
+                    return true;
+                }
+            }
+            "bulge_radius" => {
+                if let Ok(v) = value.parse() {
+                    self.bulge_radius = v;
+                    return true;
+                }
+            }
+            "chroma_enable" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_enable = v;
+                    return true;
+                }
+            }
+            "chroma_threshold" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_threshold = v;
+                    return true;
+                }
+            }
+            "chroma_smoothness" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_smoothness = v;
+                    return true;
+                }
+            }
+            "chroma_spill" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_spill = v;
+                    return true;
+                }
+            }
+            "chroma_r" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_r = v;
+                    return true;
+                }
+            }
+            "chroma_g" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_g = v;
+                    return true;
+                }
+            }
+            "chroma_b" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_b = v;
+                    return true;
+                }
+            }
+            "chroma_bg_enable" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_bg_enable = v;
+                    return true;
+                }
+            }
+            "chroma_bg_r" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_bg_r = v;
+                    return true;
+                }
+            }
+            "chroma_bg_g" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_bg_g = v;
+                    return true;
+                }
+            }
+            "chroma_bg_b" => {
+                if let Ok(v) = value.parse() {
+                    self.chroma_bg_b = v;
+                    return true;
+                }
+            }
+            "slice_intensity" => {
+                if let Ok(v) = value.parse() {
+                    self.slice_intensity = v;
+                    return true;
+                }
+            }
+            "slice_height" => {
+                if let Ok(v) = value.parse() {
+                    self.slice_height = v;
+                    return true;
+                }
+            }
+            "slice_prob" => {
+                if let Ok(v) = value.parse() {
+                    self.slice_prob = v;
+                    return true;
+                }
+            }
+            "slice_speed" => {
+                if let Ok(v) = value.parse() {
+                    self.slice_speed = v;
+                    return true;
+                }
+            }
+            "block_size" => {
+                if let Ok(v) = value.parse() {
+                    self.block_size = v;
+                    return true;
+                }
+            }
+            "block_intensity" => {
+                if let Ok(v) = value.parse() {
+                    self.block_intensity = v;
+                    return true;
+                }
+            }
+            "block_prob" => {
+                if let Ok(v) = value.parse() {
+                    self.block_prob = v;
+                    return true;
+                }
+            }
+            "block_speed" => {
+                if let Ok(v) = value.parse() {
+                    self.block_speed = v;
+                    return true;
+                }
+            }
+            "shift_chroma" => {
+                if let Ok(v) = value.parse() {
+                    self.shift_chroma = v;
+                    return true;
+                }
+            }
+            "slice_axis" => {
+                if let Ok(v) = value.parse() {
+                    self.slice_axis = v;
+                    return true;
+                }
+            }
+            "jitter_amount" => {
+                if let Ok(v) = value.parse() {
+                    self.jitter_amount = v;
+                    return true;
+                }
+            }
+            "jitter_speed" => {
+                if let Ok(v) = value.parse() {
+                    self.jitter_speed = v;
+                    return true;
+                }
+            }
+            "datamosh" => {
+                if let Ok(v) = value.parse() {
+                    self.datamosh = v;
+                    return true;
+                }
+            }
+            "feedback_persistence" => {
+                if let Ok(v) = value.parse() {
+                    self.feedback_persistence = v;
+                    return true;
+                }
+            }
+            "feedback_zoom" => {
+                if let Ok(v) = value.parse() {
+                    self.feedback_zoom = v;
+                    return true;
+                }
+            }
+            "feedback_rotate" => {
+                if let Ok(v) = value.parse() {
+                    self.feedback_rotate = v;
+                    return true;
+                }
+            }
+            "feedback_luma_key" => {
+                if let Ok(v) = value.parse() {
+                    self.feedback_luma_key = v;
+                    return true;
+                }
+            }
+            "feedback_chroma" => {
+                if let Ok(v) = value.parse() {
+                    self.feedback_chroma = v;
+                    return true;
+                }
+            }
+            "feedback_additive" => {
+                if let Ok(v) = value.parse() {
+                    self.feedback_additive = v;
+                    return true;
+                }
+            }
+            "layer_x" => {
+                if let Ok(v) = value.parse() {
+                    self.layer_x = v;
+                    return true;
+                }
+            }
+            "layer_y" => {
+                if let Ok(v) = value.parse() {
+                    self.layer_y = v;
+                    return true;
+                }
+            }
+            "layer_scale" => {
+                if let Ok(v) = value.parse() {
+                    self.layer_scale = v;
+                    return true;
+                }
+            }
+            "fit_mode" => {
+                if let Ok(v) = value.parse() {
+                    self.fit_mode = v;
+                    return true;
+                }
+            }
             _ => {}
         }
         false
@@ -801,7 +1462,9 @@ impl LayerConfig {
             paused: layer.paused,
             visible: layer.visible,
             effects: EffectsConfig::from_uniforms(&layer.effects),
-            automations: layer.automations.iter()
+            automations: layer
+                .automations
+                .iter()
                 .map(|(k, v)| (k.clone(), v.source.clone()))
                 .collect(),
             mute: layer.audio.mute,
@@ -846,8 +1509,12 @@ impl LayerConfig {
         layer.automation_errors.clear();
         for (param, expr) in &self.automations {
             match Expr::new(expr) {
-                Ok(compiled) => { layer.automations.insert(param.clone(), compiled); }
-                Err(e) => { layer.automation_errors.insert(param.clone(), e); }
+                Ok(compiled) => {
+                    layer.automations.insert(param.clone(), compiled);
+                }
+                Err(e) => {
+                    layer.automation_errors.insert(param.clone(), e);
+                }
             }
         }
     }
@@ -877,21 +1544,94 @@ impl LayerConfig {
     /// Set a top-level field by key name. Returns true if recognized.
     pub fn set_field(&mut self, key: &str, value: &str) -> bool {
         match key {
-            "opacity" => { if let Ok(v) = value.parse() { self.opacity = v; return true; } }
-            "blend_mode" => { self.blend_mode = value.to_string(); return true; }
-            "speed" => { if let Ok(v) = value.parse() { self.speed = v; return true; } }
-            "fps" => { if let Ok(v) = value.parse() { self.fps = v; return true; } }
-            "paused" => { if let Ok(v) = value.parse() { self.paused = v; return true; } }
-            "visible" => { if let Ok(v) = value.parse() { self.visible = v; return true; } }
-            "mute" => { if let Ok(v) = value.parse() { self.mute = v; return true; } }
-            "volume" => { if let Ok(v) = value.parse() { self.volume = v; return true; } }
-            "pan" => { if let Ok(v) = value.parse() { self.pan = v; return true; } }
-            "eq_low" => { if let Ok(v) = value.parse() { self.eq_low = v; return true; } }
-            "eq_mid" => { if let Ok(v) = value.parse() { self.eq_mid = v; return true; } }
-            "eq_high" => { if let Ok(v) = value.parse() { self.eq_high = v; return true; } }
-            "delay_time" => { if let Ok(v) = value.parse() { self.delay_time = v; return true; } }
-            "delay_feedback" => { if let Ok(v) = value.parse() { self.delay_feedback = v; return true; } }
-            "delay_mix" => { if let Ok(v) = value.parse() { self.delay_mix = v; return true; } }
+            "opacity" => {
+                if let Ok(v) = value.parse() {
+                    self.opacity = v;
+                    return true;
+                }
+            }
+            "blend_mode" => {
+                self.blend_mode = value.to_string();
+                return true;
+            }
+            "speed" => {
+                if let Ok(v) = value.parse() {
+                    self.speed = v;
+                    return true;
+                }
+            }
+            "fps" => {
+                if let Ok(v) = value.parse() {
+                    self.fps = v;
+                    return true;
+                }
+            }
+            "paused" => {
+                if let Ok(v) = value.parse() {
+                    self.paused = v;
+                    return true;
+                }
+            }
+            "visible" => {
+                if let Ok(v) = value.parse() {
+                    self.visible = v;
+                    return true;
+                }
+            }
+            "mute" => {
+                if let Ok(v) = value.parse() {
+                    self.mute = v;
+                    return true;
+                }
+            }
+            "volume" => {
+                if let Ok(v) = value.parse() {
+                    self.volume = v;
+                    return true;
+                }
+            }
+            "pan" => {
+                if let Ok(v) = value.parse() {
+                    self.pan = v;
+                    return true;
+                }
+            }
+            "eq_low" => {
+                if let Ok(v) = value.parse() {
+                    self.eq_low = v;
+                    return true;
+                }
+            }
+            "eq_mid" => {
+                if let Ok(v) = value.parse() {
+                    self.eq_mid = v;
+                    return true;
+                }
+            }
+            "eq_high" => {
+                if let Ok(v) = value.parse() {
+                    self.eq_high = v;
+                    return true;
+                }
+            }
+            "delay_time" => {
+                if let Ok(v) = value.parse() {
+                    self.delay_time = v;
+                    return true;
+                }
+            }
+            "delay_feedback" => {
+                if let Ok(v) = value.parse() {
+                    self.delay_feedback = v;
+                    return true;
+                }
+            }
+            "delay_mix" => {
+                if let Ok(v) = value.parse() {
+                    self.delay_mix = v;
+                    return true;
+                }
+            }
             _ => {}
         }
         false
@@ -917,7 +1657,8 @@ impl PatchState {
             master: EffectsConfig::from_uniforms(master),
             layers: layers.iter().map(LayerConfig::from_layer).collect(),
             ntsc: Some(NtscConfig::from_params(ntsc_params)),
-            master_automations: master_automations.iter()
+            master_automations: master_automations
+                .iter()
                 .map(|(k, v)| (k.clone(), v.source.clone()))
                 .collect(),
             audio: Some(MasterAudioConfig {
@@ -935,7 +1676,12 @@ impl PatchState {
         (a.volume, a.limiter)
     }
 
-    pub fn apply(&self, master: &mut EffectUniforms, layers: &mut [Layer], ntsc_params: &mut NtscParams) {
+    pub fn apply(
+        &self,
+        master: &mut EffectUniforms,
+        layers: &mut [Layer],
+        ntsc_params: &mut NtscParams,
+    ) {
         self.master.apply_to_uniforms(master);
         // `zip` pairs each saved config with the matching live layer and stops at
         // the shorter of the two — so extra live layers or extra saved configs are
@@ -957,10 +1703,262 @@ impl PatchState {
         let mut errors = HashMap::new();
         for (param, expr) in &self.master_automations {
             match Expr::new(expr) {
-                Ok(c) => { compiled.insert(param.clone(), c); }
-                Err(e) => { errors.insert(param.clone(), e); }
+                Ok(c) => {
+                    compiled.insert(param.clone(), c);
+                }
+                Err(e) => {
+                    errors.insert(param.clone(), e);
+                }
             }
         }
         (compiled, errors)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    /// Parse a small representative patch from YAML (exercises the on-disk format).
+    fn sample_patch() -> PatchState {
+        let yaml = r#"
+master:
+  rgb_split: 12.0
+  hue_shift: 90.0
+  invert: true
+layers:
+  - filename: a.mp4
+    opacity: 0.5
+    blend_mode: screen
+    volume: -6.0
+  - filename: b.mp4
+master_automations:
+  vignette: "0.5+0.5*sin(t)"
+audio:
+  volume: -3.0
+  limiter: false
+"#;
+        serde_yaml::from_str(yaml).expect("parse sample patch")
+    }
+
+    /// A representative patch survives a YAML serialize → deserialize round-trip
+    /// with all key fields preserved.
+    #[test]
+    fn patch_state_yaml_round_trips() {
+        eprintln!("patch: PatchState round-trips through YAML");
+        let patch = sample_patch();
+        let yaml = serde_yaml::to_string(&patch).expect("serialize");
+        let back: PatchState = serde_yaml::from_str(&yaml).expect("deserialize");
+
+        assert_eq!(back.layers.len(), 2);
+        assert_eq!(back.layers[0].filename, "a.mp4");
+        assert_abs_diff_eq!(back.layers[0].opacity, 0.5, epsilon = 1e-6);
+        assert_eq!(back.layers[0].blend_mode, "screen");
+        assert_abs_diff_eq!(back.layers[0].volume, -6.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(back.master.rgb_split, 12.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(back.master.hue_shift, 90.0, epsilon = 1e-6);
+        assert!(back.master.invert);
+        assert_eq!(
+            back.master_automations.get("vignette").map(String::as_str),
+            Some("0.5+0.5*sin(t)")
+        );
+        let (vol, lim) = back.master_audio();
+        assert_abs_diff_eq!(vol, -3.0, epsilon = 1e-6);
+        assert!(!lim);
+    }
+
+    /// A minimal patch with only required fields loads, filling every absent
+    /// field from its serde default.
+    #[test]
+    fn minimal_yaml_relies_on_serde_defaults() {
+        eprintln!("patch: minimal YAML falls back to serde defaults");
+        // An old/minimal patch: only the required fields. Everything else must
+        // fall back to its serde default (guards patch-format drift).
+        let yaml = "master: {}\nlayers:\n  - filename: only.mp4\n";
+        let patch: PatchState = serde_yaml::from_str(yaml).expect("minimal parse");
+        let l = &patch.layers[0];
+        assert_eq!(l.filename, "only.mp4");
+        assert_eq!(l.opacity, 1.0); // default = "one", not 0.0
+        assert_eq!(l.blend_mode, "normal");
+        assert_eq!(l.speed, 1.0);
+        assert_eq!(l.fps, 30.0);
+        assert!(l.visible);
+        assert_eq!(l.effects.pixelate, 1.0);
+        assert_eq!(l.effects.feedback_zoom, 1.0);
+        assert_eq!(l.effects.layer_scale, 1.0);
+        // Missing optional sections → None, and master_audio falls back to defaults.
+        assert!(patch.ntsc.is_none());
+        assert!(patch.audio.is_none());
+        let (vol, lim) = patch.master_audio();
+        assert_eq!(vol, 0.0);
+        assert!(lim);
+    }
+
+    /// Out-of-range `EffectsConfig` values are clamped (and `fit_mode` rounded)
+    /// when applied to the GPU uniforms.
+    #[test]
+    fn effects_config_apply_to_uniforms_clamps() {
+        eprintln!("patch: EffectsConfig apply_to_uniforms clamps out-of-range values");
+        let mut cfg = EffectsConfig::default();
+        cfg.pixelate = 999.0;
+        cfg.rgb_split = -5.0;
+        cfg.hue_shift = 500.0;
+        cfg.bulge_radius = 0.0; // min is 0.05
+        cfg.feedback_zoom = 5.0; // 0.8..1.2
+        cfg.layer_scale = 99.0; // 0.1..4.0
+        cfg.fit_mode = 1.7; // rounds to 2
+
+        let mut u = EffectUniforms::default();
+        cfg.apply_to_uniforms(&mut u);
+
+        assert_eq!(u.pixelate_size, 32.0);
+        assert_eq!(u.rgb_split, 0.0);
+        assert_eq!(u.hue_shift, 180.0);
+        assert_eq!(u.bulge_radius, 0.05);
+        assert_eq!(u.feedback_zoom, 1.2);
+        assert_eq!(u.layer_scale, 4.0);
+        assert_eq!(u.fit_mode, 2.0);
+    }
+
+    /// In-range uniform values round-trip through uniforms → config → uniforms
+    /// unchanged.
+    #[test]
+    fn effects_config_from_apply_symmetry() {
+        eprintln!("patch: EffectsConfig from/apply uniforms is symmetric");
+        // Round-trip in-range uniform values: uniforms → config → uniforms.
+        let mut u = EffectUniforms::default();
+        u.rgb_split = 10.0;
+        u.hue_shift = 45.0;
+        u.swirl_angle = 180.0;
+        u.bulge_strength = -0.5;
+        u.chroma_enable = 1.0;
+        u.feedback_zoom = 1.1;
+        u.layer_scale = 2.0;
+
+        let cfg = EffectsConfig::from_uniforms(&u);
+        let mut back = EffectUniforms::default();
+        cfg.apply_to_uniforms(&mut back);
+
+        assert_eq!(back.rgb_split, 10.0);
+        assert_eq!(back.hue_shift, 45.0);
+        assert_eq!(back.swirl_angle, 180.0);
+        assert_eq!(back.bulge_strength, -0.5);
+        assert_eq!(back.chroma_enable, 1.0);
+        assert_eq!(back.feedback_zoom, 1.1);
+        assert_eq!(back.layer_scale, 2.0);
+    }
+
+    /// Known parameter names resolve to metadata with a sane range, and unknown
+    /// names return none.
+    #[test]
+    fn param_meta_lookup_coverage() {
+        eprintln!("patch: param_meta resolves known params and rejects unknown");
+        // A representative set of known params must resolve with a sane range.
+        for name in [
+            "pixelate",
+            "rgb_split",
+            "hue_shift",
+            "opacity",
+            "speed",
+            "volume",
+            "eq_low",
+            "delay_time",
+            "wave_amp",
+            "swirl_angle",
+            "bulge_radius",
+            "feedback_zoom",
+            "layer_scale",
+            "fit_mode",
+        ] {
+            let m = param_meta(name).unwrap_or_else(|| panic!("missing meta for {name}"));
+            assert!(m.min <= m.max, "{name}: min>max");
+            assert!(m.step > 0.0, "{name}: step must be positive");
+        }
+        // Unknown params have no metadata.
+        assert!(param_meta("not_a_param").is_none());
+    }
+
+    /// `EffectsConfig::set_field` parses valid values, and rejects unparseable
+    /// values and unknown keys without mutating state.
+    #[test]
+    fn effects_config_set_field_parses_and_rejects() {
+        eprintln!("patch: EffectsConfig set_field parses valid input and rejects bad keys/values");
+        let mut cfg = EffectsConfig::default();
+        // Valid numeric.
+        assert!(cfg.set_field("rgb_split", "7.5"));
+        assert_eq!(cfg.rgb_split, 7.5);
+        // Valid bool.
+        assert!(cfg.set_field("invert", "true"));
+        assert!(cfg.invert);
+        // Valid u32.
+        assert!(cfg.set_field("grain_algo", "2"));
+        assert_eq!(cfg.grain_algo, 2);
+        // Unparseable value for a known key → returns false, leaves value intact.
+        assert!(!cfg.set_field("rgb_split", "not-a-number"));
+        assert_eq!(cfg.rgb_split, 7.5);
+        // Unknown key → false.
+        assert!(!cfg.set_field("nonexistent", "1.0"));
+    }
+
+    /// `LayerConfig::set_field` accepts blend_mode strings verbatim, parses
+    /// numeric/bool fields, and rejects bad values and unknown keys.
+    #[test]
+    fn layer_config_set_field_handles_blend_mode_strings() {
+        eprintln!("patch: LayerConfig set_field handles blend_mode and typed fields");
+        // blend_mode accepts any string verbatim (always recognized).
+        let mut cfg = sample_patch().layers.remove(1); // b.mp4 (defaults)
+        assert!(cfg.set_field("blend_mode", "multiply"));
+        assert_eq!(cfg.blend_mode, "multiply");
+        assert!(cfg.set_field("opacity", "0.25"));
+        assert_abs_diff_eq!(cfg.opacity, 0.25, epsilon = 1e-6);
+        assert!(cfg.set_field("mute", "true"));
+        assert!(cfg.mute);
+        // Bad numeric value → false.
+        assert!(!cfg.set_field("speed", "fast"));
+        // Unknown key → false.
+        assert!(!cfg.set_field("nope", "x"));
+    }
+
+    /// `NtscConfig` round-trips faithfully through from_params → to_params.
+    #[test]
+    fn ntsc_config_from_to_params_round_trips() {
+        eprintln!("patch: NtscConfig from_params/to_params round-trips");
+        let mut p = NtscParams::default();
+        p.enabled = true;
+        p.tape_speed = 2;
+        p.chroma_loss = 0.3;
+        p.head_switching_height = 16;
+        p.snow_intensity = 0.5;
+
+        let cfg = NtscConfig::from_params(&p);
+        let back = cfg.to_params();
+
+        assert!(back.enabled);
+        assert_eq!(back.tape_speed, 2);
+        assert_abs_diff_eq!(back.chroma_loss, 0.3, epsilon = 1e-6);
+        assert_eq!(back.head_switching_height, 16);
+        assert_abs_diff_eq!(back.snow_intensity, 0.5, epsilon = 1e-6);
+    }
+
+    /// Compiling master automations keeps valid expressions and routes invalid
+    /// ones into the errors map.
+    #[test]
+    fn compile_master_automations_maps_valid_and_errors() {
+        eprintln!("patch: compile_master_automations separates valid exprs from errors");
+        let mut patch = sample_patch();
+        patch.master_automations.clear();
+        patch
+            .master_automations
+            .insert("vignette".into(), "0.5*sin(t)".into());
+        patch
+            .master_automations
+            .insert("rgb_split".into(), "((((".into()); // bad
+
+        let (compiled, errors) = patch.compile_master_automations();
+        assert!(compiled.contains_key("vignette"));
+        assert!(!compiled.contains_key("rgb_split"));
+        assert!(errors.contains_key("rgb_split"));
+        assert!(!errors.contains_key("vignette"));
     }
 }
