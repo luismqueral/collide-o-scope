@@ -252,15 +252,21 @@ impl EffectUniforms {
 mod tests {
     use super::*;
 
+    /// The `EffectUniforms` struct is exactly 272 bytes so it stays byte-identical
+    /// to the WGSL `Uniforms` binding.
     #[test]
     fn uniforms_are_exactly_272_bytes() {
+        eprintln!("effects: EffectUniforms is exactly 272 bytes (17 x vec4)");
         // The Rust struct and the WGSL `Uniforms` must stay byte-identical
         // (17 × vec4 = 272). If this fails, the shader binding is broken.
         assert_eq!(std::mem::size_of::<EffectUniforms>(), 272);
     }
 
+    /// `set_by_name` stores in-range values verbatim and clamps out-of-range
+    /// values to each param's documented bounds.
     #[test]
     fn set_by_name_sets_and_clamps_known_params() {
+        eprintln!("effects: set_by_name stores and clamps known params");
         let mut u = EffectUniforms::default();
         // In-range value is stored verbatim.
         u.set_by_name("rgb_split", 12.0);
@@ -281,8 +287,11 @@ mod tests {
         assert_eq!(u.bulge_radius, 0.05);
     }
 
+    /// `set_by_name` leaves state untouched for unknown or non-automatable
+    /// param names.
     #[test]
     fn set_by_name_ignores_unknown_param() {
+        eprintln!("effects: set_by_name no-ops on unknown/non-automatable params");
         let mut u = EffectUniforms::default();
         let before = u; // EffectUniforms is Copy
                         // Unknown key (and non-automatable params like "invert") must no-op.
@@ -295,8 +304,11 @@ mod tests {
         );
     }
 
+    /// `reset` restores all params to their defaults while preserving the current
+    /// resolution.
     #[test]
     fn reset_restores_defaults_but_keeps_resolution() {
+        eprintln!("effects: reset restores defaults but keeps resolution");
         let mut u = EffectUniforms::default();
         u.resolution = [1920.0, 1080.0];
         u.rgb_split = 20.0;
@@ -311,8 +323,11 @@ mod tests {
         assert_eq!(u.hue_shift, 0.0);
     }
 
+    /// Increasing pixelate doubles the block size (saturating at 32) and
+    /// decreasing halves it (flooring at 1.0).
     #[test]
     fn pixelate_increase_decrease_double_halve_and_clamp() {
+        eprintln!("effects: pixelate increase/decrease doubles/halves and clamps");
         let mut u = EffectUniforms::default(); // pixelate_size = 1.0
                                                // First increase jumps from 1.0 to max(2.0, 2.0) = 2.0.
         u.increase_pixelate();

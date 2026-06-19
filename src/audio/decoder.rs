@@ -194,14 +194,20 @@ mod tests {
     use super::*;
     use crate::test_support::{synth_audio, synth_video};
 
+    /// Opening a synthesized audio fixture succeeds and builds the decoder and
+    /// resampler without error.
     #[test]
     fn open_succeeds_on_audio_fixture() {
+        eprintln!("audio: AudioDecoder::open succeeds on a synthesized audio fixture");
         let (_dir, path) = synth_audio(440, 0.5);
         assert!(AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).is_ok());
     }
 
+    /// Opening a path that doesn't exist returns an Err naming the failure
+    /// ("Cannot open") instead of panicking.
     #[test]
     fn open_errors_on_bogus_path() {
+        eprintln!("audio: AudioDecoder::open errors on a missing file path");
         let err = match AudioDecoder::open("/no/such/file.m4a", 48_000, 2) {
             Ok(_) => panic!("expected open to fail on a missing file"),
             Err(e) => e,
@@ -209,15 +215,20 @@ mod tests {
         assert!(err.contains("Cannot open"), "unexpected error: {err}");
     }
 
+    /// Opening a video-only clip (no audio track) returns an Err.
     #[test]
     fn open_errors_on_file_without_audio() {
+        eprintln!("audio: AudioDecoder::open errors on a file with no audio track");
         // A video-only `testsrc` clip has no audio track to decode.
         let (_dir, path) = synth_video(64, 48, 10, 0.5);
         assert!(AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).is_err());
     }
 
+    /// The first decoded chunk carries samples, is channel-aligned (even length
+    /// for interleaved stereo), and contains only finite f32 values.
     #[test]
     fn next_chunk_returns_interleaved_stereo_f32() {
+        eprintln!("audio: next_chunk returns finite, channel-aligned interleaved stereo f32");
         let (_dir, path) = synth_audio(440, 0.5);
         let mut dec = AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).expect("open fixture");
         let chunk = dec.next_chunk().expect("decode a chunk");
@@ -231,8 +242,11 @@ mod tests {
         );
     }
 
+    /// Pulling far more audio than the file holds keeps returning Some, proving
+    /// the decoder loops cleanly past EOF by reopening.
     #[test]
     fn next_chunk_loops_cleanly_past_eof() {
+        eprintln!("audio: next_chunk keeps yielding chunks by looping past EOF");
         let (_dir, path) = synth_audio(440, 0.3);
         let mut dec = AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).expect("open fixture");
         // Pull far more audio than the 0.3 s file holds: the decoder loops by

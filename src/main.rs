@@ -2827,8 +2827,11 @@ mod tests {
         parts.iter().map(|s| s.to_string()).collect()
     }
 
+    /// output_dims maps common aspect-ratio strings to pixel sizes, falls back
+    /// to 16:9 for unknown ratios, and always rounds to even dimensions.
     #[test]
     fn output_dims_common_ratios_and_evenness() {
+        eprintln!("cli: output_dims resolves aspect ratios to even encoder-friendly sizes");
         assert_eq!(output_dims("16:9", 1080), (1920, 1080));
         assert_eq!(output_dims("4:3", 1080), (1440, 1080));
         assert_eq!(output_dims("1:1", 1080), (1080, 1080));
@@ -2842,8 +2845,11 @@ mod tests {
         assert_eq!(h % 2, 0);
     }
 
+    /// fit_scale computes the right per-axis scale for stretch, contain, and
+    /// cover fit modes and short-circuits to identity on non-positive dims.
     #[test]
     fn fit_scale_modes() {
+        eprintln!("cli: fit_scale handles stretch/contain/cover and degenerate dims");
         // Stretch (mode 0) is always identity.
         assert_eq!(fit_scale(0.0, 1920.0, 1080.0, 1080.0, 1080.0), (1.0, 1.0));
         // Square source on square canvas: any mode is identity.
@@ -2862,8 +2868,11 @@ mod tests {
         assert_eq!(fit_scale(1.0, 100.0, 100.0, 0.0, 100.0), (1.0, 1.0));
     }
 
+    /// hex_to_rgb01 / rgb01_to_hex parse valid hex (with optional #), fall back
+    /// to green on bad input, and round-trip a color while clamping out-of-range.
     #[test]
     fn hex_color_round_trip_and_fallback() {
+        eprintln!("cli: hex<->rgb01 conversion round-trips and falls back on bad hex");
         assert_eq!(hex_to_rgb01("#000000"), (0.0, 0.0, 0.0));
         assert_eq!(hex_to_rgb01("#ffffff"), (1.0, 1.0, 1.0));
         // Leading # is optional.
@@ -2878,8 +2887,11 @@ mod tests {
         assert!((r - 0.2).abs() < 0.01 && (g - 0.4).abs() < 0.01 && (b - 0.6).abs() < 0.01);
     }
 
+    /// sanitize_patch_name keeps safe characters, replaces path-traversal and
+    /// symbol characters with underscores, trims ends, and caps length at 48.
     #[test]
     fn sanitize_patch_name_strips_unsafe_and_caps_length() {
+        eprintln!("cli: sanitize_patch_name strips unsafe chars and caps length");
         assert_eq!(sanitize_patch_name("my patch-1_v2"), "my patch-1_v2");
         // Path traversal / symbols (incl. dots) become underscores.
         assert_eq!(sanitize_patch_name("../etc/passwd"), "___etc_passwd");
@@ -2891,8 +2903,11 @@ mod tests {
         assert_eq!(sanitize_patch_name(&long).len(), 48);
     }
 
+    /// fit_to_area fits an aspect ratio inside a bounding box, respecting
+    /// whichever of width or height is the limiting dimension.
     #[test]
     fn fit_to_area_respects_both_bounds() {
+        eprintln!("cli: fit_to_area respects whichever bound limits the aspect ratio");
         // Width-limited: 16:9 into a wide-but-short box → height drives it.
         let (w, h) = fit_to_area(1600.0, 100.0, 16.0 / 9.0);
         assert!(h <= 100.0 + 1e-3);
@@ -2903,8 +2918,11 @@ mod tests {
         assert!((w / h - 16.0 / 9.0).abs() < 1e-3);
     }
 
+    /// parse_render_args accepts just the required --patch/--library flags and
+    /// fills in the documented defaults for out path, resolution, fps, duration.
     #[test]
     fn parse_render_args_defaults_with_required_flags() {
+        eprintln!("cli: parse_render_args fills defaults when only required flags are given");
         let a = parse_render_args(&args(&["--patch", "p.yaml", "--library", "lib/"])).unwrap();
         assert_eq!(a.patch_path, "p.yaml");
         assert_eq!(a.library, "lib/");
@@ -2914,8 +2932,11 @@ mod tests {
         assert_eq!(a.duration, 10.0);
     }
 
+    /// parse_render_args applies every optional flag (--out/--res/--fps/
+    /// --duration) when supplied, overriding the defaults.
     #[test]
     fn parse_render_args_overrides_all() {
+        eprintln!("cli: parse_render_args honors all optional override flags");
         let a = parse_render_args(&args(&[
             "--patch",
             "p.yaml",
@@ -2937,15 +2958,21 @@ mod tests {
         assert_eq!(a.duration, 2.5);
     }
 
+    /// parse_render_args errors when either required flag (--patch or
+    /// --library) is missing, including the empty-args case.
     #[test]
     fn parse_render_args_requires_patch_and_library() {
+        eprintln!("cli: parse_render_args errors when a required flag is missing");
         assert!(parse_render_args(&args(&["--library", "lib/"])).is_err());
         assert!(parse_render_args(&args(&["--patch", "p.yaml"])).is_err());
         assert!(parse_render_args(&[]).is_err());
     }
 
+    /// parse_render_args rejects malformed --res, non-numeric --fps/--duration,
+    /// and any unknown flag.
     #[test]
     fn parse_render_args_rejects_bad_values_and_unknown_flags() {
+        eprintln!("cli: parse_render_args rejects bad values and unknown flags");
         let base = ["--patch", "p.yaml", "--library", "lib/"];
         // Malformed --res.
         let mut v = base.to_vec();

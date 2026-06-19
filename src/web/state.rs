@@ -612,8 +612,11 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
 
+    /// An in-range effects snapshot survives the snapshot → uniforms → snapshot
+    /// round-trip unchanged (the browser↔engine effects mirror).
     #[test]
     fn effects_snapshot_round_trips_through_uniforms() {
+        eprintln!("web: EffectsSnapshot round-trips through EffectUniforms");
         // A snapshot of in-range values must survive snapshot → uniforms →
         // snapshot unchanged (the browser↔engine effects mirror).
         let mut snap = EffectsSnapshot::default();
@@ -642,8 +645,11 @@ mod tests {
         assert_eq!(back.vignette, 1.0);
     }
 
+    /// Out-of-range snapshot values are clamped to each parameter's valid range
+    /// when applied to the GPU uniforms.
     #[test]
     fn apply_to_uniforms_clamps_out_of_range() {
+        eprintln!("web: apply_to_uniforms clamps out-of-range values");
         let mut snap = EffectsSnapshot::default();
         snap.pixelate = 999.0; // > 32
         snap.rgb_split = -5.0; // < 0
@@ -665,8 +671,11 @@ mod tests {
         assert_eq!(u.vignette, 1.5);
     }
 
+    /// `apply_param` parses f64/bool/u64 JSON values into the right fields and
+    /// ignores unknown params and wrong-typed values.
     #[test]
     fn apply_param_parses_value_types() {
+        eprintln!("web: apply_param parses value types and ignores bad input");
         let mut snap = EffectsSnapshot::default();
         // f64 → f32
         snap.apply_param("rgb_split", &serde_json::json!(15.0));
@@ -684,8 +693,10 @@ mod tests {
         assert_eq!(snap.saturation, 0.0);
     }
 
+    /// `NtscSnapshot::from_params` faithfully mirrors the source `NtscParams`.
     #[test]
     fn ntsc_snapshot_mirrors_params() {
+        eprintln!("web: NtscSnapshot mirrors NtscParams");
         let mut p = crate::ntsc::NtscParams::default();
         p.enabled = true;
         p.tape_speed = 2;
@@ -709,8 +720,11 @@ mod tests {
         assert_eq!(json, reserialized, "round-trip mismatch for {action:?}");
     }
 
+    /// Every `WebAction` variant survives a serialize → deserialize → serialize
+    /// round-trip with matching JSON.
     #[test]
     fn web_action_serde_tag_round_trips_every_variant() {
+        eprintln!("web: every WebAction variant round-trips through serde");
         let v = serde_json::json!(5.0);
         let cases = vec![
             WebAction::SetParam {
@@ -797,8 +811,11 @@ mod tests {
         }
     }
 
+    /// The serialized `action` tag and field names match the browser wire
+    /// contract for representative variants.
     #[test]
     fn web_action_tag_field_names_match_contract() {
+        eprintln!("web: WebAction tag/field names match the browser contract");
         // The "action" tag is the wire contract with the browser; spot-check it.
         let json = serde_json::to_value(WebAction::ToggleMasterPause).unwrap();
         assert_eq!(json["action"], "toggle_master_pause");
@@ -811,14 +828,20 @@ mod tests {
         assert_eq!(json["param"], "rgb_split");
     }
 
+    /// An unknown `action` tag is rejected rather than silently deserializing
+    /// into some default variant.
     #[test]
     fn web_action_unknown_tag_fails_to_deserialize() {
+        eprintln!("web: unknown WebAction tag fails to deserialize");
         let bad = serde_json::json!({ "action": "not_a_real_action" });
         assert!(serde_json::from_value::<WebAction>(bad).is_err());
     }
 
+    /// `AppSnapshot::default` has the expected field values and survives a full
+    /// JSON round-trip.
     #[test]
     fn app_snapshot_defaults_and_json_round_trips() {
+        eprintln!("web: AppSnapshot defaults and JSON round-trip");
         let snap = AppSnapshot::default();
         assert_eq!(snap.msg_type, "state");
         assert_eq!(snap.framerate, 30.0);
