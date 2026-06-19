@@ -1612,11 +1612,28 @@ input[type="range"]::-webkit-slider-thumb:hover {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   font-size: 16px;
   line-height: 1;
   color: var(--text-dim);
 }
 .mx-addcol-head.mx-addcol-hot { color: var(--accent); }
+/* The "+" adds a clip layer (whole column is the click target); the "T" is a
+   distinct button that adds a text layer, so its click is stopped from bubbling
+   to the column. Both sit in the sticky add-column header. */
+.mx-addcol-plus { pointer-events: none; }
+.mx-addcol-text {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--value-bg);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.mx-addcol-text:hover { color: var(--accent); border-color: var(--accent); }
 .mx-colhead {
   position: sticky;
   top: 0;
@@ -1968,6 +1985,35 @@ input[type="range"]::-webkit-slider-thumb:hover {
   width: 100%;
   max-width: 64px;
 }
+
+/* --- Text-layer editor (the 'text' ptype) ---
+   A title card's source text. Lives in the same tall track as the clip row, so
+   the textarea fills the cell. Styled to read like the value inputs (value-bg +
+   accent focus). Typing is guarded in updateCell so live snapshots don't clobber
+   it mid-edit, and key/mousedown propagation is stopped in matrix.js so the grid
+   keyboard shortcuts don't fire while editing. */
+.mx-textarea {
+  flex: 1 1 auto;
+  align-self: stretch;
+  width: 100%;
+  margin: 4px 0;
+  box-sizing: border-box;
+  resize: none;
+  background: var(--value-bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 3px 5px;
+}
+.mx-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.mx-textarea::placeholder { color: var(--text-dim); }
+
 /* Dice — swap to a random clip. Pinned top-right, revealed on cell hover. */
 .mx-clip-rand {
   position: absolute;
@@ -2078,5 +2124,9 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .mx-colhead.mx-col-audio { color: var(--accent); }
 .mx-col-audio-glyph { display: inline-flex; margin-left: 4px; opacity: 0.85; }
 .mx-col-audio-glyph svg { width: 11px; height: 11px; }
+/* Text (title-card) columns: same treatment as audio, with a type glyph. */
+.mx-colhead.mx-col-text { color: var(--accent); }
+.mx-col-text-glyph { display: inline-flex; margin-left: 4px; opacity: 0.85; }
+.mx-col-text-glyph svg { width: 11px; height: 11px; }
 
 /* --- Sidebar list rows (patches) --- */

@@ -6,7 +6,7 @@
 // ParamDef fields:
 //   key         snapshot/action key (must match EffectsSnapshot / NtscSnapshot / LayerSnapshot)
 //   label       short row label
-//   ptype       'float' | 'bipolar' | 'enum' | 'bool' | 'color' | 'clip'
+//   ptype       'float' | 'bipolar' | 'enum' | 'bool' | 'color' | 'clip' | 'text'
 //   min,max     numeric range (floats/bipolar/enum-as-range)
 //   step        editing step
 //   def         default/rest value (drives the dim-vs-changed styling)
@@ -26,6 +26,18 @@ const MATRIX_GROUPS = [
         options: [ { value: 'normal', label: 'normal' }, { value: 'screen', label: 'screen' }, { value: 'multiply', label: 'multiply' }, { value: 'difference', label: 'difference' } ] },
       { key: 'visible', label: 'visible', ptype: 'bool', def: true, automatable: false, channels: 'layer' },
       { key: 'paused', label: 'paused', ptype: 'bool', def: false, automatable: false, channels: 'layer' },
+      // Title-card (text layer) source params. These read LayerSnapshot.text*
+      // fields and write through the dedicated set_text_param action (see
+      // setValueAction in matrix.js), NOT set_layer_param — the engine
+      // re-rasterizes the glyph texture on change. They only render on text
+      // columns (gated by col.is_text in matrix.js, like audio_only gating).
+      { key: 'text', label: 'text', ptype: 'text', def: '', automatable: false, channels: 'layer' },
+      { key: 'text_font', label: 'font', ptype: 'enum', def: 'sans', automatable: false, channels: 'layer',
+        options: [ { value: 'sans', label: 'Sans' }, { value: 'mono', label: 'Mono' } ] },
+      { key: 'text_size', label: 'size', ptype: 'float', min: 4, max: 512, step: 1, def: 96, automatable: false, noRandom: true, channels: 'layer' },
+      { key: 'text_color', label: 'color', ptype: 'color', def: '#00ff66', automatable: false, channels: 'layer' },
+      { key: 'text_align', label: 'align', ptype: 'enum', def: 'center', automatable: false, channels: 'layer',
+        options: [ { value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' } ] },
     ],
   },
   {
@@ -212,6 +224,10 @@ function CHANNEL_APPLIES(def, colKind) {
 //   - KEY → COLOR KEY. SHIFT split into SLICE / BLOCKS / GLITCH. shift_chroma → COLOR.
 const LAYER_GROUPS = [
   { name: 'SOURCE',    keys: ['clip', 'speed', 'fps', 'paused'] },
+  // TEXT only renders when at least one text layer exists (matrix.js skips the
+  // whole group otherwise) and shows its editor on text columns only; on clip/
+  // audio columns its rows blank out, like video params do on audio columns.
+  { name: 'TEXT',      keys: ['text', 'text_font', 'text_size', 'text_color', 'text_align'] },
   { name: 'AUDIO',     keys: ['mute', 'volume', 'pan'] },
   { name: 'AUDIO FX',  keys: ['eq_low', 'eq_mid', 'eq_high', 'delay_time', 'delay_feedback', 'delay_mix'] },
   { name: 'BLEND',     keys: ['opacity', 'blend_mode', 'visible'] },

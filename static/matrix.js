@@ -54,7 +54,8 @@
     // entry point for creating the first layer (opens the library in add mode).
     return layers.map((l, i) => ({
       key: 'layer:' + l.id, kind: 'layer', label: 'L' + (i + 1),
-      index: i, id: l.id, filename: l.filename, audio_only: !!l.audio_only,
+      index: i, id: l.id, filename: l.filename,
+      audio_only: !!l.audio_only, is_text: !!l.is_text,
     }));
   }
 
@@ -81,6 +82,21 @@
     'mute', 'volume', 'pan',
     'eq_low', 'eq_mid', 'eq_high', 'delay_time', 'delay_feedback', 'delay_mix',
   ]);
+
+  // Text-layer source params (the TEXT group). These render only on text
+  // columns and route through set_text_param. On clip/audio columns they blank.
+  const TEXT_LAYER_PARAMS = new Set(['text', 'text_font', 'text_size', 'text_color', 'text_align']);
+
+  // Clip-transport params that have no meaning for a text layer (no decoder),
+  // so they blank out on text columns. Everything else (the whole FX chain,
+  // blend, opacity, transform) still applies — text inherits it like any layer.
+  const TEXT_HIDDEN_PARAMS = new Set(['clip', 'speed', 'fps', 'paused']);
+
+  // Map a text param's schema key to its set_text_param wire param
+  // ('text' stays 'text'; 'text_font' → 'font', etc. — strip the 'text_' prefix).
+  function textWireParam(key) {
+    return key === 'text' ? 'text' : key.slice(5);
+  }
 
   // layerGroupOrder() returns schema-shaped groups ({ name, params }) built from
   // the LAYER_GROUPS layout, so buildMatrix's loop works unchanged.
@@ -137,6 +153,11 @@
       if (def.channels === 'master_audio') return { action: 'set_master_audio_param', param: def.key, value };
       return { action: 'set_param', param: def.key, value };
     }
+    // Text source params re-rasterize the glyph texture, so they have their own
+    // action; everything else on a layer goes through generic set_layer_param.
+    if (TEXT_LAYER_PARAMS.has(def.key)) {
+      return { action: 'set_text_param', index: col.index, param: textWireParam(def.key), value };
+    }
     return { action: 'set_layer_param', index: col.index, param: def.key, value };
   }
 
@@ -183,7 +204,9 @@
     gridEl.appendChild(corner);
     columns.forEach((col) => {
       const h = document.createElement('div');
-      h.className = 'mx-colhead mx-col-' + col.kind + (col.audio_only ? ' mx-col-audio' : '');
+      h.className = 'mx-colhead mx-col-' + col.kind
+        + (col.audio_only ? ' mx-col-audio' : '')
+        + (col.is_text ? ' mx-col-text' : '');
       h.textContent = col.label;
       if (col.filename) h.title = col.filename;
       col.headEl = h;
@@ -192,6 +215,13 @@
         const glyph = document.createElement('i');
         glyph.className = 'mx-col-audio-glyph';
         glyph.dataset.lucide = 'music';
+        h.appendChild(glyph);
+      }
+      // Text (title-card) columns get a type glyph, same idea as the audio one.
+      if (col.is_text) {
+        const glyph = document.createElement('i');
+        glyph.className = 'mx-col-text-glyph';
+        glyph.dataset.lucide = 'type';
         h.appendChild(glyph);
       }
       // Layer columns are draggable to reorder; MASTER stays pinned first.
@@ -224,11 +254,26 @@
       gridEl.appendChild(h);
     });
     // Trailing add-layer column header. The whole add column is one big click
-    // target (delegated in init); this top cell carries the visible "+".
+    // target (delegated in init) that opens the library — the "+" advertises it.
+    // A small "T" button sits alongside to add a title-card (text) layer; it
+    // stops propagation so it doesn't also trigger the library modal.
     const addHead = document.createElement('div');
     addHead.className = 'mx-addcol mx-addcol-head';
-    addHead.textContent = '+';
     addHead.title = 'Add a layer';
+    const addPlus = document.createElement('span');
+    addPlus.className = 'mx-addcol-plus';
+    addPlus.textContent = '+';
+    addHead.appendChild(addPlus);
+    const addText = document.createElement('button');
+    addText.className = 'mx-addcol-text';
+    addText.type = 'button';
+    addText.textContent = 'T';
+    addText.title = 'Add a text layer';
+    addText.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sendAction({ action: 'add_text_layer', text: 'TEXT', font: 'sans', size: 96, color: '#00ff66', align: 'center' });
+    });
+    addHead.appendChild(addText);
     addColCells.push(addHead);
     gridEl.appendChild(addHead);
 
@@ -236,11 +281,16 @@
     // Uses layerGroupOrder() so AUDIO/AUDIO FX sit right under LAYER.
     layerGroupOrder().forEach((group) => {
       if (!groupApplies(group, 'layer')) return;
+      // The TEXT group only exists for text layers — skip it entirely when none
+      // are present, so the common (clip-only) grid carries no empty band.
+      if (group.name === 'TEXT' && !columns.some((col) => col.is_text)) return;
 
       // Does this group have any param that stays active on an audio-only
       // column? If not (TRANSFORM, WARP, COLOR, …), audio columns get no
       // dice/reset buttons — there's nothing for them to act on.
       const groupHasAudioParam = group.params.some((def) => AUDIO_LAYER_PARAMS.has(def.key));
+      // TEXT params are non-numeric / noRandom, so its band gets no dice/reset.
+      const groupHasControls = group.name !== 'TEXT';
 
       // Group header band. The label cell (chevron + name) toggles collapse;
       // each layer column gets its own control cell with per-layer reset +
@@ -257,7 +307,7 @@
         const ctl = document.createElement('div');
         ctl.className = 'mx-group-ctl';
         ctl.dataset.group = group.name;
-        if (col.kind === 'layer' && !(col.audio_only && !groupHasAudioParam)) {
+        if (col.kind === 'layer' && groupHasControls && !(col.audio_only && !groupHasAudioParam)) {
           const rnd = document.createElement('button');
           rnd.className = 'mx-grp-btn';
           rnd.type = 'button';
@@ -298,8 +348,9 @@
         if (!applies(def, 'layer')) return;
         const rowObj = { group: group.name, def, cells: [] };
         const rowIndex = rows.length;
-        // The clip row is taller so its thumbnail is large and legible.
-        const tall = def.ptype === 'clip';
+        // The clip row is taller so its thumbnail is large and legible; the
+        // text row is tall too so its multi-line editor has room.
+        const tall = def.ptype === 'clip' || def.ptype === 'text';
 
         const label = document.createElement('div');
         label.className = 'mx-label' + (tall ? ' mx-row-tall' : '');
@@ -311,9 +362,15 @@
 
         columns.forEach((col, c) => {
           // Blank a cell if the param doesn't apply to this column kind, or if
-          // it's a video-only param on an audio-only column.
-          const audioBlank = col.audio_only && !AUDIO_LAYER_PARAMS.has(def.key);
-          if (!applies(def, col.kind) || audioBlank) {
+          // it doesn't apply to this particular layer kind (audio-only / text).
+          //   - text columns: hide clip-transport params (no decoder); the TEXT
+          //     group's params show, the rest of the FX chain stays.
+          //   - clip/audio columns: hide the TEXT group's params; audio columns
+          //     additionally hide video-only params (existing rule).
+          const layerBlank = col.is_text
+            ? TEXT_HIDDEN_PARAMS.has(def.key)
+            : TEXT_LAYER_PARAMS.has(def.key) || (col.audio_only && !AUDIO_LAYER_PARAMS.has(def.key));
+          if (!applies(def, col.kind) || (col.kind === 'layer' && layerBlank)) {
             const na = document.createElement('div');
             na.className = 'mx-cell mx-na' + (tall ? ' mx-row-tall' : '');
             na.dataset.group = group.name;
@@ -812,6 +869,22 @@
       el.classList.add('mx-clip-cell');
       el.title = 'Click to choose a different clip';
       el.addEventListener('click', () => openLibraryModal('swap', col.index));
+    } else if (def.ptype === 'text') {
+      // The text-content editor (title-card body). A plain textarea so multi-line
+      // titles work; every keystroke sends set_text_param and the engine
+      // re-rasterizes. stopPropagation keeps typing out of the grid's keyboard
+      // nav / scrub handlers.
+      const ta = document.createElement('textarea');
+      ta.className = 'mx-textarea';
+      ta.rows = 3;
+      ta.spellcheck = false;
+      ta.placeholder = 'Title text…';
+      ta.addEventListener('input', () => sendAction(setValueAction(col, def, ta.value)));
+      ta.addEventListener('keydown', (e) => e.stopPropagation());
+      ta.addEventListener('mousedown', (e) => e.stopPropagation());
+      el.appendChild(ta);
+      info.textInput = ta;
+      info.valEl = ta;
     }
 
     el.addEventListener('mousedown', () => focusCell(info));
@@ -1019,7 +1092,8 @@
     // active color picker.
     const editing = valEl && valEl.querySelector && valEl.querySelector('input');
     const colorActive = info.colorInput && document.activeElement === info.colorInput;
-    if (editing || colorActive || info.scrubbing) {
+    const textActive = info.textInput && document.activeElement === info.textInput;
+    if (editing || colorActive || textActive || info.scrubbing) {
       applyMatrixAutoState(info, autos, errors);
       return;
     }
@@ -1053,6 +1127,12 @@
           info.thumbEl.style.display = want ? '' : 'none';
         }
       }
+    } else if (def.ptype === 'text') {
+      // Mirror the snapshot into the textarea unless the user is typing in it
+      // (guarded above via textActive), so live edits aren't clobbered.
+      const s = typeof v === 'string' ? v : '';
+      if (info.textInput && info.textInput.value !== s) info.textInput.value = s;
+      markChanged(info, s !== (def.def || ''));
     }
 
     applyMatrixAutoState(info, autos, errors);
@@ -1476,7 +1556,10 @@
     // and AUDIO starts collapsed; in the master panel, every group except AUDIO
     // starts collapsed (OUTPUT is a static, non-collapsible section).
     layerLayout.forEach((g) => {
-      if (g.name !== 'SOURCE' && g.name !== 'AUDIO') {
+      // SOURCE/AUDIO start open; TEXT stays open too so a text layer's editor is
+      // visible the moment its column appears (the group is skipped entirely
+      // when no text layer exists).
+      if (g.name !== 'SOURCE' && g.name !== 'AUDIO' && g.name !== 'TEXT') {
         collapsed.add('layer:' + g.name);
       }
     });

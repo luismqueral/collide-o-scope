@@ -9,6 +9,7 @@ use crate::automation::Expr;
 use crate::effects::EffectUniforms;
 use crate::layers::{BlendMode, Layer};
 use crate::ntsc::NtscParams;
+use crate::text::{TextAlign, TextFont};
 
 // --- Helpers for serde defaults ---
 //
@@ -553,7 +554,14 @@ impl NtscConfig {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LayerConfig {
+    /// Source clip filename. Empty/absent for text layers (which persist `text`
+    /// instead) — `#[serde(default)]` lets those patches omit it entirely.
+    #[serde(default)]
     pub filename: String,
+    /// Present only for title-card layers: the text + style to rasterize. A
+    /// clip layer leaves this `None` and uses `filename`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<TextConfig>,
     #[serde(default = "one")]
     pub opacity: f32,
     #[serde(default = "default_blend")]
@@ -600,6 +608,63 @@ fn default_blend() -> String {
 }
 fn default_true() -> bool {
     true
+}
+
+/// Persisted form of a title-card layer's text + style. A text layer has no
+/// file, so this captures everything `Layer::new_text` needs to reconstruct it
+/// on load. Colors ride as `#rrggbb` hex for human-editable YAML. All fields
+/// default so a hand-written `text:` block can omit most of them.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TextConfig {
+    #[serde(default)]
+    pub text: String,
+    #[serde(default = "default_text_font")]
+    pub font: String,
+    #[serde(default = "default_text_size")]
+    pub size: f32,
+    #[serde(default = "default_text_color")]
+    pub color: String,
+    #[serde(default = "default_text_align")]
+    pub align: String,
+    #[serde(default = "default_text_canvas_w")]
+    pub canvas_w: u32,
+    #[serde(default = "default_text_canvas_h")]
+    pub canvas_h: u32,
+}
+
+fn default_text_font() -> String {
+    "sans".to_string()
+}
+fn default_text_size() -> f32 {
+    128.0
+}
+fn default_text_color() -> String {
+    "#ffffff".to_string()
+}
+fn default_text_align() -> String {
+    "left".to_string()
+}
+fn default_text_canvas_w() -> u32 {
+    1920
+}
+fn default_text_canvas_h() -> u32 {
+    1080
+}
+
+impl TextConfig {
+    /// Parse the persisted font id into the enum (defaults to Sans).
+    pub fn font_enum(&self) -> TextFont {
+        TextFont::from_wire(&self.font)
+    }
+    /// Parse the persisted alignment id into the enum (defaults to Left).
+    pub fn align_enum(&self) -> TextAlign {
+        TextAlign::from_wire(&self.align)
+    }
+    /// Parse the persisted `#rrggbb` color into sRGB 0..1 components.
+    pub fn color_rgb(&self) -> [f32; 3] {
+        let (r, g, b) = crate::hex_to_rgb01(&self.color);
+        [r, g, b]
+    }
 }
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EffectsConfig {
@@ -1447,8 +1512,19 @@ impl EffectsConfig {
 
 impl LayerConfig {
     pub fn from_layer(layer: &Layer) -> Self {
+        // Text layers persist their content/style instead of a filename.
+        let text = layer.text_source().map(|t| TextConfig {
+            text: t.text.clone(),
+            font: t.font.as_str().to_string(),
+            size: t.size_px,
+            color: crate::rgb01_to_hex(t.color[0], t.color[1], t.color[2]),
+            align: t.align.as_str().to_string(),
+            canvas_w: t.canvas_w,
+            canvas_h: t.canvas_h,
+        });
         Self {
             filename: layer.filename.clone(),
+            text,
             opacity: layer.opacity,
             blend_mode: match layer.blend_mode {
                 BlendMode::Normal => "normal",

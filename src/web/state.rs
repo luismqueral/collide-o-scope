@@ -259,6 +259,20 @@ pub struct LayerSnapshot {
     /// Audio-only clip (no video): the grid blanks video-only rows for it.
     #[serde(default)]
     pub audio_only: bool,
+    /// Title-card (text) layer: the panel shows text-editing controls instead of
+    /// a clip thumbnail/transport. The fields below mirror the `TextSource`.
+    #[serde(default)]
+    pub is_text: bool,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub text_font: String,
+    #[serde(default)]
+    pub text_size: f32,
+    #[serde(default)]
+    pub text_color: String,
+    #[serde(default)]
+    pub text_align: String,
     /// Per-layer param automations: param name → expression text.
     #[serde(default)]
     pub automations: HashMap<String, String>,
@@ -357,6 +371,17 @@ pub enum WebAction {
     /// Add a layer from the library by filename
     #[serde(rename = "add_layer")]
     AddLayer { filename: String },
+    /// Add a text (title-card) layer with the given content + style. The canvas
+    /// size is chosen engine-side from the current output resolution, so the
+    /// browser only sends the text and its styling.
+    #[serde(rename = "add_text_layer")]
+    AddTextLayer {
+        text: String,
+        font: String,
+        size: f32,
+        color: String,
+        align: String,
+    },
     /// Swap a layer's source clip in place (keeps FX, opacity, blend, position)
     #[serde(rename = "set_layer_clip")]
     SetLayerClip { index: usize, filename: String },
@@ -387,6 +412,15 @@ pub enum WebAction {
     /// Set a per-layer parameter (opacity, speed, blend_mode)
     #[serde(rename = "set_layer_param")]
     SetLayerParam {
+        index: usize,
+        param: String,
+        value: serde_json::Value,
+    },
+    /// Edit a text layer's content/style (text, font, size, color, align). The
+    /// handler updates the `TextSource` and marks it dirty so the next tick
+    /// re-rasterizes; a no-op on non-text layers.
+    #[serde(rename = "set_text_param")]
+    SetTextParam {
         index: usize,
         param: String,
         value: serde_json::Value,

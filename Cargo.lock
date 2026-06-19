@@ -728,6 +728,7 @@ dependencies = [
 name = "collide-o-scope"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "approx",
  "axum",
  "bytemuck",

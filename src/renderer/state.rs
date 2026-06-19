@@ -660,7 +660,7 @@ impl Renderer {
         // layers have only a 1×1 placeholder texture, so they're excluded.
         let visible_layers: Vec<&Layer> = layers
             .iter()
-            .filter(|l| l.visible && !l.audio_only)
+            .filter(|l| l.visible && !l.is_audio_only())
             .rev()
             .collect();
 

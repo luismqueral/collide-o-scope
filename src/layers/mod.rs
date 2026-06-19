@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use crate::automation::Expr;
 use crate::effects::EffectUniforms;
+use crate::text::{TextAlign, TextFont, TextSource};
 use crate::video::VideoDecoder;
 
 /// How a layer is mixed with everything beneath it. Same maths as Photoshop
@@ -72,15 +73,35 @@ impl BlendMode {
 /// slow VHS tick) from fast-forwarding the footage on the next tick.
 const MAX_CATCHUP_FRAMES: u32 = 4;
 
-/// One clip in the stack, bundling its decoder, GPU texture, transport state,
-/// per-layer effects, and any parameter automations.
+/// Where a layer's pixels come from. Every variant ultimately feeds the same
+/// `upload_frame` → GPU texture → FX-chain path, so the rest of the engine
+/// (effects, blend, opacity, transform, automation) is identical regardless of
+/// kind. A tagged enum (one field + one tag) replaces the old
+/// `Option<VideoDecoder>` + `audio_only: bool` pair, and the compiler now forces
+/// every consumer to handle each kind exhaustively.
+pub enum LayerSource {
+    /// Video **or** still image — the decoder handles both (images set its
+    /// `still` flag and hold one frame). This is the only kind that decodes
+    /// per-tick footage.
+    Clip(VideoDecoder),
+    /// A title card: CPU-rasterized glyphs. Rasterizes lazily (only when
+    /// `dirty`), then the persisted texture is animated purely by
+    /// transform/opacity automation — no per-frame re-rasterize.
+    Text(TextSource),
+    /// Audio-only clip (no video stream). Skipped in the visual composite; the
+    /// mixer thread drives its audio. Was the old `decoder: None` case.
+    AudioOnly,
+}
+
+/// One clip in the stack, bundling its pixel source, GPU texture, transport
+/// state, per-layer effects, and any parameter automations.
 pub struct Layer {
     /// Stable identifier assigned by `App::add_layer`, used by the web UI to
     /// track cards across reorders. Survives MoveLayer/RemoveLayer.
     pub id: u64,
     pub filename: String,
-    /// `None` for audio-only layers (no video stream); the mixer drives audio.
-    pub decoder: Option<VideoDecoder>,
+    /// Where this layer's pixels come from (clip, text, or audio-only).
+    pub source: LayerSource,
     pub texture: wgpu::Texture,
     pub texture_view: wgpu::TextureView,
     pub opacity: f32,
@@ -90,8 +111,6 @@ pub struct Layer {
     pub effects: EffectUniforms,
     pub width: u32,
     pub height: u32,
-    /// Audio-only clip: skipped in the visual composite, still mixed for audio.
-    pub audio_only: bool,
     // Transport
     pub speed: f32,             // 0.25..4.0 playback multiplier (1.0 = normal)
     pub fps: f32,               // target decode FPS (e.g. 30.0)
@@ -110,37 +129,15 @@ impl Layer {
         // and use a 1×1 placeholder texture. They're filtered out of the visual
         // composite, so this texture is never actually sampled.
         let audio_only = is_audio_file(std::path::Path::new(path));
-        let (decoder, width, height) = if audio_only {
-            (None, 1u32, 1u32)
+        let (source, width, height) = if audio_only {
+            (LayerSource::AudioOnly, 1u32, 1u32)
         } else {
             let dec = VideoDecoder::open(path)?;
             let (w, h) = (dec.width, dec.height);
-            (Some(dec), w, h)
+            (LayerSource::Clip(dec), w, h)
         };
 
-        // Allocate the GPU texture decoded frames get copied into each tick.
-        // wgpu uses "descriptor" structs (a settings bag) for resource creation.
-        // `COPY_DST` = we'll write CPU pixels into it; `TEXTURE_BINDING` = the
-        // shader can sample it. `Rgba8UnormSrgb` matches the decoder's RGBA8
-        // output and applies sRGB gamma correctly when sampled. Audio-only
-        // layers get a 1×1 of this (never bound — see render_layers filter).
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Layer Texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        // A "view" is the handle shaders actually bind to (it can reinterpret a
-        // texture's format/mips); the default view is the whole texture as-is.
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let (texture, texture_view) = create_layer_texture(device, width, height);
 
         // Extract just the filename from the path (for display in the UI).
         // `file_name()` returns an `Option` (a path could end in `..`), so we
@@ -158,8 +155,7 @@ impl Layer {
         Ok(Self {
             id: 0,
             filename,
-            decoder,
-            audio_only,
+            source,
             texture,
             texture_view,
             opacity: 1.0,
@@ -178,6 +174,95 @@ impl Layer {
         })
     }
 
+    /// Build a title-card layer. The text rasterizes into a fixed `canvas_w ×
+    /// canvas_h` RGBA texture (chosen at creation, like a clip's file-derived
+    /// dimensions); the existing transform/fit then places and scales it like
+    /// any other layer. No file, so the patch persists the text/style instead
+    /// of a `filename` (see `patch::TextConfig`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_text(
+        text: String,
+        font: TextFont,
+        size_px: f32,
+        color: [f32; 3],
+        align: TextAlign,
+        canvas_w: u32,
+        canvas_h: u32,
+        device: &wgpu::Device,
+    ) -> Self {
+        // Card title for the UI: first non-empty line, capped; else "Text".
+        let filename = text
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .map(|l| l.chars().take(24).collect::<String>())
+            .unwrap_or_else(|| "Text".to_string());
+
+        let source = LayerSource::Text(TextSource::new(
+            text, font, size_px, color, align, canvas_w, canvas_h,
+        ));
+        let (width, height) = (canvas_w.max(1), canvas_h.max(1));
+        let (texture, texture_view) = create_layer_texture(device, width, height);
+
+        let mut effects = EffectUniforms::default();
+        effects.resolution = [width as f32, height as f32];
+
+        Self {
+            id: 0,
+            filename,
+            source,
+            texture,
+            texture_view,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            paused: false,
+            visible: true,
+            effects,
+            width,
+            height,
+            speed: 1.0,
+            fps: 30.0,
+            frame_accumulator: 0.0,
+            automations: HashMap::new(),
+            automation_errors: HashMap::new(),
+            audio: crate::audio::AudioParams::default(),
+        }
+    }
+
+    /// True for audio-only layers (no video stream): skipped in the visual
+    /// composite, still mixed for audio. Replaces the old `audio_only` field.
+    pub fn is_audio_only(&self) -> bool {
+        matches!(self.source, LayerSource::AudioOnly)
+    }
+
+    /// Playback position within the source, 0..1. Clips report decoder progress;
+    /// text/audio-only have no transport, so they report 0.
+    pub fn progress(&self) -> f32 {
+        match &self.source {
+            LayerSource::Clip(decoder) => decoder.progress(),
+            LayerSource::Text(_) | LayerSource::AudioOnly => 0.0,
+        }
+    }
+
+    /// The text source if this is a title-card layer, else `None`. Lets the
+    /// patch + web snapshot read a text layer's content and style.
+    pub fn text_source(&self) -> Option<&TextSource> {
+        match &self.source {
+            LayerSource::Text(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Mutable access to the text source for in-place edits (re-set text/style
+    /// and mark `dirty` so `advance` re-rasterizes next tick). `None` for
+    /// non-text layers.
+    pub fn text_source_mut(&mut self) -> Option<&mut TextSource> {
+        match &mut self.source {
+            LayerSource::Text(t) => Some(t),
+            _ => None,
+        }
+    }
+
     /// Advance this layer's footage by `dt` real seconds (scaled by `speed`).
     /// Decodes/skips as many frames as elapsed time dictates, uploading only the
     /// last one (intermediate frames are skipped on screen). This keeps footage on
@@ -185,32 +270,51 @@ impl Layer {
     /// when a tick runs long (e.g. the blocking VHS readback). Mirrors the export
     /// accumulator in render_export.rs, but capped for live use.
     pub fn advance(&mut self, dt: f32, queue: &wgpu::Queue) {
-        // Audio-only layers have no video decoder; audio is driven by the mixer
-        // thread, not by this per-frame pull. Nothing to advance here.
-        let Some(decoder) = &mut self.decoder else {
-            return;
-        };
-        self.frame_accumulator += dt * self.speed;
-        let interval = 1.0 / self.fps; // seconds per source frame
-        let mut n = (self.frame_accumulator / interval).floor() as u32;
-        if n == 0 {
-            return;
-        }
-        if n > MAX_CATCHUP_FRAMES {
-            // Discard the backlog so a long stall doesn't fast-forward next tick.
-            n = MAX_CATCHUP_FRAMES;
-            self.frame_accumulator = 0.0;
-        } else {
-            self.frame_accumulator -= n as f32 * interval;
-        }
-        // Decode n frames; only the last is shown (skips intermediate frames).
-        let mut last: Option<Vec<u8>> = None;
-        for _ in 0..n {
-            if let Some(frame) = decoder.next_frame() {
-                last = Some(frame);
+        // Each source kind decides what (if anything) to upload this tick. We
+        // compute the RGBA buffer here, then upload after the match so the
+        // `&mut self.source` borrow is released before `upload_frame(&self)`.
+        let frame: Option<Vec<u8>> = match &mut self.source {
+            // Clip: pull as many frames as elapsed time owes, showing only the
+            // last (intermediate frames are skipped on screen). This keeps
+            // footage on the same wall-clock as the animated `time` uniform.
+            LayerSource::Clip(decoder) => {
+                self.frame_accumulator += dt * self.speed;
+                let interval = 1.0 / self.fps; // seconds per source frame
+                let mut n = (self.frame_accumulator / interval).floor() as u32;
+                if n == 0 {
+                    return;
+                }
+                if n > MAX_CATCHUP_FRAMES {
+                    // Discard the backlog so a long stall doesn't fast-forward.
+                    n = MAX_CATCHUP_FRAMES;
+                    self.frame_accumulator = 0.0;
+                } else {
+                    self.frame_accumulator -= n as f32 * interval;
+                }
+                let mut last: Option<Vec<u8>> = None;
+                for _ in 0..n {
+                    if let Some(frame) = decoder.next_frame() {
+                        last = Some(frame);
+                    }
+                }
+                last
             }
-        }
-        if let Some(frame) = last {
+            // Text: rasterize once when dirty (create/edit), then never again —
+            // the texture is the cache and motion comes from automation. Clear
+            // the flag so subsequent ticks are no-ops.
+            LayerSource::Text(text) => {
+                if text.dirty {
+                    text.dirty = false;
+                    Some(text.rasterize())
+                } else {
+                    None
+                }
+            }
+            // Audio-only: no video; the mixer thread drives audio. Nothing here.
+            LayerSource::AudioOnly => None,
+        };
+
+        if let Some(frame) = frame {
             self.upload_frame(queue, &frame);
         }
     }
@@ -239,6 +343,38 @@ impl Layer {
             },
         );
     }
+}
+
+/// Allocate the RGBA GPU texture a layer uploads frames into, plus its default
+/// view. Shared by clip and text layers so the descriptor lives in one place.
+/// wgpu uses "descriptor" structs (a settings bag) for resource creation.
+/// `COPY_DST` = we'll write CPU pixels into it; `TEXTURE_BINDING` = the shader
+/// can sample it. `Rgba8UnormSrgb` matches the decoder's / rasterizer's RGBA8
+/// output and applies sRGB gamma correctly when sampled. Audio-only layers get
+/// a 1×1 of this (never bound — see the render_layers filter).
+fn create_layer_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Layer Texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    // A "view" is the handle shaders actually bind to (it can reinterpret a
+    // texture's format/mips); the default view is the whole texture as-is.
+    let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, texture_view)
 }
 
 /// Valid media file extensions accepted by the library + drag-and-drop.

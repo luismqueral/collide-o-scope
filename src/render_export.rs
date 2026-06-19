@@ -15,9 +15,10 @@ use wgpu::util::DeviceExt;
 
 use crate::automation::Expr;
 use crate::effects::EffectUniforms;
-use crate::layers::BlendMode;
+use crate::layers::{BlendMode, LayerSource};
 use crate::ntsc::NtscState;
 use crate::patch::PatchState;
+use crate::text::TextSource;
 use crate::video::VideoDecoder;
 
 /// Configuration for an offline render job.
@@ -136,7 +137,12 @@ struct CompositeUniforms {
 
 /// Internal layer state for offline rendering.
 struct ExportLayer {
-    decoder: VideoDecoder,
+    /// Pixel source for this layer: a video/image clip (decoded per frame) or a
+    /// text card (rasterized once at setup). Mirrors the live `Layer::source` so
+    /// export honors the same layer kinds — that's the live/offline parity goal.
+    /// Audio-only layers never reach here (they fail the decoder open and are
+    /// skipped during the build loop below).
+    source: LayerSource,
     texture: wgpu::Texture,
     texture_view: wgpu::TextureView,
     effects: EffectUniforms,
@@ -430,17 +436,35 @@ fn run_export(
     // --- Open video decoders for each layer ---
     let mut layers: Vec<ExportLayer> = Vec::new();
     for layer_cfg in &patch.layers {
-        let path = format!("{}/{}", library_folder, layer_cfg.filename);
-        let decoder = match VideoDecoder::open(&path) {
-            Ok(d) => d,
-            Err(e) => {
-                log::warn!("Export: skipping layer '{}': {e}", layer_cfg.filename);
-                continue;
+        // Two layer kinds reach the export: text cards (rasterized once here) and
+        // clips (decoded per frame). A text config has no file; everything else
+        // goes through the decoder, which also naturally skips audio-only layers
+        // (they have no video stream, so `open` errors and we `continue`).
+        let (source, lw, lh) = if let Some(tc) = &layer_cfg.text {
+            let ts = TextSource::new(
+                tc.text.clone(),
+                tc.font_enum(),
+                tc.size,
+                tc.color_rgb(),
+                tc.align_enum(),
+                tc.canvas_w,
+                tc.canvas_h,
+            );
+            let (cw, ch) = (ts.canvas_w, ts.canvas_h);
+            (LayerSource::Text(ts), cw, ch)
+        } else {
+            let path = format!("{}/{}", library_folder, layer_cfg.filename);
+            match VideoDecoder::open(&path) {
+                Ok(d) => {
+                    let (dw, dh) = (d.width, d.height);
+                    (LayerSource::Clip(d), dw, dh)
+                }
+                Err(e) => {
+                    log::warn!("Export: skipping layer '{}': {e}", layer_cfg.filename);
+                    continue;
+                }
             }
         };
-
-        let lw = decoder.width;
-        let lh = decoder.height;
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Export Layer Tex"),
@@ -457,6 +481,31 @@ fn run_export(
             view_formats: &[],
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // A text card's pixels never change after setup, so rasterize + upload
+        // once here; the per-frame loop below then only re-uploads clip frames.
+        if let LayerSource::Text(ts) = &source {
+            let rgba = ts.rasterize();
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * lw),
+                    rows_per_image: Some(lh),
+                },
+                wgpu::Extent3d {
+                    width: lw,
+                    height: lh,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
 
         let mut effects = EffectUniforms::default();
         effects.resolution = [lw as f32, lh as f32];
@@ -489,7 +538,7 @@ fn run_export(
         };
 
         layers.push(ExportLayer {
-            decoder,
+            source,
             texture,
             texture_view,
             effects,
@@ -621,7 +670,13 @@ fn run_export(
             let layer_interval = 1.0 / 30.0; // layers decode at 30fps base
             while layer_accumulators[i] >= layer_interval {
                 layer_accumulators[i] -= layer_interval;
-                if let Some(rgba) = layer.decoder.next_frame() {
+                // Only clips produce new frames each tick; text was uploaded once
+                // at setup and audio-only never reaches the export build loop.
+                let rgba = match &mut layer.source {
+                    LayerSource::Clip(decoder) => decoder.next_frame(),
+                    LayerSource::Text(_) | LayerSource::AudioOnly => None,
+                };
+                if let Some(rgba) = rgba {
                     queue.write_texture(
                         wgpu::TexelCopyTextureInfo {
                             texture: &layer.texture,

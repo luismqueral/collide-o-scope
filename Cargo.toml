@@ -28,6 +28,7 @@ ntsc-rs = { git = "https://github.com/ntsc-rs/ntsc-rs", package = "ntsc-rs", fea
 fasteval = "0.2"
 cpal = "0.15"        # cross-platform audio output (macOS CoreAudio)
 rtrb = "0.3"         # lock-free SPSC ring buffer for the decode→callback boundary
+ab_glyph = "0.2"     # CPU glyph rasterization for text/title-card layers
 
 [dev-dependencies]
 approx = "0.5"      # ergonomic float assertions (assert_relative_eq!) for DSP/automation

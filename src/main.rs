@@ -24,6 +24,7 @@ mod ntsc;
 mod patch;
 mod render_export;
 mod renderer;
+mod text;
 mod video;
 mod web;
 
@@ -250,6 +251,47 @@ impl App {
         }
     }
 
+    /// Add a title-card layer. Mirrors `add_layer` (id assignment + selection)
+    /// but builds a text source instead of opening a file, and registers no
+    /// mixer track (text layers are silent).
+    #[allow(clippy::too_many_arguments)]
+    fn add_text_layer(
+        &mut self,
+        text: String,
+        font: text::TextFont,
+        size_px: f32,
+        color: [f32; 3],
+        align: text::TextAlign,
+        canvas_w: u32,
+        canvas_h: u32,
+    ) {
+        let renderer = self.renderer.as_ref().unwrap();
+        let mut layer = Layer::new_text(
+            text,
+            font,
+            size_px,
+            color,
+            align,
+            canvas_w,
+            canvas_h,
+            &renderer.device,
+        );
+        let id = self.next_layer_id;
+        layer.id = id;
+        self.next_layer_id += 1;
+        self.layers.push(layer);
+        self.selected_layer = Some(self.layers.len() - 1);
+    }
+
+    /// Canvas size for a new text layer: match the current output dimensions so
+    /// the card fills the frame; fall back to 1080p before the renderer exists.
+    fn text_canvas_dims(&self) -> (u32, u32) {
+        self.renderer
+            .as_ref()
+            .map(|r| (r.output_width, r.output_height))
+            .unwrap_or((1920, 1080))
+    }
+
     fn set_library_folder(&mut self, folder: PathBuf) {
         self.library_files = scan_folder(&folder);
         self.library_folder = Some(folder);
@@ -299,6 +341,27 @@ impl App {
                     self.add_layer(&path_str);
                 }
             }
+            WebAction::AddTextLayer {
+                text,
+                font,
+                size,
+                color,
+                align,
+            } => {
+                // Canvas matches the current output so the card fills the frame
+                // by default; transform/fit then place it like any other layer.
+                let (cw, ch) = self.text_canvas_dims();
+                let (r, g, b) = hex_to_rgb01(&color);
+                self.add_text_layer(
+                    text,
+                    text::TextFont::from_wire(&font),
+                    size,
+                    [r, g, b],
+                    text::TextAlign::from_wire(&align),
+                    cw,
+                    ch,
+                );
+            }
             WebAction::SetLayerClip { index, filename } => {
                 // Swap a layer's source video in place, preserving its FX, opacity,
                 // blend, transport, and automation. Only the decoder/texture/dims
@@ -319,8 +382,7 @@ impl App {
                         match Layer::new(&path_str, &renderer.device) {
                             Ok(fresh) => {
                                 let layer = &mut self.layers[index];
-                                layer.decoder = fresh.decoder;
-                                layer.audio_only = fresh.audio_only;
+                                layer.source = fresh.source;
                                 layer.texture = fresh.texture;
                                 layer.texture_view = fresh.texture_view;
                                 layer.width = fresh.width;
@@ -433,6 +495,53 @@ impl App {
                         self.ntsc_state.params = ntsc::NtscParams::default();
                     }
                     _ => {}
+                }
+            }
+            WebAction::SetTextParam {
+                index,
+                param,
+                value,
+            } => {
+                // Edit a title-card's content/style in place, then mark it dirty
+                // so `Layer::advance` re-rasterizes on the next tick. A no-op on
+                // non-text layers (the accessor returns None).
+                if index < self.layers.len() {
+                    if let Some(ts) = self.layers[index].text_source_mut() {
+                        match param.as_str() {
+                            "text" => {
+                                if let Some(s) = value.as_str() {
+                                    ts.text = s.to_string();
+                                    ts.dirty = true;
+                                }
+                            }
+                            "font" => {
+                                if let Some(s) = value.as_str() {
+                                    ts.font = text::TextFont::from_wire(s);
+                                    ts.dirty = true;
+                                }
+                            }
+                            "size" => {
+                                if let Some(v) = value.as_f64() {
+                                    ts.size_px = (v as f32).clamp(4.0, 512.0);
+                                    ts.dirty = true;
+                                }
+                            }
+                            "color" => {
+                                if let Some(s) = value.as_str() {
+                                    let (r, g, b) = hex_to_rgb01(s);
+                                    ts.color = [r, g, b];
+                                    ts.dirty = true;
+                                }
+                            }
+                            "align" => {
+                                if let Some(s) = value.as_str() {
+                                    ts.align = text::TextAlign::from_wire(s);
+                                    ts.dirty = true;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
             WebAction::SetLayerParam {
@@ -1096,6 +1205,23 @@ impl App {
                 self.layers.clear();
                 self.selected_layer = None;
                 for cfg in &patch.layers {
+                    // Text layers reconstruct from stored text/style — no file
+                    // lookup, no mixer source. Build, then apply common fields.
+                    if let Some(tc) = &cfg.text {
+                        self.add_text_layer(
+                            tc.text.clone(),
+                            tc.font_enum(),
+                            tc.size,
+                            tc.color_rgb(),
+                            tc.align_enum(),
+                            tc.canvas_w,
+                            tc.canvas_h,
+                        );
+                        if let Some(layer) = self.layers.last_mut() {
+                            cfg.apply_to_layer(layer);
+                        }
+                        continue;
+                    }
                     let resolved = self.library_files.iter().find(|p| {
                         p.file_name()
                             .map(|n| n.to_string_lossy().to_string())
@@ -1201,8 +1327,25 @@ impl App {
                     speed: l.speed,
                     fps: l.fps,
                     blend_mode: l.blend_mode.as_str().to_string(),
-                    progress: l.decoder.as_ref().map(|d| d.progress()).unwrap_or(0.0),
-                    audio_only: l.audio_only,
+                    progress: l.progress(),
+                    audio_only: l.is_audio_only(),
+                    // Text-layer mirror: present only for title-card layers, so
+                    // the panel can show text controls instead of a clip row.
+                    is_text: l.text_source().is_some(),
+                    text: l.text_source().map(|t| t.text.clone()).unwrap_or_default(),
+                    text_font: l
+                        .text_source()
+                        .map(|t| t.font.as_str().to_string())
+                        .unwrap_or_default(),
+                    text_size: l.text_source().map(|t| t.size_px).unwrap_or(0.0),
+                    text_color: l
+                        .text_source()
+                        .map(|t| rgb01_to_hex(t.color[0], t.color[1], t.color[2]))
+                        .unwrap_or_default(),
+                    text_align: l
+                        .text_source()
+                        .map(|t| t.align.as_str().to_string())
+                        .unwrap_or_default(),
                     automations: l
                         .automations
                         .iter()
@@ -1348,7 +1491,7 @@ impl App {
 }
 
 /// Parse a `#rrggbb` hex color into sRGB 0..1 components.
-fn hex_to_rgb01(hex: &str) -> (f32, f32, f32) {
+pub(crate) fn hex_to_rgb01(hex: &str) -> (f32, f32, f32) {
     let h = hex.trim_start_matches('#');
     if h.len() == 6 {
         if let Ok(n) = u32::from_str_radix(h, 16) {
@@ -1362,7 +1505,7 @@ fn hex_to_rgb01(hex: &str) -> (f32, f32, f32) {
 }
 
 /// Format sRGB 0..1 components into a `#rrggbb` hex string.
-fn rgb01_to_hex(r: f32, g: f32, b: f32) -> String {
+pub(crate) fn rgb01_to_hex(r: f32, g: f32, b: f32) -> String {
     let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     format!("#{:02x}{:02x}{:02x}", to_u8(r), to_u8(g), to_u8(b))
 }
