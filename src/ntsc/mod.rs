@@ -4,8 +4,8 @@
 //! as a CPU-based post-process on the final composite RGBA buffer.
 
 use ntsc_rs::settings::standard::*;
-use ntsc_rs::{Context, NtscEffect};
 use ntsc_rs::yiq_fielding::Rgbx;
+use ntsc_rs::{Context, NtscEffect};
 
 /// User-facing VHS parameters (mirrored in the web UI).
 #[derive(Debug, Clone)]
@@ -127,7 +127,8 @@ impl NtscState {
                     small[dst + c] = ((pixels[s00 + c] as u16
                         + pixels[s10 + c] as u16
                         + pixels[s01 + c] as u16
-                        + pixels[s11 + c] as u16) / 4) as u8;
+                        + pixels[s11 + c] as u16)
+                        / 4) as u8;
                 }
             }
         }
@@ -198,7 +199,12 @@ impl NtscState {
 
         // Edge wave
         self.effect.vhs_settings.settings.edge_wave.enabled = p.edge_wave_enabled;
-        self.effect.vhs_settings.settings.edge_wave.settings.intensity = p.edge_wave_intensity;
+        self.effect
+            .vhs_settings
+            .settings
+            .edge_wave
+            .settings
+            .intensity = p.edge_wave_intensity;
         self.effect.vhs_settings.settings.edge_wave.settings.speed = p.edge_wave_speed;
 
         // Head switching
@@ -236,61 +242,99 @@ impl NtscState {
     pub fn set_param(&mut self, param: &str, value: &serde_json::Value) {
         match param {
             "enabled" => {
-                if let Some(b) = value.as_bool() { self.params.enabled = b; }
+                if let Some(b) = value.as_bool() {
+                    self.params.enabled = b;
+                }
             }
             "tape_speed" => {
-                if let Some(n) = value.as_u64() { self.params.tape_speed = n as u32; }
+                if let Some(n) = value.as_u64() {
+                    self.params.tape_speed = n as u32;
+                }
             }
             "chroma_loss" => {
-                if let Some(n) = value.as_f64() { self.params.chroma_loss = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.chroma_loss = n as f32;
+                }
             }
             "edge_wave_enabled" => {
-                if let Some(b) = value.as_bool() { self.params.edge_wave_enabled = b; }
+                if let Some(b) = value.as_bool() {
+                    self.params.edge_wave_enabled = b;
+                }
             }
             "edge_wave_intensity" => {
-                if let Some(n) = value.as_f64() { self.params.edge_wave_intensity = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.edge_wave_intensity = n as f32;
+                }
             }
             "edge_wave_speed" => {
-                if let Some(n) = value.as_f64() { self.params.edge_wave_speed = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.edge_wave_speed = n as f32;
+                }
             }
             "head_switching_enabled" => {
-                if let Some(b) = value.as_bool() { self.params.head_switching_enabled = b; }
+                if let Some(b) = value.as_bool() {
+                    self.params.head_switching_enabled = b;
+                }
             }
             "head_switching_height" => {
-                if let Some(n) = value.as_i64() { self.params.head_switching_height = n as i32; }
+                if let Some(n) = value.as_i64() {
+                    self.params.head_switching_height = n as i32;
+                }
             }
             "head_switching_shift" => {
-                if let Some(n) = value.as_f64() { self.params.head_switching_shift = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.head_switching_shift = n as f32;
+                }
             }
             "tracking_noise_enabled" => {
-                if let Some(b) = value.as_bool() { self.params.tracking_noise_enabled = b; }
+                if let Some(b) = value.as_bool() {
+                    self.params.tracking_noise_enabled = b;
+                }
             }
             "tracking_noise_height" => {
-                if let Some(n) = value.as_i64() { self.params.tracking_noise_height = n as i32; }
+                if let Some(n) = value.as_i64() {
+                    self.params.tracking_noise_height = n as i32;
+                }
             }
             "tracking_noise_wave" => {
-                if let Some(n) = value.as_f64() { self.params.tracking_noise_wave = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.tracking_noise_wave = n as f32;
+                }
             }
             "tracking_noise_snow" => {
-                if let Some(n) = value.as_f64() { self.params.tracking_noise_snow = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.tracking_noise_snow = n as f32;
+                }
             }
             "snow_intensity" => {
-                if let Some(n) = value.as_f64() { self.params.snow_intensity = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.snow_intensity = n as f32;
+                }
             }
             "composite_noise_intensity" => {
-                if let Some(n) = value.as_f64() { self.params.composite_noise_intensity = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.composite_noise_intensity = n as f32;
+                }
             }
             "luma_noise_intensity" => {
-                if let Some(n) = value.as_f64() { self.params.luma_noise_intensity = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.luma_noise_intensity = n as f32;
+                }
             }
             "chroma_noise_intensity" => {
-                if let Some(n) = value.as_f64() { self.params.chroma_noise_intensity = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.chroma_noise_intensity = n as f32;
+                }
             }
             "luma_smear" => {
-                if let Some(n) = value.as_f64() { self.params.luma_smear = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.luma_smear = n as f32;
+                }
             }
             "composite_sharpening" => {
-                if let Some(n) = value.as_f64() { self.params.composite_sharpening = n as f32; }
+                if let Some(n) = value.as_f64() {
+                    self.params.composite_sharpening = n as f32;
+                }
             }
             _ => {}
         }

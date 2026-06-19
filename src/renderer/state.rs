@@ -104,14 +104,12 @@ impl Renderer {
         }))
         .expect("No suitable GPU adapter found");
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("Device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                ..Default::default()
-            },
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("Device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            ..Default::default()
+        }))
         .expect("Failed to create device");
 
         // Pick an sRGB surface format if the GPU offers one (correct gamma),
@@ -199,7 +197,6 @@ impl Renderer {
                     count: None,
                 }],
             });
-
 
         // Shaders are compiled from WGSL source. `include_str!` embeds the file
         // contents into the binary at *compile* time (so there's no runtime file
@@ -308,7 +305,6 @@ impl Renderer {
                 }],
             });
 
-
         let composite_fragment = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Composite Fragment"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/composite.wgsl").into()),
@@ -382,12 +378,11 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/blit.wgsl").into()),
         });
 
-        let blit_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Blit Pipeline Layout"),
-                bind_group_layouts: &[Some(&blit_bind_group_layout)],
-                immediate_size: 0,
-            });
+        let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Blit Pipeline Layout"),
+            bind_group_layouts: &[Some(&blit_bind_group_layout)],
+            immediate_size: 0,
+        });
 
         let blit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Blit Pipeline"),
@@ -425,8 +420,10 @@ impl Renderer {
         // readback. `std::array::from_fn(|i| ...)` builds the `[T; 3]` array by
         // calling the closure once per index — handy when each element needs
         // its own GPU allocation (you can't `Copy` a texture).
-        let tex_usage =
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST;
+        let tex_usage = wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::COPY_DST;
 
         let composite_textures: [wgpu::Texture; 3] = std::array::from_fn(|i| {
             device.create_texture(&wgpu::TextureDescriptor {
@@ -486,8 +483,7 @@ impl Renderer {
             usage: tex_usage,
             view_formats: &[],
         });
-        let ntsc_half_view =
-            ntsc_half_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let ntsc_half_view = ntsc_half_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self {
             surface,
@@ -596,8 +592,7 @@ impl Renderer {
             usage: tex_usage,
             view_formats: &[],
         });
-        let ntsc_half_view =
-            ntsc_half_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let ntsc_half_view = ntsc_half_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         self.composite_textures = composite_textures;
         self.composite_views = composite_views;
@@ -618,11 +613,7 @@ impl Renderer {
 
     /// Render all layers composited together. Final result ends up in composite_views[0].
     /// Each layer gets its own effects applied.
-    pub fn render_layers(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        layers: &[Layer],
-    ) {
+    pub fn render_layers(&self, encoder: &mut wgpu::CommandEncoder, layers: &[Layer]) {
         // Capture last frame's final output (still in [0]) for datamosh feedback,
         // before this frame's passes overwrite it.
         encoder.copy_texture_to_texture(
@@ -667,8 +658,11 @@ impl Renderer {
         // Render in reverse order: last layer in the vec is the bottom,
         // first layer (index 0, "Layer 1" in UI) ends up on top. Audio-only
         // layers have only a 1×1 placeholder texture, so they're excluded.
-        let visible_layers: Vec<&Layer> =
-            layers.iter().filter(|l| l.visible && !l.audio_only).rev().collect();
+        let visible_layers: Vec<&Layer> = layers
+            .iter()
+            .filter(|l| l.visible && !l.audio_only)
+            .rev()
+            .collect();
 
         // Each layer is handled in two steps: (1) run its effect shader into the
         // scratch texture [1], then (2) blend [1] over the accumulator [0]. The
@@ -679,11 +673,13 @@ impl Renderer {
 
             // Each pass needs its own buffer because queue.write_buffer writes
             // all execute before the encoder's render passes run on the GPU.
-            let fx_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Layer FX Uniforms"),
-                contents: bytemuck::cast_slice(&[uniforms]),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
+            let fx_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Layer FX Uniforms"),
+                    contents: bytemuck::cast_slice(&[uniforms]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
 
             let tex_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
@@ -759,39 +755,35 @@ impl Renderer {
             } else {
                 // Subsequent layers: composite base[0] + overlay[1] → temp[2]
                 let comp_buffer =
-                    self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Composite Uniforms"),
-                        contents: bytemuck::cast_slice(&[CompositeUniforms {
-                            opacity: layer.opacity,
-                            blend_mode: layer.blend_mode.as_u32(),
-                            _pad: [0.0; 2],
-                        }]),
-                        usage: wgpu::BufferUsages::UNIFORM,
-                    });
+                    self.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Composite Uniforms"),
+                            contents: bytemuck::cast_slice(&[CompositeUniforms {
+                                opacity: layer.opacity,
+                                blend_mode: layer.blend_mode.as_u32(),
+                                _pad: [0.0; 2],
+                            }]),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
 
-                let composite_tex_bg =
-                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("Composite Textures BG"),
-                        layout: &self.composite_bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &self.composite_views[0],
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &self.composite_views[1],
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&self.sampler),
-                            },
-                        ],
-                    });
+                let composite_tex_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Composite Textures BG"),
+                    layout: &self.composite_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&self.composite_views[0]),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&self.composite_views[1]),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        },
+                    ],
+                });
 
                 let composite_uniform_bg =
                     self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -856,11 +848,13 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         master_uniforms: &EffectUniforms,
     ) {
-        let fx_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Master FX Uniforms"),
-            contents: bytemuck::cast_slice(&[*master_uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let fx_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Master FX Uniforms"),
+                contents: bytemuck::cast_slice(&[*master_uniforms]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
         let tex_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Master FX Input"),
@@ -957,9 +951,11 @@ impl Renderer {
         }
         let staging = self.readback_buffer.as_ref().unwrap();
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("NTSC Readback Encoder"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("NTSC Readback Encoder"),
+            });
 
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {

@@ -29,6 +29,10 @@ fasteval = "0.2"
 cpal = "0.15"        # cross-platform audio output (macOS CoreAudio)
 rtrb = "0.3"         # lock-free SPSC ring buffer for the decode→callback boundary
 
+[dev-dependencies]
+approx = "0.5"      # ergonomic float assertions (assert_relative_eq!) for DSP/automation
+tempfile = "3"      # temp dirs/files for synthesized media fixtures + export output
+
 # ntsc-rs is CPU-intensive; always optimize it even in debug builds
 [profile.dev.package.ntsc-rs]
 opt-level = 3

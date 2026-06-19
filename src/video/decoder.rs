@@ -20,15 +20,15 @@ use ffmpeg_next::util::frame::video::Video as VideoFrame;
 /// `pub` exposes them to other modules (here only `width`/`height` are public,
 /// so callers can size GPU textures without reaching into ffmpeg internals).
 pub struct VideoDecoder {
-    path: String,                   // original file path, kept so we can reopen to loop
-    input_ctx: Input,               // ffmpeg demuxer: reads packets out of the container
-    stream_index: usize,            // which stream in the file is the video track
+    path: String,                    // original file path, kept so we can reopen to loop
+    input_ctx: Input,                // ffmpeg demuxer: reads packets out of the container
+    stream_index: usize,             // which stream in the file is the video track
     decoder: ffmpeg::decoder::Video, // turns compressed packets into raw frames
-    scaler: ScalerContext,          // converts the decoder's native pixel format → RGBA
+    scaler: ScalerContext,           // converts the decoder's native pixel format → RGBA
     pub width: u32,
     pub height: u32,
-    frame_count: u64,               // how many frames we've yielded since (re)open
-    total_frames: u64,              // estimated frame count, used only for progress()
+    frame_count: u64,  // how many frames we've yielded since (re)open
+    total_frames: u64, // estimated frame count, used only for progress()
     /// True for still images (png/jpg/etc): decode one frame then hold it,
     /// instead of re-opening the file every frame at EOF.
     still: bool,
@@ -74,7 +74,8 @@ impl VideoDecoder {
                 frames
             } else {
                 // Fallback: compute from duration and fps
-                let duration_secs = input_ctx.duration() as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE);
+                let duration_secs =
+                    input_ctx.duration() as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE);
                 let fps = f64::from(stream.avg_frame_rate());
                 let estimated = (duration_secs * fps) as u64;
                 estimated.max(1)
@@ -223,5 +224,75 @@ impl VideoDecoder {
         self.frame_count = 0;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{synth_video, write_non_media};
+
+    #[test]
+    fn open_reads_dimensions_from_fixture() {
+        let (_dir, path) = synth_video(64, 48, 10, 0.5);
+        let dec = VideoDecoder::open(path.to_str().unwrap()).expect("open fixture");
+        assert_eq!(dec.width, 64);
+        assert_eq!(dec.height, 48);
+    }
+
+    #[test]
+    fn open_errors_on_bogus_path() {
+        let err = match VideoDecoder::open("/no/such/file.mp4") {
+            Ok(_) => panic!("expected open to fail on a missing file"),
+            Err(e) => e,
+        };
+        assert!(err.contains("Cannot open"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn open_errors_on_non_media_file() {
+        let (_dir, path) = write_non_media();
+        // A text file has no decodable video stream; open must fail rather than
+        // hand back a half-built decoder.
+        assert!(VideoDecoder::open(path.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn next_frame_yields_rgba_sized_buffer() {
+        let (_dir, path) = synth_video(64, 48, 10, 0.5);
+        let mut dec = VideoDecoder::open(path.to_str().unwrap()).expect("open fixture");
+        let frame = dec.next_frame().expect("decode one frame");
+        // RGBA = 4 bytes per pixel.
+        assert_eq!(frame.len(), 64 * 48 * 4);
+    }
+
+    #[test]
+    fn progress_advances_and_wraps_on_loop() {
+        let (_dir, path) = synth_video(64, 48, 10, 0.5); // ~5 frames
+        let mut dec = VideoDecoder::open(path.to_str().unwrap()).expect("open fixture");
+        assert_eq!(dec.progress(), 0.0, "no frames decoded yet");
+
+        // Decode well past the clip length so it loops at least once.
+        let mut seq = Vec::new();
+        for _ in 0..30 {
+            dec.next_frame().expect("decode frame");
+            seq.push(dec.progress());
+        }
+
+        // Progress always stays in [0, 1).
+        assert!(
+            seq.iter().all(|&p| (0.0..1.0).contains(&p)),
+            "out of range: {seq:?}"
+        );
+        // It advanced past zero at some point...
+        assert!(
+            seq.iter().any(|&p| p > 0.0),
+            "progress never advanced: {seq:?}"
+        );
+        // ...and wrapped back down at a loop boundary (not monotonic).
+        assert!(
+            seq.windows(2).any(|w| w[1] < w[0]),
+            "progress never wrapped (no loop detected): {seq:?}"
+        );
     }
 }

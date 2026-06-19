@@ -149,6 +149,19 @@ cargo run -- render --patch patches/my-patch.yaml --library library/ \
 
 Defaults: `--out experiments/headless-output/out.mp4`, `1280x720`, `30` fps, `10` s.
 
+## Testing
+
+Tests run with [cargo-nextest](https://nexte.st/) (`curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C ~/.cargo/bin`):
+
+```sh
+cargo nextest run                    # fast hardware-free unit + ffmpeg integration tests
+cargo nextest run --run-ignored all  # also runs the GPU export E2E (needs a real GPU)
+```
+
+GPU-dependent tests are marked `#[ignore]` so the default run (and CI) stays
+hardware-free; ffmpeg tests synthesize their own tiny fixtures via the system
+`ffmpeg`. There are no doctests yet (those would run via `cargo test --doc`).
+
 ## Controls (render window)
 
 | Key | Action |

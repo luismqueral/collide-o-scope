@@ -105,10 +105,7 @@ pub struct Layer {
 }
 
 impl Layer {
-    pub fn new(
-        path: &str,
-        device: &wgpu::Device,
-    ) -> Result<Self, String> {
+    pub fn new(path: &str, device: &wgpu::Device) -> Result<Self, String> {
         // Audio-only clips have no video stream: skip the (failing) decoder open
         // and use a 1×1 placeholder texture. They're filtered out of the visual
         // composite, so this texture is never actually sampled.
@@ -270,5 +267,75 @@ pub fn is_audio_file(path: &std::path::Path) -> bool {
             "m4a" | "mp3" | "wav" | "aac" | "ogg" | "opus" | "flac" | "aiff" | "aif"
         ),
         None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn blend_mode_bijection_over_all() {
+        // as_u32 must be the 0..N index into ALL, and the string/label forms
+        // must round-trip 1:1 (the wire format + UI depend on this).
+        for (i, &mode) in BlendMode::ALL.iter().enumerate() {
+            assert_eq!(mode.as_u32() as usize, i, "as_u32 should match ALL index");
+        }
+        // Codes are distinct and contiguous 0..4.
+        let codes: Vec<u32> = BlendMode::ALL.iter().map(|m| m.as_u32()).collect();
+        assert_eq!(codes, vec![0, 1, 2, 3]);
+        // Labels / wire ids are distinct.
+        let labels: Vec<&str> = BlendMode::ALL.iter().map(|m| m.label()).collect();
+        let ids: Vec<&str> = BlendMode::ALL.iter().map(|m| m.as_str()).collect();
+        assert_eq!(labels, vec!["Normal", "Screen", "Multiply", "Difference"]);
+        assert_eq!(ids, vec!["normal", "screen", "multiply", "difference"]);
+    }
+
+    #[test]
+    fn supported_media_accepts_known_extensions() {
+        for ext in [
+            "mp4", "webm", "mov", "avi", "mkv", // video
+            "gif", "png", "jpg", "jpeg", "bmp", "webp", "tiff", "tif", // images
+            "m4a", "mp3", "wav", "aac", "ogg", "opus", "flac", "aiff", "aif", // audio
+        ] {
+            let p = format!("clip.{ext}");
+            assert!(
+                is_supported_media(Path::new(&p)),
+                "{ext} should be supported"
+            );
+        }
+    }
+
+    #[test]
+    fn supported_media_is_case_insensitive() {
+        assert!(is_supported_media(Path::new("CLIP.MP4")));
+        assert!(is_supported_media(Path::new("Song.Mp3")));
+    }
+
+    #[test]
+    fn supported_media_rejects_unknown_and_extensionless() {
+        assert!(!is_supported_media(Path::new("notes.txt")));
+        assert!(!is_supported_media(Path::new("archive.zip")));
+        assert!(!is_supported_media(Path::new("README"))); // no extension
+        assert!(!is_supported_media(Path::new("")));
+    }
+
+    #[test]
+    fn audio_file_detection_splits_from_video() {
+        // Audio extensions are audio files...
+        for ext in [
+            "m4a", "mp3", "wav", "aac", "ogg", "opus", "flac", "aiff", "aif",
+        ] {
+            let p = format!("track.{ext}");
+            assert!(is_audio_file(Path::new(&p)), "{ext} should be audio");
+        }
+        // ...video/image extensions are not (even though they're supported media).
+        for ext in ["mp4", "webm", "mov", "png", "gif"] {
+            let p = format!("clip.{ext}");
+            assert!(!is_audio_file(Path::new(&p)), "{ext} should NOT be audio");
+            assert!(is_supported_media(Path::new(&p)));
+        }
+        assert!(!is_audio_file(Path::new("noext")));
     }
 }

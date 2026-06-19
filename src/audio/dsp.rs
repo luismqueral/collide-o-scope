@@ -317,3 +317,93 @@ fn peaking(f0: f32, fs: f32, q: f32, db: f32) -> [f32; 5] {
     let a2 = 1.0 - alpha / a;
     normalize(b0, b1, b2, a0, a1, a2)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    const FS: f32 = 48_000.0;
+
+    fn coeffs_finite(c: &[f32; 5]) -> bool {
+        c.iter().all(|v| v.is_finite())
+    }
+
+    #[test]
+    fn shelves_and_peak_are_identity_at_0db() {
+        // At 0 dB gain every RBJ band collapses to H(z)=1: b0≈1 and the
+        // numerator equals the denominator (b1≈a1, b2≈a2).
+        for c in [
+            low_shelf(LOW_FREQ, FS, 0.0),
+            high_shelf(HIGH_FREQ, FS, 0.0),
+            peaking(MID_FREQ, FS, MID_Q, 0.0),
+        ] {
+            assert_abs_diff_eq!(c[0], 1.0, epsilon = 1e-5); // b0
+            assert_abs_diff_eq!(c[1], c[3], epsilon = 1e-5); // b1 == a1
+            assert_abs_diff_eq!(c[2], c[4], epsilon = 1e-5); // b2 == a2
+        }
+    }
+
+    #[test]
+    fn identity_coeffs_pass_signal_through_unchanged() {
+        // Feeding a signal through a biquad loaded with 0 dB coeffs returns the
+        // input (the transfer function is exactly 1).
+        let mut bq = Biquad::identity();
+        bq.set_coeffs(low_shelf(LOW_FREQ, FS, 0.0));
+        let signal = [0.0f32, 0.5, -0.3, 0.9, -0.8, 0.1, 0.0];
+        for &x in &signal {
+            assert_abs_diff_eq!(bq.process(x), x, epsilon = 1e-3);
+        }
+    }
+
+    #[test]
+    fn coeffs_stay_finite_across_gain_range() {
+        let mut db = -24.0;
+        while db <= 12.0 {
+            assert!(coeffs_finite(&low_shelf(LOW_FREQ, FS, db)), "low {db}");
+            assert!(coeffs_finite(&high_shelf(HIGH_FREQ, FS, db)), "high {db}");
+            assert!(
+                coeffs_finite(&peaking(MID_FREQ, FS, MID_Q, db)),
+                "peak {db}"
+            );
+            db += 1.5;
+        }
+    }
+
+    #[test]
+    fn biquad_process_updates_history() {
+        // b1 = 1, everything else 0 → a pure one-sample delay (y[n] = x[n-1]).
+        let mut bq = Biquad::identity();
+        bq.set_coeffs([0.0, 1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(bq.process(1.0), 0.0); // x1 was 0
+        assert_eq!(bq.process(0.0), 1.0); // now emits the previous input
+        assert_eq!(bq.process(0.0), 0.0);
+        // reset clears history.
+        bq.process(0.7);
+        bq.reset();
+        assert_eq!(bq.process(0.0), 0.0);
+    }
+
+    #[test]
+    fn update_params_clamps_delay_settings() {
+        let mut dsp = LayerDsp::new(48_000, 2);
+        let mut p = AudioParams::default();
+        p.delay_time = 5_000.0; // over MAX_DELAY_MS (1000)
+        p.delay_feedback = 2.0; // over 0.95
+        p.delay_mix = 3.0; // over 1.0
+        dsp.update_params(&p);
+        // 1000 ms at 48 kHz = 48000 samples (clamped from the 5 s request).
+        assert_abs_diff_eq!(dsp.delay_target, 48_000.0, epsilon = 1.0);
+        assert_eq!(dsp.delay_feedback, 0.95);
+        assert_eq!(dsp.delay_mix, 1.0);
+
+        // Negative values clamp up to zero.
+        p.delay_time = -100.0;
+        p.delay_feedback = -1.0;
+        p.delay_mix = -1.0;
+        dsp.update_params(&p);
+        assert_eq!(dsp.delay_target, 0.0);
+        assert_eq!(dsp.delay_feedback, 0.0);
+        assert_eq!(dsp.delay_mix, 0.0);
+    }
+}
