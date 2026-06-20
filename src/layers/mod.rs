@@ -96,6 +96,11 @@ pub struct Layer {
     pub speed: f32,             // 0.25..4.0 playback multiplier (1.0 = normal)
     pub fps: f32,               // target decode FPS (e.g. 30.0)
     pub frame_accumulator: f32, // seconds of footage owed, drained by advance()
+    // Loop window as fractions of the clip (0.0..1.0). Default 0.0..1.0 loops the
+    // whole file; narrowing them cycles just a slice. Mirror of the decoder's
+    // window kept here for snapshots/patches; `set_loop` forwards into the decoder.
+    pub loop_start: f32,
+    pub loop_end: f32,
     // Parameter automation
     pub automations: HashMap<String, Expr>, // param name → compiled expression
     pub automation_errors: HashMap<String, String>, // param name → parse error
@@ -172,6 +177,8 @@ impl Layer {
             speed: 1.0,
             fps: 30.0,
             frame_accumulator: 0.0,
+            loop_start: 0.0,
+            loop_end: 1.0,
             automations: HashMap::new(),
             automation_errors: HashMap::new(),
             audio: crate::audio::AudioParams::default(),
@@ -212,6 +219,19 @@ impl Layer {
         }
         if let Some(frame) = last {
             self.upload_frame(queue, &frame);
+        }
+    }
+
+    /// Set this layer's loop window (fractions of the clip, 0.0..1.0). Stores the
+    /// mirror on the layer (for snapshots/patches) and forwards into the decoder,
+    /// which is the authority that actually loops within the window. No-op for
+    /// audio-only layers (no video decoder). Mirrors how `main.rs` forwards
+    /// `layer.speed` into the audio mixer.
+    pub fn set_loop(&mut self, start: f32, end: f32) {
+        self.loop_start = start;
+        self.loop_end = end;
+        if let Some(decoder) = &mut self.decoder {
+            decoder.set_loop(start, end);
         }
     }
 

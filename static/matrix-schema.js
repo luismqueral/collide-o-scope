@@ -22,6 +22,8 @@ const MATRIX_GROUPS = [
       { key: 'opacity', label: 'opacity', ptype: 'float', min: 0, max: 1, step: 0.01, def: 1, automatable: true, channels: 'layer' },
       { key: 'speed', label: 'speed', ptype: 'float', min: 0.25, max: 4, step: 0.25, def: 1, automatable: true, channels: 'layer' },
       { key: 'fps', label: 'fps', ptype: 'float', min: 1, max: 30, step: 1, def: 30, automatable: true, channels: 'layer' },
+      { key: 'loop_start', label: 'loop in', ptype: 'float', min: 0, max: 1, step: 0.01, def: 0, automatable: false, channels: 'layer' },
+      { key: 'loop_end', label: 'loop out', ptype: 'float', min: 0, max: 1, step: 0.01, def: 1, automatable: false, channels: 'layer' },
       { key: 'blend_mode', label: 'blend', ptype: 'enum', def: 'normal', automatable: false, channels: 'layer',
         options: [ { value: 'normal', label: 'normal' }, { value: 'screen', label: 'screen' }, { value: 'multiply', label: 'multiply' }, { value: 'difference', label: 'difference' } ] },
       { key: 'visible', label: 'visible', ptype: 'bool', def: true, automatable: false, channels: 'layer' },
@@ -206,12 +208,12 @@ function CHANNEL_APPLIES(def, colKind) {
 // MATRIX_GROUPS via a key→def map, so min/max/step/etc. stay single-sourced.
 //
 // Differences from MATRIX_GROUPS for the layer view:
-//   - LAYER split into SOURCE (clip/speed/fps/paused) + BLEND (opacity/blend/visible).
+//   - LAYER split into SOURCE (clip/speed/fps/loop in/loop out/paused) + BLEND (opacity/blend/visible).
 //   - TRANSFORM + WARP clustered early (geometry). pixelate folded into WARP.
 //   - DIGITAL dissolved: rgb_split → COLOR; pixelate → WARP. posterize/invert → COLOR.
 //   - KEY → COLOR KEY. SHIFT split into SLICE / BLOCKS / GLITCH. shift_chroma → COLOR.
 const LAYER_GROUPS = [
-  { name: 'SOURCE',    keys: ['clip', 'speed', 'fps', 'paused'] },
+  { name: 'SOURCE',    keys: ['clip', 'speed', 'fps', 'loop_start', 'loop_end', 'paused'] },
   { name: 'AUDIO',     keys: ['mute', 'volume', 'pan'] },
   { name: 'AUDIO FX',  keys: ['eq_low', 'eq_mid', 'eq_high', 'delay_time', 'delay_feedback', 'delay_mix'] },
   { name: 'BLEND',     keys: ['opacity', 'blend_mode', 'visible'] },

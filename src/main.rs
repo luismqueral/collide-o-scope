@@ -458,6 +458,19 @@ impl App {
                                 layer.fps = (v as f32).clamp(1.0, 60.0);
                             }
                         }
+                        // Loop in/out points (fractions of the clip). Set the one
+                        // field, then push the pair through `set_loop` so the
+                        // decoder's window updates (and gets clamped/ordered).
+                        "loop_start" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.set_loop((v as f32).clamp(0.0, 1.0), layer.loop_end);
+                            }
+                        }
+                        "loop_end" => {
+                            if let Some(v) = value.as_f64() {
+                                layer.set_loop(layer.loop_start, (v as f32).clamp(0.0, 1.0));
+                            }
+                        }
                         "blend_mode" => {
                             if let Some(s) = value.as_str() {
                                 layer.blend_mode = match s {
@@ -765,6 +778,12 @@ impl App {
                                 audio.set_params(id, self.layers[index].audio)
                             }
                             "speed" => audio.set_speed(id, self.layers[index].speed),
+                            // Trim the audio to the same slice as the video loop.
+                            "loop_start" | "loop_end" => audio.set_loop(
+                                id,
+                                self.layers[index].loop_start,
+                                self.layers[index].loop_end,
+                            ),
                             _ => {}
                         }
                     }
@@ -775,10 +794,13 @@ impl App {
                     let d = crate::effects::EffectUniforms::default();
                     match group.as_str() {
                         "source" => {
-                            // Transport only (speed/fps). Clip + paused are left
-                            // alone — resetting a group shouldn't reload media.
+                            // Transport only (speed/fps + loop window). Clip +
+                            // paused are left alone — resetting a group shouldn't
+                            // reload media.
                             layer.speed = 1.0;
                             layer.fps = 30.0;
+                            // Back to whole-clip loop (forwards into the decoder).
+                            layer.set_loop(0.0, 1.0);
                         }
                         "blend" => {
                             // Composite params. visible is left alone (matches the
@@ -880,7 +902,15 @@ impl App {
                         let id = self.layers[index].id;
                         match group.as_str() {
                             "audio" | "audiofx" => audio.set_params(id, self.layers[index].audio),
-                            "source" => audio.set_speed(id, self.layers[index].speed),
+                            "source" => {
+                                audio.set_speed(id, self.layers[index].speed);
+                                // Reset re-widened the loop to the whole clip.
+                                audio.set_loop(
+                                    id,
+                                    self.layers[index].loop_start,
+                                    self.layers[index].loop_end,
+                                );
+                            }
                             _ => {}
                         }
                     }
@@ -1113,14 +1143,24 @@ impl App {
                             // `self.layers` borrow ends before we touch `self.audio`.
                             let resync = self.layers.last_mut().map(|layer| {
                                 cfg.apply_to_layer(layer);
-                                (layer.id, layer.audio, layer.speed, layer.paused)
+                                (
+                                    layer.id,
+                                    layer.audio,
+                                    layer.speed,
+                                    layer.paused,
+                                    layer.loop_start,
+                                    layer.loop_end,
+                                )
                             });
-                            if let (Some((id, params, speed, paused)), Some(audio)) =
-                                (resync, &self.audio)
+                            if let (
+                                Some((id, params, speed, paused, loop_start, loop_end)),
+                                Some(audio),
+                            ) = (resync, &self.audio)
                             {
                                 audio.set_params(id, params);
                                 audio.set_speed(id, speed);
                                 audio.set_paused(id, paused);
+                                audio.set_loop(id, loop_start, loop_end);
                             }
                         }
                         None => log::warn!(
@@ -1200,8 +1240,11 @@ impl App {
                     opacity: l.opacity,
                     speed: l.speed,
                     fps: l.fps,
+                    loop_start: l.loop_start,
+                    loop_end: l.loop_end,
                     blend_mode: l.blend_mode.as_str().to_string(),
                     progress: l.decoder.as_ref().map(|d| d.progress()).unwrap_or(0.0),
+                    duration: l.decoder.as_ref().map(|d| d.duration_secs()).unwrap_or(0.0),
                     audio_only: l.audio_only,
                     automations: l
                         .automations

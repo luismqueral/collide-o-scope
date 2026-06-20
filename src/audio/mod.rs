@@ -118,6 +118,9 @@ enum AudioCommand {
     SetPaused { id: u64, paused: bool },
     /// Varispeed: playback multiplier (pitch-follows-speed).
     SetSpeed { id: u64, speed: f32 },
+    /// Loop window as clip fractions `0.0..1.0` (mirrors the video loop trim so
+    /// the audio cycles the same slice).
+    SetLoop { id: u64, start: f32, end: f32 },
     /// Update one source's mute/volume/pan.
     SetParams { id: u64, params: AudioParams },
     /// Freeze/unfreeze the whole mix (master pause).
@@ -363,6 +366,12 @@ impl AudioEngine {
         let _ = self.cmd_tx.send(AudioCommand::SetSpeed { id, speed });
     }
 
+    /// Set a layer's loop window (clip fractions `0.0..1.0`) so its audio cycles
+    /// the same slice the video loop trim uses.
+    pub fn set_loop(&self, id: u64, start: f32, end: f32) {
+        let _ = self.cmd_tx.send(AudioCommand::SetLoop { id, start, end });
+    }
+
     /// Update a layer's mute/volume/pan.
     pub fn set_params(&self, id: u64, params: AudioParams) {
         let _ = self.cmd_tx.send(AudioCommand::SetParams { id, params });
@@ -516,6 +525,11 @@ fn apply_command(
         AudioCommand::SetSpeed { id, speed } => {
             if let Some(src) = sources.iter_mut().find(|s| s.id == id) {
                 src.speed = speed;
+            }
+        }
+        AudioCommand::SetLoop { id, start, end } => {
+            if let Some(src) = sources.iter_mut().find(|s| s.id == id) {
+                src.decoder.set_loop(start, end);
             }
         }
         AudioCommand::SetParams { id, params } => {

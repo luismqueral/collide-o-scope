@@ -845,7 +845,7 @@
         if (def.step) v = Math.round(v / def.step) * def.step;
         v = Math.max(def.min, Math.min(def.max, v));
         info.value = v;
-        if (info.valEl) info.valEl.textContent = formatValue(v, def.min, def.max, def.step);
+        if (info.valEl) info.valEl.textContent = formatScrubValue(info, v);
         paintBar(info, v);
         markChanged(info, !nearlyEqual(v, def.def));
         sendAction(setValueAction(info.col, def, v));
@@ -1010,6 +1010,31 @@
     }
   }
 
+  // Seconds → a compact timecode for the loop in/out readout: "1:05" past a
+  // minute, "3.4s" under one. Used instead of the bare 0.00–1.00 fraction.
+  function formatTime(secs) {
+    if (!isFinite(secs) || secs < 0) secs = 0;
+    if (secs >= 60) {
+      const m = Math.floor(secs / 60);
+      const s = Math.round(secs - m * 60);
+      return m + ':' + String(s).padStart(2, '0');
+    }
+    return secs.toFixed(1) + 's';
+  }
+
+  // The text to show for a cell's numeric value: a timecode for the loop in/out
+  // sliders (when the clip length is known), else the normal numeric format.
+  // Shared by the live scrub handler and updateCell so both read identically.
+  function formatScrubValue(info, v) {
+    const def = info.def;
+    if (def.key === 'loop_start' || def.key === 'loop_end') {
+      const layer = lastMsg && lastMsg.layers ? lastMsg.layers[info.col.index] : null;
+      const dur = layer && layer.duration ? layer.duration : 0;
+      if (dur > 0) return formatTime(v * dur);
+    }
+    return formatValue(v, def.min, def.max, def.step);
+  }
+
   function updateCell(info, msg, autos, errors) {
     const { def, col, valEl } = info;
     const v = readValue(msg, col, def);
@@ -1026,7 +1051,9 @@
 
     if (def.ptype === 'float' || def.ptype === 'bipolar') {
       const num = typeof v === 'number' ? v : 0;
-      valEl.textContent = formatValue(num, def.min, def.max, def.step);
+      // Loop in/out read out as a timecode (fraction × clip seconds) when the
+      // clip length is known; everything else uses the normal numeric format.
+      valEl.textContent = formatScrubValue(info, num);
       paintBar(info, num);
       markChanged(info, !nearlyEqual(num, def.def));
     } else if (def.ptype === 'bool') {

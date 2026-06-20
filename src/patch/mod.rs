@@ -149,6 +149,18 @@ pub fn param_meta(name: &str) -> Option<ParamMeta> {
             max: 60.0,
             desc: "decode frame rate",
         }),
+        "loop_start" => Some(ParamMeta {
+            step: 0.01,
+            min: 0.0,
+            max: 1.0,
+            desc: "loop in point (fraction)",
+        }),
+        "loop_end" => Some(ParamMeta {
+            step: 0.01,
+            min: 0.0,
+            max: 1.0,
+            desc: "loop out point (fraction)",
+        }),
         "volume" => Some(ParamMeta {
             step: 1.0,
             min: -60.0,
@@ -562,6 +574,12 @@ pub struct LayerConfig {
     pub speed: f32,
     #[serde(default = "default_fps")]
     pub fps: f32,
+    // Loop window as fractions of the clip (0.0..1.0). Defaulted so patches saved
+    // before loop trimming load as a whole-clip loop (0.0..1.0).
+    #[serde(default)]
+    pub loop_start: f32,
+    #[serde(default = "one")]
+    pub loop_end: f32,
     #[serde(default)]
     pub paused: bool,
     #[serde(default = "default_true")]
@@ -1459,6 +1477,8 @@ impl LayerConfig {
             .to_string(),
             speed: layer.speed,
             fps: layer.fps,
+            loop_start: layer.loop_start,
+            loop_end: layer.loop_end,
             paused: layer.paused,
             visible: layer.visible,
             effects: EffectsConfig::from_uniforms(&layer.effects),
@@ -1489,6 +1509,9 @@ impl LayerConfig {
         };
         layer.speed = self.speed.clamp(0.25, 4.0);
         layer.fps = self.fps.clamp(1.0, 60.0);
+        // Set the loop window via the helper so the decoder picks it up too
+        // (clamping/ordering is enforced inside the decoder's `set_loop`).
+        layer.set_loop(self.loop_start, self.loop_end);
         layer.paused = self.paused;
         layer.visible = self.visible;
         self.effects.apply_to_uniforms(&mut layer.effects);
@@ -1527,6 +1550,8 @@ impl LayerConfig {
             ("blend_mode", self.blend_mode.clone()),
             ("speed", format!("{:.2}", self.speed)),
             ("fps", format!("{:.1}", self.fps)),
+            ("loop_start", format!("{:.2}", self.loop_start)),
+            ("loop_end", format!("{:.2}", self.loop_end)),
             ("paused", format!("{}", self.paused)),
             ("visible", format!("{}", self.visible)),
             ("mute", format!("{}", self.mute)),
@@ -1563,6 +1588,18 @@ impl LayerConfig {
             "fps" => {
                 if let Ok(v) = value.parse() {
                     self.fps = v;
+                    return true;
+                }
+            }
+            "loop_start" => {
+                if let Ok(v) = value.parse() {
+                    self.loop_start = v;
+                    return true;
+                }
+            }
+            "loop_end" => {
+                if let Ok(v) = value.parse() {
+                    self.loop_end = v;
                     return true;
                 }
             }
@@ -1783,6 +1820,9 @@ audio:
         assert_eq!(l.blend_mode, "normal");
         assert_eq!(l.speed, 1.0);
         assert_eq!(l.fps, 30.0);
+        // Loop fields absent in old patches → whole-clip window (0.0..1.0).
+        assert_eq!(l.loop_start, 0.0);
+        assert_eq!(l.loop_end, 1.0);
         assert!(l.visible);
         assert_eq!(l.effects.pixelate, 1.0);
         assert_eq!(l.effects.feedback_zoom, 1.0);
@@ -1793,6 +1833,24 @@ audio:
         let (vol, lim) = patch.master_audio();
         assert_eq!(vol, 0.0);
         assert!(lim);
+    }
+
+    /// A `LayerConfig` carrying an explicit loop window survives a YAML
+    /// round-trip with both fractions preserved.
+    #[test]
+    fn layer_config_loop_window_yaml_round_trips() {
+        eprintln!("patch: LayerConfig loop_start/loop_end round-trip through YAML");
+        let yaml = "master: {}\nlayers:\n  - filename: clip.mp4\n    loop_start: 0.25\n    loop_end: 0.75\n";
+        let patch: PatchState = serde_yaml::from_str(yaml).expect("parse");
+        let l = &patch.layers[0];
+        assert_abs_diff_eq!(l.loop_start, 0.25, epsilon = 1e-6);
+        assert_abs_diff_eq!(l.loop_end, 0.75, epsilon = 1e-6);
+
+        // Re-serialize and read back: the window must be unchanged.
+        let out = serde_yaml::to_string(&patch).expect("serialize");
+        let back: PatchState = serde_yaml::from_str(&out).expect("deserialize");
+        assert_abs_diff_eq!(back.layers[0].loop_start, 0.25, epsilon = 1e-6);
+        assert_abs_diff_eq!(back.layers[0].loop_end, 0.75, epsilon = 1e-6);
     }
 
     /// Out-of-range `EffectsConfig` values are clamped (and `fit_mode` rounded)
