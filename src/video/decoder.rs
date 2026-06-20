@@ -27,8 +27,10 @@ pub struct VideoDecoder {
     scaler: ScalerContext,           // converts the decoder's native pixel format → RGBA
     pub width: u32,
     pub height: u32,
-    frame_count: u64,  // how many frames we've yielded since (re)open
-    total_frames: u64, // estimated frame count, used for progress() + loop window
+    frame_count: u64,   // how many frames we've yielded since (re)open
+    total_frames: u64,  // estimated frame count, used for progress() + loop window
+    duration_secs: f64, // clip length in seconds (0 if unknown), for the UI's
+    // seconds/timecode readout on the loop in/out sliders
     /// True for still images (png/jpg/etc): decode one frame then hold it,
     /// instead of re-opening the file every frame at EOF.
     still: bool,
@@ -88,6 +90,12 @@ impl VideoDecoder {
             }
         };
 
+        // Clip length in seconds from the container duration (AV_TIME_BASE units).
+        // Negative/unknown → 0.0; the UI then falls back to showing a fraction
+        // instead of a timecode for the loop sliders.
+        let duration_secs =
+            (input_ctx.duration() as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE)).max(0.0);
+
         // Decoders output frames in formats like YUV420; the GPU wants RGBA.
         // This scaler does that conversion (same in/out size, just a pixel
         // format change). `Flags::BILINEAR` is the interpolation used if it
@@ -125,6 +133,7 @@ impl VideoDecoder {
             height,
             frame_count: 0,
             total_frames,
+            duration_secs,
             still,
             // Default window = whole clip; `set_loop` narrows it later.
             loop_start: 0.0,
@@ -281,6 +290,13 @@ impl VideoDecoder {
         // saturating_sub floors the position at 0 rather than wrapping huge.
         let pos = self.frame_count.saturating_sub(start);
         (pos % span) as f32 / span as f32
+    }
+
+    /// Clip length in seconds (0.0 when the container doesn't report a duration,
+    /// e.g. stills). The UI multiplies the loop in/out fractions by this to show
+    /// a seconds/timecode readout instead of a bare 0.00–1.00.
+    pub fn duration_secs(&self) -> f32 {
+        self.duration_secs as f32
     }
 
     /// Run one decoded frame through the RGBA scaler and copy out the bytes.

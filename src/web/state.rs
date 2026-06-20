@@ -268,6 +268,11 @@ pub struct LayerSnapshot {
     pub loop_end: f32,
     pub blend_mode: String,
     pub progress: f32,
+    /// Clip length in seconds (0.0 if unknown). Lets the UI show the loop in/out
+    /// sliders as a seconds/timecode readout (fraction × duration) rather than a
+    /// bare 0.00–1.00. Defaulted so older snapshots deserialize cleanly.
+    #[serde(default)]
+    pub duration: f32,
     /// Audio-only clip (no video): the grid blanks video-only rows for it.
     #[serde(default)]
     pub audio_only: bool,
@@ -865,6 +870,7 @@ mod tests {
             loop_end: 0.8,
             blend_mode: "normal".to_string(),
             progress: 0.0,
+            duration: 12.0,
             audio_only: false,
             automations: HashMap::new(),
             automation_errors: HashMap::new(),

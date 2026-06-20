@@ -28,6 +28,19 @@ pub struct AudioDecoder {
     src_rate: u32,                   // decoder's native sample rate (for capacity math)
     out_rate: u32,                   // device sample rate we resample to
     out_channels: u16,               // device channel count (2 = stereo for v1)
+    /// Loop window as fractions of the clip `0.0..1.0`, mirroring the video
+    /// decoder so audio trims to the *same* slice. Default `0.0..1.0` = loop the
+    /// whole file (the original behavior). `set_loop` narrows it.
+    loop_start: f64,
+    loop_end: f64,
+    /// Total clip length measured in *output frames* (one frame = one sample per
+    /// channel, at `out_rate`). An estimate from the container duration; only
+    /// consulted when the clip is trimmed, so a bad estimate can't affect the
+    /// default whole-file loop.
+    total_out_frames: u64,
+    /// Output frames emitted since the current loop-in point. The audio analog
+    /// of the video decoder's `frame_count`: drives the out-point check.
+    emitted_frames: u64,
 }
 
 impl AudioDecoder {
@@ -56,6 +69,13 @@ impl AudioDecoder {
 
         let src_rate = decoder.rate();
 
+        // Estimate the clip length in output frames from the container duration.
+        // `duration()` is in AV_TIME_BASE units (microseconds); × out_rate gives
+        // frames at our device rate. Clamp to ≥1 so the window maths never divide
+        // by zero. Only used when trimmed — untrimmed playback ignores it.
+        let duration_secs = input_ctx.duration() as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE);
+        let total_out_frames = ((duration_secs.max(0.0) * out_rate as f64) as u64).max(1);
+
         // Build the resampler: native (format, layout, rate) → f32 packed,
         // requested layout, device rate. `decoder.resampler(...)` reads the
         // input side off the decoder itself, so we only specify the output.
@@ -73,17 +93,63 @@ impl AudioDecoder {
             src_rate,
             out_rate,
             out_channels,
+            // Default window = whole clip; `set_loop` narrows it later.
+            loop_start: 0.0,
+            loop_end: 1.0,
+            total_out_frames,
+            emitted_frames: 0,
         })
     }
 
     /// Decode and resample the next available chunk of audio, returning it as
-    /// interleaved f32 (`[L, R, L, R, ...]`). Loops back to the start at EOF.
-    /// Returns None only on an unrecoverable error.
+    /// interleaved f32 (`[L, R, L, R, ...]`). Loops back to the window's start
+    /// (the loop-in point, or the file start when untrimmed) at the out-point or
+    /// true EOF. Returns None only on an unrecoverable error.
     ///
-    /// Same "push packets in, pull frames out" dance as the video decoder: one
-    /// packet may yield zero or many frames, so we drain ready frames first and
-    /// only feed a new packet when the decoder has none buffered.
+    /// Trimmed clips can't land on the loop-out point exactly — chunks are
+    /// coarse (~21 ms) — so we truncate the chunk that crosses it and accept a
+    /// little drift, consistent with the looping philosophy in docs/audio-plan
+    /// §6. Untrimmed clips (the default 0..1 window) skip all of this and just
+    /// loop at EOF, byte-for-byte the original behavior.
     pub fn next_chunk(&mut self) -> Option<Vec<f32>> {
+        // Reached the out-point on a previous call → loop before decoding more.
+        if self.is_trimmed() && self.emitted_frames >= self.end_frame() {
+            self.loop_to_start().ok()?;
+        }
+
+        // Decode the next chunk; on true EOF, loop to the window start and retry
+        // once (covers untrimmed whole-file looping and short-clip estimates).
+        let chunk = match self.decode_chunk() {
+            Some(c) => c,
+            None => {
+                self.loop_to_start().ok()?;
+                self.decode_chunk()?
+            }
+        };
+
+        let per_frame = self.out_channels.max(1) as usize;
+        let frames = (chunk.len() / per_frame) as u64;
+
+        // If this chunk would carry us past the out-point, keep only the part
+        // up to it; the next call loops back to the in-point.
+        if self.is_trimmed() && self.emitted_frames + frames > self.end_frame() {
+            let allow = self.end_frame().saturating_sub(self.emitted_frames) as usize;
+            let mut chunk = chunk;
+            chunk.truncate(allow * per_frame);
+            self.emitted_frames = self.end_frame();
+            return Some(chunk);
+        }
+
+        self.emitted_frames += frames;
+        Some(chunk)
+    }
+
+    /// One "push packets in, pull frames out" decode step: returns the next
+    /// resampled chunk, or `None` at true end-of-file (no auto-reopen — callers
+    /// decide whether/where to loop). One packet may yield zero or many frames,
+    /// so we drain ready frames first and only feed a new packet when none are
+    /// buffered.
+    fn decode_chunk(&mut self) -> Option<Vec<f32>> {
         loop {
             // Try to receive an already-decoded frame first.
             let mut decoded = AudioFrame::empty();
@@ -103,18 +169,76 @@ impl AudioDecoder {
                     }
                 }
                 None => {
-                    // EOF — flush the decoder, then reopen to loop.
+                    // EOF — flush the decoder for any final buffered frame.
                     self.decoder.send_eof().ok();
                     let mut decoded = AudioFrame::empty();
                     if self.decoder.receive_frame(&mut decoded).is_ok() {
                         return Some(self.resample(&decoded));
                     }
-                    if self.reopen().is_err() {
-                        return None;
-                    }
+                    return None; // truly drained
                 }
             }
         }
+    }
+
+    /// Reopen the file and discard chunks up to the loop-in point so the next
+    /// decode yields the window's start. Mirrors the video decoder's
+    /// `loop_to_start`; the discard cost is bounded by the clip length. Discards
+    /// happen in whole chunks, so we may overshoot the in-point by up to one
+    /// chunk — the accepted "little loop drift."
+    fn loop_to_start(&mut self) -> Result<(), String> {
+        self.reopen()?; // resets emitted_frames = 0
+        let start = self.start_frame();
+        if start > 0 {
+            let per_frame = self.out_channels.max(1) as usize;
+            let mut discarded = 0u64;
+            while discarded < start {
+                match self.decode_chunk() {
+                    Some(chunk) => discarded += (chunk.len() / per_frame) as u64,
+                    // Clip shorter than the requested start (estimate was high):
+                    // stop discarding and play from wherever we landed.
+                    None => break,
+                }
+            }
+            self.emitted_frames = discarded;
+        }
+        Ok(())
+    }
+
+    /// True when the loop window is narrower than the whole clip. Gates the
+    /// windowing so untrimmed clips behave exactly as they did before.
+    fn is_trimmed(&self) -> bool {
+        self.loop_start > 0.0 || self.loop_end < 1.0
+    }
+
+    /// Output-frame index of the loop-in point.
+    fn start_frame(&self) -> u64 {
+        (self.loop_start * self.total_out_frames as f64).round() as u64
+    }
+
+    /// Output-frame index of the loop-out point. Clamped to keep at least one
+    /// frame in the window and never exceed the clip length.
+    fn end_frame(&self) -> u64 {
+        let end = (self.loop_end * self.total_out_frames as f64).round() as u64;
+        let lo = self.start_frame() + 1;
+        let hi = self.total_out_frames.max(lo);
+        end.clamp(lo, hi)
+    }
+
+    /// Restrict looping to the window `[start, end]` (fractions of the clip,
+    /// `0.0..1.0`), matching `VideoDecoder::set_loop` so audio and video trim to
+    /// the same slice. Clamps to range and keeps the out-point at least ~one
+    /// frame past the in-point.
+    pub fn set_loop(&mut self, start: f32, end: f32) {
+        let min_gap = if self.total_out_frames > 0 {
+            1.0 / self.total_out_frames as f64
+        } else {
+            0.01
+        };
+        let start = (start.clamp(0.0, 1.0) as f64).min(1.0 - min_gap);
+        let end = (end.clamp(0.0, 1.0) as f64).clamp(start + min_gap, 1.0);
+        self.loop_start = start;
+        self.loop_end = end;
     }
 
     /// Run one decoded frame through the resampler and copy out interleaved f32.
@@ -184,6 +308,8 @@ impl AudioDecoder {
             .decoder
             .resampler(Sample::F32(SampleType::Packed), out_layout, self.out_rate)
             .map_err(|e| format!("Resampler on reopen: {e}"))?;
+
+        self.emitted_frames = 0;
 
         Ok(())
     }
@@ -257,5 +383,85 @@ mod tests {
                 "chunk {i} returned None (no clean loop)"
             );
         }
+    }
+
+    /// A freshly opened decoder is *not* trimmed: the window spans the whole
+    /// file, so the default path is byte-for-byte the pre-trim whole-file loop.
+    #[test]
+    fn default_window_is_whole_clip() {
+        eprintln!("audio: a new decoder loops the whole clip (untrimmed) by default");
+        let (_dir, path) = synth_audio(440, 0.5);
+        let dec = AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).expect("open fixture");
+        assert!(!dec.is_trimmed(), "default window should not be trimmed");
+        assert_eq!(dec.start_frame(), 0, "default in-point is frame 0");
+        assert_eq!(
+            dec.end_frame(),
+            dec.total_out_frames,
+            "default out-point is the clip end"
+        );
+    }
+
+    /// `set_loop` clamps out-of-range input to [0,1] and corrects an inverted
+    /// pair (end <= start) into a valid window holding at least one frame.
+    #[test]
+    fn set_loop_clamps_and_orders() {
+        eprintln!("audio: set_loop clamps to [0,1] and keeps end strictly after start");
+        let (_dir, path) = synth_audio(440, 0.5);
+        let mut dec = AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).expect("open fixture");
+
+        // Inverted input: end below start. Window must be corrected, not empty.
+        dec.set_loop(0.8, 0.2);
+        assert!(
+            dec.loop_start <= dec.loop_end,
+            "inverted input should be corrected: {} > {}",
+            dec.loop_start,
+            dec.loop_end
+        );
+        assert!(
+            dec.end_frame() > dec.start_frame(),
+            "window must hold at least one frame"
+        );
+
+        // Out-of-range input: clamped into [0,1].
+        dec.set_loop(-1.0, 5.0);
+        assert!(
+            (0.0..=1.0).contains(&dec.loop_start),
+            "start clamped to [0,1]"
+        );
+        assert!((0.0..=1.0).contains(&dec.loop_end), "end clamped to [0,1]");
+        assert!(dec.loop_end >= dec.loop_start, "end stays >= start");
+    }
+
+    /// With a trimmed window (second half of the clip), playback loops *within*
+    /// that window: chunks keep coming, the emitted-frame counter wraps back
+    /// down at the out-point, and after wrapping it never falls below the
+    /// in-point — proof we cycle the slice, not the whole file.
+    #[test]
+    fn trimmed_window_loops_within_bounds() {
+        eprintln!("audio: a trimmed loop window cycles only its slice, not the whole clip");
+        let (_dir, path) = synth_audio(440, 0.5);
+        let mut dec = AudioDecoder::open(path.to_str().unwrap(), 48_000, 2).expect("open fixture");
+        dec.set_loop(0.5, 1.0);
+        let start = dec.start_frame();
+        assert!(start > 0, "0.5 fraction should land past frame 0");
+
+        // Pull well past the window length so it loops at least once.
+        let mut emitted = Vec::new();
+        for i in 0..200 {
+            assert!(dec.next_chunk().is_some(), "chunk {i} returned None");
+            emitted.push(dec.emitted_frames);
+        }
+
+        // A wrap happened (counter decreased = it looped rather than running on).
+        let first_wrap = emitted
+            .windows(2)
+            .position(|w| w[1] < w[0])
+            .unwrap_or_else(|| panic!("never wrapped: {emitted:?}"));
+        // After wrapping, playback stays inside the window (never below the
+        // in-point) — proof we loop the slice, not the whole clip.
+        assert!(
+            emitted[first_wrap + 1..].iter().all(|&c| c >= start),
+            "left the loop window after wrap (start={start}): {emitted:?}"
+        );
     }
 }

@@ -778,6 +778,12 @@ impl App {
                                 audio.set_params(id, self.layers[index].audio)
                             }
                             "speed" => audio.set_speed(id, self.layers[index].speed),
+                            // Trim the audio to the same slice as the video loop.
+                            "loop_start" | "loop_end" => audio.set_loop(
+                                id,
+                                self.layers[index].loop_start,
+                                self.layers[index].loop_end,
+                            ),
                             _ => {}
                         }
                     }
@@ -896,7 +902,15 @@ impl App {
                         let id = self.layers[index].id;
                         match group.as_str() {
                             "audio" | "audiofx" => audio.set_params(id, self.layers[index].audio),
-                            "source" => audio.set_speed(id, self.layers[index].speed),
+                            "source" => {
+                                audio.set_speed(id, self.layers[index].speed);
+                                // Reset re-widened the loop to the whole clip.
+                                audio.set_loop(
+                                    id,
+                                    self.layers[index].loop_start,
+                                    self.layers[index].loop_end,
+                                );
+                            }
                             _ => {}
                         }
                     }
@@ -1129,14 +1143,24 @@ impl App {
                             // `self.layers` borrow ends before we touch `self.audio`.
                             let resync = self.layers.last_mut().map(|layer| {
                                 cfg.apply_to_layer(layer);
-                                (layer.id, layer.audio, layer.speed, layer.paused)
+                                (
+                                    layer.id,
+                                    layer.audio,
+                                    layer.speed,
+                                    layer.paused,
+                                    layer.loop_start,
+                                    layer.loop_end,
+                                )
                             });
-                            if let (Some((id, params, speed, paused)), Some(audio)) =
-                                (resync, &self.audio)
+                            if let (
+                                Some((id, params, speed, paused, loop_start, loop_end)),
+                                Some(audio),
+                            ) = (resync, &self.audio)
                             {
                                 audio.set_params(id, params);
                                 audio.set_speed(id, speed);
                                 audio.set_paused(id, paused);
+                                audio.set_loop(id, loop_start, loop_end);
                             }
                         }
                         None => log::warn!(
@@ -1220,6 +1244,7 @@ impl App {
                     loop_end: l.loop_end,
                     blend_mode: l.blend_mode.as_str().to_string(),
                     progress: l.decoder.as_ref().map(|d| d.progress()).unwrap_or(0.0),
+                    duration: l.decoder.as_ref().map(|d| d.duration_secs()).unwrap_or(0.0),
                     audio_only: l.audio_only,
                     automations: l
                         .automations
