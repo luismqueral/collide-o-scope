@@ -33,7 +33,15 @@ public:
     void setParam(const QString &param, bool value);            // set_param (e.g. invert)
     void setMasterAudioParam(const QString &param, double value);
     void setMasterAudioParam(const QString &param, bool value); // e.g. limiter
+    void setNtscParam(const QString &param, double value);      // set_ntsc_param
+    void setNtscParam(const QString &param, bool value);        // set_ntsc_param (e.g. enabled)
     void setLayerParam(int index, const QString &param, double value);
+    void setLayerParam(int index, const QString &param, bool value);   // e.g. mute
+    void setLayerParam(int index, const QString &param, const QString &value); // e.g. blend_mode/chroma_color
+    void setLayerClip(int index, const QString &filename);      // set_layer_clip
+    void addLayer(const QString &filename);                     // add_layer
+    void removeLayer(int index);                                // remove_layer
+    void moveLayer(int from, int to);                           // move_layer
     void resetFx();                                             // reset_fx
     void toggleMasterPause();                                   // toggle_master_pause
     void toggleVisibility(int index);                           // toggle_visibility

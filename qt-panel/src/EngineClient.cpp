@@ -100,12 +100,76 @@ void EngineClient::setMasterAudioParam(const QString &param, bool value) {
     sendAction(a);
 }
 
+void EngineClient::setNtscParam(const QString &param, double value) {
+    QJsonObject a;
+    a["action"] = "set_ntsc_param";
+    a["param"] = param;
+    a["value"] = value;
+    sendAction(a);
+}
+
+void EngineClient::setNtscParam(const QString &param, bool value) {
+    QJsonObject a;
+    a["action"] = "set_ntsc_param";
+    a["param"] = param;
+    a["value"] = value;
+    sendAction(a);
+}
+
 void EngineClient::setLayerParam(int index, const QString &param, double value) {
     QJsonObject a;
     a["action"] = "set_layer_param";
     a["index"] = index;
     a["param"] = param;
     a["value"] = value;
+    sendAction(a);
+}
+
+void EngineClient::setLayerParam(int index, const QString &param, bool value) {
+    QJsonObject a;
+    a["action"] = "set_layer_param";
+    a["index"] = index;
+    a["param"] = param;
+    a["value"] = value;
+    sendAction(a);
+}
+
+void EngineClient::setLayerParam(int index, const QString &param, const QString &value) {
+    QJsonObject a;
+    a["action"] = "set_layer_param";
+    a["index"] = index;
+    a["param"] = param;
+    a["value"] = value;
+    sendAction(a);
+}
+
+void EngineClient::setLayerClip(int index, const QString &filename) {
+    QJsonObject a;
+    a["action"] = "set_layer_clip";
+    a["index"] = index;
+    a["filename"] = filename;
+    sendAction(a);
+}
+
+void EngineClient::addLayer(const QString &filename) {
+    QJsonObject a;
+    a["action"] = "add_layer";
+    a["filename"] = filename;
+    sendAction(a);
+}
+
+void EngineClient::removeLayer(int index) {
+    QJsonObject a;
+    a["action"] = "remove_layer";
+    a["index"] = index;
+    sendAction(a);
+}
+
+void EngineClient::moveLayer(int from, int to) {
+    QJsonObject a;
+    a["action"] = "move_layer";
+    a["from"] = from;
+    a["to"] = to;
     sendAction(a);
 }
 

@@ -1,45 +1,31 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QStringList>
 #include <QUrl>
 #include <QVector>
 #include <QWidget>
 
 class EngineClient;
-class QCheckBox;
+class MatrixCell;
 class QGridLayout;
 class QLabel;
 class QProgressBar;
 class QPushButton;
-class QSlider;
-class QVBoxLayout;
+class QScrollArea;
 
-// One master-FX slider, paired with its numeric readout label and the float
-// range it maps onto (the integer QSlider runs 0..kSliderSteps internally).
-struct FxSlider {
-    QString param;   // wire param name sent via set_param
-    QSlider *slider = nullptr;
-    QLabel *value = nullptr;
-    double min = 0.0;
-    double max = 1.0;
-};
-
-// The widgets making up one row of the layer strip. Kept so onSnapshot() can
-// push live values into them each frame without rebuilding the row.
-struct LayerRow {
-    QWidget *container = nullptr;
-    QLabel *name = nullptr;
-    QSlider *opacity = nullptr;
-    QLabel *opacityVal = nullptr;
-    QPushButton *visible = nullptr;
-    QPushButton *pause = nullptr;
-    QProgressBar *progress = nullptr;
-    QProgressBar *meter = nullptr;
-};
-
-// The whole control panel window. Builds its widgets once, then keeps them in
-// sync with the engine: outbound, each control calls an EngineClient helper;
-// inbound, onSnapshot() repaints displayed values from the ~30fps AppSnapshot.
+// The transposed-matrix control panel. Layout mirrors the browser:
+//   * a centre layer grid — rows are parameters (grouped per LAYER_GROUPS),
+//     columns are layers, each a stack of MatrixCells with a header (name / ×
+//     remove / progress / meter) and a trailing "+" add-column button;
+//   * a right Master panel — the MATRIX_GROUPS params that apply to the master
+//     column (FX / audio / VHS), one column of MatrixCells, built once.
+//
+// Outbound edits happen inside each MatrixCell (it owns its EngineClient route).
+// Inbound, onSnapshot() fans the ~30fps AppSnapshot out to every cell's
+// applyValue() (which self-guards while scrubbing) and refreshes the live
+// headers/progress/meters. The layer grid is rebuilt only when the layer count
+// changes (the POC's rebuildLayers pattern).
 class ControlPanel : public QWidget {
     Q_OBJECT
 public:
@@ -50,35 +36,49 @@ private slots:
     void onConnectionChanged(bool connected);
 
 private:
+    // Shell.
     QWidget *buildConnectionBar();
     QWidget *buildTransport();
-    QWidget *buildMasterFx();
-    QWidget *buildMasterAudio();
-    QWidget *buildLayers();
-    void addFxRow(QGridLayout *grid, int row, const QString &label,
-                  const QString &param, double min, double max);
-    void rebuildLayers(int count);
+
+    // Matrix.
+    QWidget *buildLayerPanel();  // scroll host for the layer grid
+    QWidget *buildMasterPanel(); // the master column (built once)
+    void rebuildLayerGrid(int count);
+    QWidget *makeLayerHeader(int index);
+    void addLayerViaPicker();
 
     EngineClient *m_engine = nullptr;
 
-    // Connection bar
+    // Connection bar.
     QLabel *m_statusDot = nullptr;
     QLabel *m_statusText = nullptr;
 
-    // Master transport
+    // Master transport.
     QPushButton *m_pauseBtn = nullptr;
 
-    // Master FX
-    QVector<FxSlider> m_fx;
-    QCheckBox *m_invert = nullptr;
+    // Layer grid (rebuilt when the layer count changes).
+    QScrollArea *m_layerScroll = nullptr;
+    QWidget *m_layerInner = nullptr;
+    QGridLayout *m_layerGrid = nullptr;
+    QPushButton *m_addColBtn = nullptr;
+    int m_layerCount = -1;
 
-    // Master audio
-    QSlider *m_masterVol = nullptr;
-    QLabel *m_masterVolVal = nullptr;
-    QCheckBox *m_limiter = nullptr;
-    QProgressBar *m_meter = nullptr;
+    // Per-layer column header widgets, kept for live updates.
+    struct LayerHeader {
+        QWidget *container = nullptr;
+        QLabel *title = nullptr;
+        QLabel *filename = nullptr;
+        QProgressBar *progress = nullptr;
+        QProgressBar *meter = nullptr;
+    };
+    QVector<LayerHeader> m_layerHeaders;
+    QVector<MatrixCell *> m_layerCells;
 
-    // Layer strip (rows rebuilt only when the layer count changes)
-    QVBoxLayout *m_layerLayout = nullptr;
-    QVector<LayerRow> m_layerRows;
+    // Master column.
+    QVector<MatrixCell *> m_masterCells;
+    QProgressBar *m_masterMeter = nullptr;
+
+    // Latest library filename list (drives the add/swap clip pickers). Cells
+    // hold a pointer to this member, so it must outlive them (it does).
+    QStringList m_library;
 };

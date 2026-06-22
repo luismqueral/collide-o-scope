@@ -1670,12 +1670,24 @@ impl ApplicationHandler for App {
         // fit_to_area, so non-square output is letterboxed inside the square frame.
         const PREVIEW_WINDOW_SIZE: u32 = 600;
 
-        let window_attrs = WindowAttributes::default()
+        let mut window_attrs = WindowAttributes::default()
             .with_title("collide-o-scope")
             .with_inner_size(winit::dpi::LogicalSize::new(
                 PREVIEW_WINDOW_SIZE,
                 PREVIEW_WINDOW_SIZE,
             ));
+
+        // Open the preview just to the right of the native control panel, which
+        // docks itself to the left ~58% of the primary screen (the matching 0.58
+        // split lives in qt-panel/src/webview_main.cpp). Best-effort: if we can't
+        // read the monitor, fall back to the OS-chosen default position.
+        if let Some(monitor) = event_loop.primary_monitor() {
+            let scale = monitor.scale_factor();
+            let screen_w = monitor.size().width as f64 / scale; // physical px → logical points
+            let panel_w = screen_w * 0.58;
+            window_attrs = window_attrs
+                .with_position(winit::dpi::LogicalPosition::new(panel_w + 8.0, 40.0));
+        }
 
         let window = Arc::new(event_loop.create_window(window_attrs).unwrap());
 
@@ -2715,11 +2727,21 @@ fn main() {
     event_loop.run_app(&mut app).unwrap();
 }
 
-/// Open the control panel in a chromeless "app mode" window if a Chromium-based
-/// browser (Chrome / Edge / Brave) is installed, falling back to the system
-/// default browser otherwise. App mode (`--app=<url>`) gives a standalone window
-/// with no tabs or address bar, so the panel reads like a native app.
+/// Bring up the control panel, preferring the native `collide-webview` window
+/// (Qt WebEngine hosting this same web UI in a chromeless, native-feeling frame)
+/// when it's available, then a Chromium "--app" window, then the default browser.
+///
+/// The native webview is a separate build artifact (see `qt-panel/`), so it's an
+/// optional, soft dependency: we just *prefer* it if present. The engine still
+/// neither needs nor talks to it directly — it only launches it pointed at `url`.
 fn open_control_panel(url: &str) {
+    // 1. Native webview panel, if built/available.
+    if open_native_webview(url) {
+        return;
+    }
+
+    // 2. Chromium "app mode": a chromeless window that reads like a native app.
+    //
     // macOS app bundles must be launched via their inner binary to pass flags
     // reliably (`open -a … --args --app=…` is dropped when an instance is up).
     #[cfg(target_os = "macos")]
@@ -2746,8 +2768,39 @@ fn open_control_panel(url: &str) {
         }
     }
 
-    // No Chromium browser available (or launch failed): use the default browser.
+    // 3. No Chromium browser available (or launch failed): use the default browser.
     let _ = open::that(url);
+}
+
+/// Try to launch the native `collide-webview` panel pointed at `url`, returning
+/// `true` if a candidate binary spawned. Locations tried, in order:
+///   1. `$COLLIDE_WEBVIEW` (explicit override — full path to the binary),
+///   2. `qt-panel/build/collide-webview` relative to the working dir (the
+///      in-tree CMake build output, the usual `cargo run` case),
+///   3. `collide-webview` next to this executable (installed side by side).
+/// The panel URL is passed as the first argument.
+fn open_native_webview(url: &str) -> bool {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(p) = std::env::var("COLLIDE_WEBVIEW") {
+        candidates.push(PathBuf::from(p));
+    }
+    candidates.push(PathBuf::from("qt-panel/build/collide-webview"));
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("collide-webview"));
+        }
+    }
+
+    for bin in candidates {
+        if !bin.exists() {
+            continue;
+        }
+        if std::process::Command::new(&bin).arg(url).spawn().is_ok() {
+            log::info!("Opened native webview panel: {}", bin.display());
+            return true;
+        }
+    }
+    false
 }
 
 /// Parsed CLI arguments for the headless `render` subcommand.

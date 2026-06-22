@@ -1,40 +1,44 @@
 #include "ControlPanel.h"
 
 #include "EngineClient.h"
+#include "MatrixCell.h"
+#include "Schema.h"
 
-#include <QCheckBox>
-#include <QFrame>
+#include <QFontMetrics>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
-#include <QSignalBlocker>
-#include <QSlider>
 #include <QVBoxLayout>
 
-#include <algorithm>
-#include <cmath>
 #include <utility>
 
 namespace {
-// The integer resolution every QSlider runs at internally; we map each param's
-// real float range onto 0..kSliderSteps.
-constexpr int kSliderSteps = 1000;
+// Progress/meter bars run at this integer resolution (values are 0..1 floats).
+constexpr int kBars = 1000;
 
-QString fmt(double v) { return QString::number(v, 'f', 2); }
-
-int floatToSlider(double v, double mn, double mx) {
-    const double t = (v - mn) / (mx - mn);
-    return std::clamp(static_cast<int>(std::lround(t * kSliderSteps)), 0, kSliderSteps);
+// Shared label styling so the Qt panel matches the browser's dark theme.
+QLabel *groupHeader(const QString &text) {
+    auto *l = new QLabel(text);
+    l->setStyleSheet(QStringLiteral(
+        "color:#7a8aa0; font-weight:700; font-size:10px; padding-top:7px; letter-spacing:1px;"));
+    return l;
+}
+QLabel *rowLabel(const QString &text) {
+    auto *l = new QLabel(text);
+    l->setStyleSheet(QStringLiteral("color:#9a9aa8; font-size:11px;"));
+    return l;
 }
 
-double sliderToFloat(int s, double mn, double mx) {
-    return mn + (mx - mn) * (static_cast<double>(s) / kSliderSteps);
-}
+const char *kProgressQss =
+    "QProgressBar{background:#1c1c24;border:none;} QProgressBar::chunk{background:#5a8fe6;}";
+const char *kMeterQss =
+    "QProgressBar{background:#1c1c24;border:none;} QProgressBar::chunk{background:#3ad15a;}";
 } // namespace
 
 ControlPanel::ControlPanel(QUrl engineUrl, QWidget *parent) : QWidget(parent) {
@@ -42,12 +46,25 @@ ControlPanel::ControlPanel(QUrl engineUrl, QWidget *parent) : QWidget(parent) {
     connect(m_engine, &EngineClient::snapshotReceived, this, &ControlPanel::onSnapshot);
     connect(m_engine, &EngineClient::connectionChanged, this, &ControlPanel::onConnectionChanged);
 
+    // Global dark theme (cells paint their own backgrounds; this covers the rest).
+    setStyleSheet(QStringLiteral(
+        "QWidget{background:#0f0f12;color:#d8d8dc;}"
+        "QScrollArea{border:1px solid #2a2a35;}"
+        "QGroupBox{border:1px solid #2a2a35;border-radius:4px;margin-top:8px;}"
+        "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 3px;color:#9a9aa8;}"
+        "QPushButton{background:#1c1c24;border:1px solid #2a2a35;border-radius:3px;padding:3px "
+        "8px;}"
+        "QPushButton:hover{border-color:#5a8fe6;}"
+        "QPushButton:checked{background:#5a8fe6;color:#0f0f12;border-color:#5a8fe6;}"));
+
     auto *root = new QVBoxLayout(this);
     root->addWidget(buildConnectionBar());
     root->addWidget(buildTransport());
-    root->addWidget(buildMasterFx());
-    root->addWidget(buildMasterAudio());
-    root->addWidget(buildLayers(), 1); // the layer strip soaks up extra height
+
+    auto *body = new QHBoxLayout;
+    body->addWidget(buildLayerPanel(), 1); // the layer grid soaks up extra width
+    body->addWidget(buildMasterPanel());
+    root->addLayout(body, 1);
 
     onConnectionChanged(false); // paint the initial "reconnecting" state
 }
@@ -77,165 +94,162 @@ QWidget *ControlPanel::buildTransport() {
     return box;
 }
 
-QWidget *ControlPanel::buildMasterFx() {
-    auto *box = new QGroupBox(QStringLiteral("Master FX"));
-    auto *v = new QVBoxLayout(box);
-
-    auto *grid = new QGridLayout;
-    int r = 0;
-    // Ranges mirror the clamps in EffectsSnapshot::apply_to_uniforms (web/state.rs).
-    addFxRow(grid, r++, QStringLiteral("Pixelate"), QStringLiteral("pixelate"), 1.0, 32.0);
-    addFxRow(grid, r++, QStringLiteral("RGB split"), QStringLiteral("rgb_split"), 0.0, 30.0);
-    addFxRow(grid, r++, QStringLiteral("Hue shift"), QStringLiteral("hue_shift"), -180.0, 180.0);
-    addFxRow(grid, r++, QStringLiteral("Saturation"), QStringLiteral("saturation"), -1.0, 1.0);
-    addFxRow(grid, r++, QStringLiteral("Contrast"), QStringLiteral("contrast"), -1.0, 1.0);
-    addFxRow(grid, r++, QStringLiteral("Vignette"), QStringLiteral("vignette"), 0.0, 1.5);
-    v->addLayout(grid);
-
-    auto *row = new QHBoxLayout;
-    m_invert = new QCheckBox(QStringLiteral("Invert"));
-    connect(m_invert, &QCheckBox::toggled, this,
-            [this](bool on) { m_engine->setParam(QStringLiteral("invert"), on); });
-    auto *reset = new QPushButton(QStringLiteral("Reset FX"));
-    connect(reset, &QPushButton::clicked, this, [this] { m_engine->resetFx(); });
-    row->addWidget(m_invert);
-    row->addStretch();
-    row->addWidget(reset);
-    v->addLayout(row);
-    return box;
+QWidget *ControlPanel::buildLayerPanel() {
+    m_layerScroll = new QScrollArea;
+    m_layerScroll->setWidgetResizable(true);
+    rebuildLayerGrid(0); // empty grid (labels + "+" only) until the first snapshot
+    return m_layerScroll;
 }
 
-void ControlPanel::addFxRow(QGridLayout *grid, int row, const QString &label,
-                            const QString &param, double mn, double mx) {
-    auto *name = new QLabel(label);
-    auto *slider = new QSlider(Qt::Horizontal);
-    slider->setRange(0, kSliderSteps);
-    auto *val = new QLabel;
-    val->setMinimumWidth(56);
-    val->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-    // User drags only: programmatic setValue() in onSnapshot() is wrapped in a
-    // QSignalBlocker, so this never echoes the engine's own value back at it.
-    connect(slider, &QSlider::valueChanged, this, [this, param, val, mn, mx](int s) {
-        const double v = sliderToFloat(s, mn, mx);
-        val->setText(fmt(v));
-        m_engine->setParam(param, v);
-    });
-
-    grid->addWidget(name, row, 0);
-    grid->addWidget(slider, row, 1);
-    grid->addWidget(val, row, 2);
-    m_fx.push_back(FxSlider{param, slider, val, mn, mx});
-}
-
-QWidget *ControlPanel::buildMasterAudio() {
-    auto *box = new QGroupBox(QStringLiteral("Master audio"));
-    auto *grid = new QGridLayout(box);
-
-    grid->addWidget(new QLabel(QStringLiteral("Volume (dB)")), 0, 0);
-    m_masterVol = new QSlider(Qt::Horizontal);
-    m_masterVol->setRange(0, kSliderSteps);
-    m_masterVolVal = new QLabel;
-    m_masterVolVal->setMinimumWidth(56);
-    m_masterVolVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    connect(m_masterVol, &QSlider::valueChanged, this, [this](int s) {
-        const double v = sliderToFloat(s, -60.0, 6.0);
-        m_masterVolVal->setText(fmt(v));
-        m_engine->setMasterAudioParam(QStringLiteral("master_volume"), v);
-    });
-    grid->addWidget(m_masterVol, 0, 1);
-    grid->addWidget(m_masterVolVal, 0, 2);
-
-    m_limiter = new QCheckBox(QStringLiteral("Limiter"));
-    connect(m_limiter, &QCheckBox::toggled, this,
-            [this](bool on) { m_engine->setMasterAudioParam(QStringLiteral("limiter"), on); });
-    grid->addWidget(m_limiter, 1, 0);
-
-    grid->addWidget(new QLabel(QStringLiteral("Output")), 2, 0);
-    m_meter = new QProgressBar;
-    m_meter->setRange(0, kSliderSteps);
-    m_meter->setTextVisible(false);
-    grid->addWidget(m_meter, 2, 1, 1, 2);
-    return box;
-}
-
-QWidget *ControlPanel::buildLayers() {
-    auto *box = new QGroupBox(QStringLiteral("Layers"));
-    auto *outer = new QVBoxLayout(box);
+QWidget *ControlPanel::buildMasterPanel() {
     auto *scroll = new QScrollArea;
     scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setMinimumWidth(220);
+    scroll->setMaximumWidth(300);
+
     auto *inner = new QWidget;
-    m_layerLayout = new QVBoxLayout(inner);
-    m_layerLayout->setAlignment(Qt::AlignTop);
+    auto *grid = new QGridLayout(inner);
+    grid->setHorizontalSpacing(6);
+    grid->setVerticalSpacing(2);
+
+    int row = 0;
+    grid->addWidget(groupHeader(QStringLiteral("MASTER")), row++, 0, 1, 2);
+    for (const Group &g : matrixGroups()) {
+        // Only the rows that apply to the master column.
+        QVector<const ParamDef *> ps;
+        for (const ParamDef &p : g.params)
+            if (channelApplies(p, ColumnKind::Master))
+                ps.push_back(&p);
+        if (ps.isEmpty())
+            continue;
+
+        grid->addWidget(groupHeader(g.name), row++, 0, 1, 2);
+        for (const ParamDef *def : ps) {
+            grid->addWidget(rowLabel(def->label), row, 0);
+            auto *cell = new MatrixCell(def, ColumnDesc{ColumnKind::Master, 0}, m_engine, nullptr);
+            cell->setMinimumWidth(120);
+            grid->addWidget(cell, row, 1);
+            m_masterCells.push_back(cell);
+            ++row;
+        }
+        // The master output meter sits under the AUDIO group (read-only peak).
+        if (g.name == QStringLiteral("AUDIO")) {
+            grid->addWidget(rowLabel(QStringLiteral("output")), row, 0);
+            m_masterMeter = new QProgressBar;
+            m_masterMeter->setRange(0, kBars);
+            m_masterMeter->setTextVisible(false);
+            m_masterMeter->setFixedHeight(12);
+            m_masterMeter->setStyleSheet(QString::fromLatin1(kMeterQss));
+            grid->addWidget(m_masterMeter, row, 1);
+            ++row;
+        }
+    }
+    grid->setColumnStretch(1, 1);
+    grid->setRowStretch(row, 1);
+
     scroll->setWidget(inner);
-    outer->addWidget(scroll);
-    return box;
+    return scroll;
 }
 
-void ControlPanel::rebuildLayers(int count) {
-    for (const LayerRow &row : m_layerRows)
-        row.container->deleteLater();
-    m_layerRows.clear();
+void ControlPanel::rebuildLayerGrid(int count) {
+    m_layerCells.clear();
+    m_layerHeaders.clear();
 
-    for (int i = 0; i < count; ++i) {
-        LayerRow row;
-        row.container = new QWidget;
-        auto *v = new QVBoxLayout(row.container);
-        v->setContentsMargins(4, 4, 4, 4);
+    // Fresh inner widget + grid each time (setWidget deletes the previous one,
+    // taking all its child cells/headers with it — so no manual cleanup needed).
+    m_layerInner = new QWidget;
+    m_layerGrid = new QGridLayout(m_layerInner);
+    m_layerGrid->setHorizontalSpacing(2);
+    m_layerGrid->setVerticalSpacing(2);
 
-        row.name = new QLabel;
-        row.name->setStyleSheet(QStringLiteral("font-weight: bold;"));
-        v->addWidget(row.name);
+    // Row 0: column headers. Col 0 corner, then a header per layer, then "+".
+    m_layerGrid->addWidget(groupHeader(QStringLiteral("LAYERS")), 0, 0);
+    for (int i = 0; i < count; ++i)
+        m_layerGrid->addWidget(makeLayerHeader(i), 0, i + 1);
 
-        auto *opRow = new QHBoxLayout;
-        opRow->addWidget(new QLabel(QStringLiteral("Opacity")));
-        row.opacity = new QSlider(Qt::Horizontal);
-        row.opacity->setRange(0, kSliderSteps);
-        row.opacityVal = new QLabel;
-        row.opacityVal->setMinimumWidth(56);
-        row.opacityVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        connect(row.opacity, &QSlider::valueChanged, this,
-                [this, i, lbl = row.opacityVal](int s) {
-                    const double v = sliderToFloat(s, 0.0, 1.0);
-                    lbl->setText(fmt(v));
-                    m_engine->setLayerParam(i, QStringLiteral("opacity"), v);
-                });
-        opRow->addWidget(row.opacity);
-        opRow->addWidget(row.opacityVal);
-        v->addLayout(opRow);
+    m_addColBtn = new QPushButton(QStringLiteral("+"));
+    m_addColBtn->setFixedWidth(28);
+    connect(m_addColBtn, &QPushButton::clicked, this, [this] { addLayerViaPicker(); });
+    m_layerGrid->addWidget(m_addColBtn, 0, count + 1, Qt::AlignTop);
 
-        auto *btnRow = new QHBoxLayout;
-        row.visible = new QPushButton;
-        row.visible->setCheckable(true);
-        connect(row.visible, &QPushButton::clicked, this, [this, i] { m_engine->toggleVisibility(i); });
-        row.pause = new QPushButton;
-        row.pause->setCheckable(true);
-        connect(row.pause, &QPushButton::clicked, this, [this, i] { m_engine->toggleLayerPause(i); });
-        btnRow->addWidget(row.visible);
-        btnRow->addWidget(row.pause);
-        btnRow->addStretch();
-        v->addLayout(btnRow);
-
-        row.progress = new QProgressBar;
-        row.progress->setRange(0, kSliderSteps);
-        row.progress->setTextVisible(false);
-        row.progress->setFixedHeight(6);
-        v->addWidget(row.progress);
-
-        row.meter = new QProgressBar;
-        row.meter->setRange(0, kSliderSteps);
-        row.meter->setTextVisible(false);
-        row.meter->setFixedHeight(6);
-        v->addWidget(row.meter);
-
-        auto *line = new QFrame;
-        line->setFrameShape(QFrame::HLine);
-        line->setFrameShadow(QFrame::Sunken);
-        v->addWidget(line);
-
-        m_layerLayout->addWidget(row.container);
-        m_layerRows.push_back(row);
+    // Param rows, grouped per LAYER_GROUPS. Keys resolve to shared ParamDefs.
+    int row = 1;
+    for (const LayerGroup &g : layerGroups()) {
+        m_layerGrid->addWidget(groupHeader(g.name), row++, 0);
+        for (const QString &key : g.keys) {
+            const ParamDef *def = findParam(key);
+            if (!def)
+                continue;
+            m_layerGrid->addWidget(rowLabel(def->label), row, 0);
+            for (int i = 0; i < count; ++i) {
+                auto *cell =
+                    new MatrixCell(def, ColumnDesc{ColumnKind::Layer, i}, m_engine, &m_library);
+                cell->setMinimumWidth(70);
+                m_layerGrid->addWidget(cell, row, i + 1);
+                m_layerCells.push_back(cell);
+            }
+            ++row;
+        }
     }
+    m_layerGrid->setColumnStretch(count + 1, 1); // keep columns packed left
+    m_layerGrid->setRowStretch(row, 1);
+
+    m_layerScroll->setWidget(m_layerInner);
+    m_layerCount = count;
+}
+
+QWidget *ControlPanel::makeLayerHeader(int index) {
+    LayerHeader h;
+    h.container = new QWidget;
+    auto *v = new QVBoxLayout(h.container);
+    v->setContentsMargins(2, 2, 2, 2);
+    v->setSpacing(1);
+
+    auto *top = new QHBoxLayout;
+    top->setSpacing(2);
+    h.title = new QLabel(QStringLiteral("L%1").arg(index + 1));
+    h.title->setStyleSheet(QStringLiteral("color:#5a8fe6; font-weight:700;"));
+    auto *rm = new QPushButton(QStringLiteral("\u00D7")); // ×
+    rm->setFixedSize(16, 16);
+    rm->setStyleSheet(QStringLiteral("padding:0; color:#9a9aa8;"));
+    connect(rm, &QPushButton::clicked, this, [this, index] { m_engine->removeLayer(index); });
+    top->addWidget(h.title);
+    top->addStretch();
+    top->addWidget(rm);
+    v->addLayout(top);
+
+    h.filename = new QLabel;
+    h.filename->setStyleSheet(QStringLiteral("color:#6a6a78; font-size:10px;"));
+    h.filename->setMaximumWidth(84);
+    v->addWidget(h.filename);
+
+    h.progress = new QProgressBar;
+    h.progress->setRange(0, kBars);
+    h.progress->setTextVisible(false);
+    h.progress->setFixedHeight(4);
+    h.progress->setStyleSheet(QString::fromLatin1(kProgressQss));
+    v->addWidget(h.progress);
+
+    h.meter = new QProgressBar;
+    h.meter->setRange(0, kBars);
+    h.meter->setTextVisible(false);
+    h.meter->setFixedHeight(4);
+    h.meter->setStyleSheet(QString::fromLatin1(kMeterQss));
+    v->addWidget(h.meter);
+
+    m_layerHeaders.push_back(h);
+    return h.container;
+}
+
+void ControlPanel::addLayerViaPicker() {
+    if (m_library.isEmpty())
+        return;
+    bool ok = false;
+    const QString choice = QInputDialog::getItem(this, QStringLiteral("Add layer"),
+                                                 QStringLiteral("Clip:"), m_library, 0, false, &ok);
+    if (ok && !choice.isEmpty())
+        m_engine->addLayer(choice);
 }
 
 void ControlPanel::onConnectionChanged(bool connected) {
@@ -249,65 +263,43 @@ void ControlPanel::onConnectionChanged(bool connected) {
 }
 
 void ControlPanel::onSnapshot(const QJsonObject &snap) {
-    // --- master transport ---
+    // Refresh the library list first so the add/swap pickers are current.
+    m_library.clear();
+    const QJsonArray lib = snap.value(QStringLiteral("library")).toArray();
+    for (const QJsonValue &v : lib)
+        m_library.push_back(v.toString());
+
+    // Master transport.
     const bool paused = snap.value(QStringLiteral("paused")).toBool();
     m_pauseBtn->setText(paused ? QStringLiteral("Resume") : QStringLiteral("Pause"));
 
-    // --- master FX (editing guard: never overwrite a slider being dragged) ---
-    const QJsonObject fx = snap.value(QStringLiteral("effects")).toObject();
-    for (const FxSlider &f : m_fx) {
-        if (f.slider->isSliderDown())
-            continue;
-        const double v = fx.value(f.param).toDouble();
-        QSignalBlocker block(f.slider);
-        f.slider->setValue(floatToSlider(v, f.min, f.max));
-        f.value->setText(fmt(v));
-    }
-    if (!m_invert->hasFocus()) {
-        QSignalBlocker block(m_invert);
-        m_invert->setChecked(fx.value(QStringLiteral("invert")).toBool());
-    }
-
-    // --- master audio ---
-    if (!m_masterVol->isSliderDown()) {
-        const double vol = snap.value(QStringLiteral("master_volume")).toDouble();
-        QSignalBlocker block(m_masterVol);
-        m_masterVol->setValue(floatToSlider(vol, -60.0, 6.0));
-        m_masterVolVal->setText(fmt(vol));
-    }
-    if (!m_limiter->hasFocus()) {
-        QSignalBlocker block(m_limiter);
-        m_limiter->setChecked(snap.value(QStringLiteral("master_limiter")).toBool());
-    }
-    m_meter->setValue(static_cast<int>(snap.value(QStringLiteral("meter")).toDouble() * kSliderSteps));
-
-    // --- layers (rebuild rows only when the count changes) ---
+    // Rebuild the layer grid only when the column count changes.
     const QJsonArray layers = snap.value(QStringLiteral("layers")).toArray();
-    if (layers.size() != m_layerRows.size())
-        rebuildLayers(static_cast<int>(layers.size()));
-    for (int i = 0; i < layers.size() && i < m_layerRows.size(); ++i) {
+    if (layers.size() != m_layerCount)
+        rebuildLayerGrid(static_cast<int>(layers.size()));
+
+    // Fan the snapshot out to every cell (each self-guards while scrubbing).
+    for (MatrixCell *c : m_masterCells)
+        c->applyValue(snap);
+    for (MatrixCell *c : m_layerCells)
+        c->applyValue(snap);
+
+    if (m_masterMeter)
+        m_masterMeter->setValue(
+            static_cast<int>(snap.value(QStringLiteral("meter")).toDouble() * kBars));
+
+    // Live per-column headers: filename (♪ for audio-only) + progress + meter.
+    for (int i = 0; i < layers.size() && i < m_layerHeaders.size(); ++i) {
         const QJsonObject l = layers.at(i).toObject();
-        const LayerRow &row = m_layerRows.at(i);
-        row.name->setText(l.value(QStringLiteral("filename")).toString());
-
-        if (!row.opacity->isSliderDown()) {
-            const double op = l.value(QStringLiteral("opacity")).toDouble();
-            QSignalBlocker block(row.opacity);
-            row.opacity->setValue(floatToSlider(op, 0.0, 1.0));
-            row.opacityVal->setText(fmt(op));
-        }
-
-        // visible/pause buttons connect to clicked(), not toggled(), so
-        // setChecked() here won't echo back as an action.
-        const bool vis = l.value(QStringLiteral("visible")).toBool();
-        row.visible->setText(vis ? QStringLiteral("Visible") : QStringLiteral("Hidden"));
-        row.visible->setChecked(vis);
-
-        const bool lpaused = l.value(QStringLiteral("paused")).toBool();
-        row.pause->setText(lpaused ? QStringLiteral("Paused") : QStringLiteral("Playing"));
-        row.pause->setChecked(!lpaused);
-
-        row.progress->setValue(static_cast<int>(l.value(QStringLiteral("progress")).toDouble() * kSliderSteps));
-        row.meter->setValue(static_cast<int>(l.value(QStringLiteral("meter")).toDouble() * kSliderSteps));
+        const LayerHeader &h = m_layerHeaders.at(i);
+        const QString fn = l.value(QStringLiteral("filename")).toString();
+        const bool audioOnly = l.value(QStringLiteral("audio_only")).toBool();
+        const QString shown = (audioOnly ? QString::fromUtf8("\u266A ") : QString()) + fn;
+        const QFontMetrics fm(h.filename->font());
+        h.filename->setText(fm.elidedText(shown, Qt::ElideRight, h.filename->maximumWidth()));
+        h.filename->setToolTip(fn);
+        h.progress->setValue(
+            static_cast<int>(l.value(QStringLiteral("progress")).toDouble() * kBars));
+        h.meter->setValue(static_cast<int>(l.value(QStringLiteral("meter")).toDouble() * kBars));
     }
 }
